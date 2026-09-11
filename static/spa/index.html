@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>漫剧坊 — 从一句话到连续漫画 / 短剧</title>
+  <script>
+    // 首屏前应用主题（防闪）：浅色 / 深色 / 跟随系统
+    (function () {
+      var t = "system";
+      try { t = localStorage.getItem("theme") || "system"; } catch (e) {}
+      var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.setAttribute("data-theme", t);
+      document.documentElement.classList.toggle("dark", dark);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/vendor/element-plus/index.css">
+  <link rel="stylesheet" href="/static/vendor/element-plus/dark.css">
+  <link rel="stylesheet" href="/static/spa/css/app.css">
+</head>
+<body>
+  <div id="app" v-cloak></div>
+  <script src="/static/vendor/vue.global.prod.js"></script>
+  <script src="/static/vendor/vue-router.global.js"></script>
+  <script src="/static/vendor/element-plus/index.full.min.js"></script>
+  <script src="/static/vendor/element-plus/zh-cn.js"></script>
+  <script src="/static/vendor/icons.iife.min.js"></script>
+  <script src="/static/spa/js/api.js"></script>
+  <script src="/static/spa/js/theme.js"></script>
+  <script src="/static/spa/js/md.js"></script>
+  <script src="/static/spa/js/views/create-form.js"></script>
+  <script src="/static/spa/js/views/home.js"></script>
+  <script src="/static/spa/js/views/projects.js"></script>
+  <script src="/static/spa/js/views/new.js"></script>
+  <script src="/static/spa/js/views/project.js"></script>
+  <script src="/static/spa/js/views/configs.js"></script>
+  <script src="/static/spa/js/views/micro.js"></script>
+  <script src="/static/spa/js/views/micro-work.js"></script>
+  <script src="/static/spa/js/router.js"></script>
+  <script src="/static/spa/js/app.js"></script>
+</body>
+</html>
