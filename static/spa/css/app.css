@@ -195,6 +195,20 @@ h1, h2, h3 { line-height: 1.4; }
 .wc-meta { font-size: 12px; }
 .wc-actions { display: flex; gap: 8px; margin-top: auto; }
 
+/* ---------- 配置管理：配置卡片 ---------- */
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.cfg-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.cfg-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; word-break: break-all; }
+.cfg-meta { font-size: 12px; }
+.cfg-url {
+  font-size: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* ---------- 微创作：作品页（会话列表 + 对话） ---------- */
 .mc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
 .mc-body {

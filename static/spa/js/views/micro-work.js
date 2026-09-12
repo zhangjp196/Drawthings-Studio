@@ -60,7 +60,7 @@ Views.microWork = {
                 </div>
                 <div v-else>
                   <div class="msg-media" v-if="m.media_url">
-                    <video v-if="isVideo" :src="m.media_url" controls preload="metadata"></video>
+                    <video v-if="isMediaVideo(m.media_url)" :src="m.media_url" controls preload="metadata"></video>
                     <img v-else :src="m.media_url" alt="生成结果" @click="openLb([m.media_url], 0)">
                     <div class="media-cap" v-if="m.prompt">{{ m.prompt }}</div>
                   </div>
@@ -131,18 +131,11 @@ Views.microWork = {
             </el-select>
           </el-form-item>
           <el-form-item label="DrawThings 配置">
-            <el-select v-model="cfg.dt" clearable style="width: 100%" @change="onCfgDt">
+            <el-select v-model="cfg.dt" clearable style="width: 100%">
               <el-option value="" label="不选（纯对话，不出媒体）" />
-              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id"
-                         :label="c.name + '（' + (c.media_type === 'image' ? '图像' : '视频') + '模型 / ' + c.protocol + '）'" />
+              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
             </el-select>
-          </el-form-item>
-          <el-form-item label="产出类型">
-            <el-select v-model="cfg.media" :disabled="!cfg.dt" style="width: 100%">
-              <el-option value="image" label="图像" />
-              <el-option value="video" label="视频" />
-            </el-select>
-            <div class="hint" v-if="!cfg.dt">未选 DrawThings 时为纯对话，不产出媒体。</div>
+            <div class="hint">产出类型（图像/视频）由 app 当前加载的模型自动判断，无需选择。</div>
           </el-form-item>
         </el-form>
         <template #footer>
@@ -182,7 +175,7 @@ Views.microWork = {
     // 作品选项
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
-    const cfg = reactive({ title: '', llm: '', dt: '', media: 'image' });
+    const cfg = reactive({ title: '', llm: '', dt: '' });
 
     // 图片放大
     const lb = reactive({ show: false, list: [], idx: 0 });
@@ -200,15 +193,14 @@ Views.microWork = {
     const streamHtml = computed(() => stream.text
       ? renderMd(stream.text) + '<span class="cursor"></span>'
       : '<span class="typing"><i></i><i></i><i></i></span>');
-    const isVideo = computed(() => data.value?.work.media_type === 'video');
+    function isMediaVideo(url) {  // 按文件扩展名判断（媒体落盘时按实际内容定扩展名）
+      return /\.(mp4|mov|webm|gif)$/i.test(url || '');
+    }
     const tagLabel = computed(() => {
       if (!data.value) return '';
-      if (data.value.work.dt_name && data.value.work.dt_name !== '不选（纯对话）') {
-        return data.value.work.media_type === 'video' ? '视频' : '图像';
-      }
-      return '纯对话';
+      return (data.value.work.dt_name && data.value.work.dt_name !== '不选（纯对话）') ? '生成' : '纯对话';
     });
-    const tagType = computed(() => isVideo.value ? 'warning' : (tagLabel.value === '纯对话' ? 'info' : 'primary'));
+    const tagType = computed(() => tagLabel.value === '纯对话' ? 'info' : 'primary');
     const ph = computed(() => '对话…（Enter 发送，Shift+Enter 换行' + (data.value?.work.vision ? '，可附图）' : '）'));
 
     async function load() {
@@ -292,19 +284,14 @@ Views.microWork = {
       cfg.title = data.value.work.title;
       cfg.llm = data.value.work.llm_config_id;
       cfg.dt = data.value.work.drawthings_config_id || '';
-      cfg.media = data.value.work.media_type || 'image';
       cfgDlg.value = true;
-    }
-    function onCfgDt(v) {
-      const c = data.value.drawthing_configs.find(x => x.id === v);
-      if (c) cfg.media = c.media_type || 'image';
     }
     async function saveCfg() {
       cfgBusy.value = true;
       try {
         await API.post(`/api/micro/${props.id}/settings`, {
           title: cfg.title, llm_config_id: cfg.llm,
-          drawthings_config_id: cfg.dt, media_type: cfg.media,
+          drawthings_config_id: cfg.dt,
         });
         ElementPlus.ElMessage.success('已保存，作用于全部会话');
         cfgDlg.value = false;
@@ -452,9 +439,9 @@ Views.microWork = {
     return {
       data, msgs, hasSession, sideHidden, setSide,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgDlg, cfgBusy, cfg, openCfg, onCfgDt, saveCfg, delWork,
+      cfgDlg, cfgBusy, cfg, openCfg, saveCfg, delWork,
       lb, openLb, input, attached, busy, status, drag, streaming, stream, streamHtml,
-      isVideo, tagLabel, tagType, ph,
+      isMediaVideo, tagLabel, tagType, ph,
       chatBox, fileInput, onFiles, onPaste, onDrop, autoResize, send,
       renderMd, router, pick, openSess,
       EditPen: ElementPlusIconsVue.EditPen, Delete: ElementPlusIconsVue.Delete,

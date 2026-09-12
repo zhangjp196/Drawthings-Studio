@@ -208,15 +208,20 @@ class Pipeline:
 
     # ---------------- 阶段 4：剧本编写 ----------------
     async def step_script(self, db, project: Project) -> Project:
-        llm_cfg = self._llm_cfg(db, project)
+        llm_cfg, dt_cfg = self._configs(db, project)
         supports_vision = (getattr(llm_cfg, "supports_vision", None) or "yes").lower() == "yes"
         chapters = self._load_chapters(db, project)
         media_dir = Path(self.data_dir) / "media"
         scope = project.scope or {}
         style = (scope.get("style") or "").strip()
         first_img = (project.first_image or "").strip()
+        # 分辨率：智能体按场景构图决定具体宽高（64 的倍数），最长边受配置上限约束
+        max_side = int(getattr(dt_cfg, "max_side", 0) or 0)
+        limit = max_side if max_side > 0 else 1024
         system = ("你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
-                  "写本章详细剧本描述和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。")
+                  "写本章详细剧本描述和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
+                  f"同时按本章构图决定出图分辨率 width/height（横构图/竖构图/方形，均为 64 的倍数，"
+                  f"最长边不超过 {limit} 像素）。")
         agent = make_agent(build_model(llm_cfg), system, output_type=ScriptOut)
         async with agent:
             for i, ch in enumerate(chapters):
@@ -248,6 +253,8 @@ class Pipeline:
                 data = (await agent.run(prompt_content)).output
                 ch.description = data.description
                 ch.prompt = data.prompt
+                ch.width = int(data.width or 0)
+                ch.height = int(data.height or 0)
         db.commit()
         project.status = "scripted"
         self._save(db, project)
@@ -273,10 +280,13 @@ class Pipeline:
                 prev = chapters[ch.index - 1] if ch.index > 0 else None
                 ref = prev.media_path if (prev and prev.media_path) else ""
             try:
+                params = {}
+                if ch.width and ch.height:  # 智能体决定的具体分辨率（客户端按 max_side 限幅）
+                    params = {"width": ch.width, "height": ch.height}
                 if project.kind == "comic":
-                    ch.media_path = dt.generate_image(ch.prompt, ref_path=ref)
+                    ch.media_path = dt.generate_image(ch.prompt, ref_path=ref, params=params)
                 else:
-                    ch.media_path = dt.generate_video(ch.prompt, ref_video_path=ref)
+                    ch.media_path = dt.generate_video(ch.prompt, ref_video_path=ref, params=params)
                 ch.status = "done"
                 ch.error = ""
             except Exception as e:  # 单章失败不影响其他章

@@ -55,10 +55,12 @@ def _migrate():
             "supports_vision": "VARCHAR(5) DEFAULT 'yes'",
         },
         "drawthing_configs": {
-            "protocol": "VARCHAR(10) DEFAULT 'http'",
-            "model_name": "VARCHAR(200) DEFAULT ''",
-            "shared_secret": "VARCHAR(200) DEFAULT ''",
-            "media_type": "VARCHAR(10) DEFAULT 'image'",
+            "max_side": "INTEGER DEFAULT 0",
+            "max_frames": "INTEGER DEFAULT 0",
+        },
+        "chapters": {
+            "width": "INTEGER DEFAULT 0",
+            "height": "INTEGER DEFAULT 0",
         },
         "projects": {
             "title": "VARCHAR(200) DEFAULT ''",
@@ -75,14 +77,22 @@ def _migrate():
             for name, ddl in cols.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
-        # 移除已废弃的 mock 模式列（SQLite >= 3.35 支持 DROP COLUMN）
-        for table in ("llm_configs", "drawthing_configs"):
+        # 移除已废弃的列（SQLite >= 3.35 支持 DROP COLUMN）
+        deprecated = {
+            "llm_configs": ("mode",),
+            "drawthing_configs": ("mode", "protocol", "shared_secret", "model_name", "media_type",
+                                  "steps", "guidance_scale", "num_frames", "fps",
+                                  "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）
+            "micro_works": ("media_type",),  # 产出类型改由 app 当前模型自动判断
+        }
+        for table, cols in deprecated.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
-            if "mode" in existing:
-                try:
-                    conn.execute(text(f"ALTER TABLE {table} DROP COLUMN mode"))
-                except Exception:
-                    pass  # 旧版本 SQLite 删不了列：保留该列但不再使用
+            for col in cols:
+                if col in existing:
+                    try:
+                        conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {col}"))
+                    except Exception:
+                        pass  # 旧版本 SQLite 删不了列：保留该列但不再使用
         # 微创作三级结构迁移：旧 micro_sessions（配置随会话）→ micro_works（作品）；
         # 重建 micro_sessions（挂 micro_id），旧会话整体变成作品的「默认会话」，历史消息保留；
         # micro_messages 需重建（SQLite 改名会连带把 FK 指向 micro_works）。

@@ -15,9 +15,8 @@ Views.micro = {
       <div class="work-grid" v-if="works.length">
         <div class="work-card" v-for="w in works" :key="w.id">
           <div class="wc-top">
-            <el-tag size="small" :type="w.media_type === 'video' ? 'warning' : 'info'" effect="light">
-              {{ w.media_type === 'video' ? '视频' : '图像' }}
-            </el-tag>
+            <el-tag v-if="w.drawthings_config_id" size="small" type="primary" effect="light">生成</el-tag>
+            <el-tag v-else size="small" type="info" effect="light">对话</el-tag>
             <el-link :underline="false" type="primary" style="flex: 1; min-width: 0;" @click="enter(w)">
               {{ w.title || '（未命名）' }}
             </el-link>
@@ -49,18 +48,11 @@ Views.micro = {
             </el-select>
           </el-form-item>
           <el-form-item label="DrawThings 配置">
-            <el-select v-model="f.dt" clearable style="width: 100%" @change="onDt">
+            <el-select v-model="f.dt" clearable style="width: 100%">
               <el-option value="" label="不选（纯对话，不出媒体）" />
-              <el-option v-for="c in dts" :key="c.id" :value="c.id"
-                         :label="c.name + '（' + (c.media_type === 'image' ? '图像' : '视频') + '模型 / ' + c.protocol + '）'" />
+              <el-option v-for="c in dts" :key="c.id" :value="c.id" :label="c.name" />
             </el-select>
-          </el-form-item>
-          <el-form-item label="产出类型">
-            <el-select v-model="f.media" :disabled="!f.dt" style="width: 100%">
-              <el-option value="image" label="图像" />
-              <el-option value="video" label="视频" />
-            </el-select>
-            <div class="hint" v-if="!f.dt">未选 DrawThings 时为纯对话，不产出媒体。</div>
+            <div class="hint">产出类型（图像/视频）由 app 当前加载的模型自动判断，无需选择。</div>
           </el-form-item>
         </el-form>
         <template #footer>
@@ -79,7 +71,7 @@ Views.micro = {
     const page = ref(1);
     const dlg = ref(false);
     const saving = ref(false);
-    const f = reactive({ title: '', llm: '', dt: '', media: 'image' });
+    const f = reactive({ title: '', llm: '', dt: '' });
 
     async function load() {
       try {
@@ -94,13 +86,8 @@ Views.micro = {
       }
     }
 
-    function onDt(v) {
-      const c = dts.value.find(x => x.id === v);
-      if (c) f.media = c.media_type || 'image';
-    }
-
     function openNew() {
-      Object.assign(f, { title: '', llm: '', dt: '', media: 'image' });
+      Object.assign(f, { title: '', llm: '', dt: '' });
       dlg.value = true;
     }
 
@@ -110,7 +97,7 @@ Views.micro = {
       try {
         const data = await API.post('/api/micro', {
           title: f.title, llm_config_id: f.llm,
-          drawthings_config_id: f.dt, media_type: f.media,
+          drawthings_config_id: f.dt,
         });
         dlg.value = false;
         router.push('/micro/' + data.id);
@@ -137,7 +124,7 @@ Views.micro = {
     onMounted(load);
     return {
       works, llms, dts, total, totalPages, page, dlg, saving, f,
-      load, onDt, openNew, create, enter, del,
+      load, openNew, create, enter, del,
     };
   },
 };

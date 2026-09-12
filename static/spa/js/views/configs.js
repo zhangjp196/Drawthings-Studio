@@ -1,4 +1,4 @@
-// 配置管理：LLM / DrawThings 两个标签页 + 表格 + 删除（引用检查在后端）+ 新建弹框（动态字段）
+// 配置管理：LLM / DrawThings 两个标签页 + 卡片列表（编辑/删除，引用检查在后端）+ 新建/编辑弹框（动态字段）
 window.Views = window.Views || {};
 Views.configs = {
   template: `
@@ -14,41 +14,30 @@ Views.configs = {
         <el-tab-pane :label="'DrawThings 配置（' + dtCount + '）'" name="drawthings" />
       </el-tabs>
 
-      <el-table v-if="items.length" :data="items" style="width: 100%;">
-        <el-table-column prop="name" label="名称" min-width="140">
-          <template #default="{ row }"><b>{{ row.name }}</b></template>
-        </el-table-column>
-        <el-table-column prop="base_url" label="端点" min-width="200" class-name="muted" />
-        <template v-if="ctype === 'llm'">
-          <el-table-column prop="model" label="模型" min-width="140" class-name="muted" />
-          <el-table-column label="图片输入" width="100" align="center">
-            <template #default="{ row }">{{ row.supports_vision === 'yes' ? '✓ 支持' : '— 纯文本' }}</template>
-          </el-table-column>
-        </template>
-        <template v-else>
-          <el-table-column label="类型" width="90" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.media_type === 'image' ? 'primary' : 'success'" effect="light">
-                {{ row.media_type === 'image' ? '图像' : '视频' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="protocol" label="协议" width="100" class-name="muted" />
-        </template>
-        <el-table-column label="创建时间" width="170" class-name="muted">
-          <template #default="{ row }">{{ fmt(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
+      <div class="cfg-grid" v-if="items.length">
+        <div class="cfg-card" v-for="row in items" :key="row.id">
+          <div class="wc-top">
+            <el-tag v-if="ctype === 'llm'" size="small" type="primary" effect="light">LLM</el-tag>
+            <el-tag v-else size="small" type="primary" effect="light">DrawThings</el-tag>
+            <span class="cfg-name">{{ row.name }}</span>
+          </div>
+          <div class="cfg-meta muted" v-if="ctype === 'llm'">
+            模型 {{ row.model }} · {{ row.supports_vision === 'yes' ? '✓ 支持图片输入' : '纯文本' }}
+          </div>
+          <div class="cfg-meta muted" v-else>{{ dtMeta(row) }}</div>
+          <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
+          <div class="wc-meta muted">创建于 {{ fmt(row.created_at) }}</div>
+          <div class="wc-actions">
+            <el-button size="small" @click="openEdit(row)">编辑</el-button>
             <el-popconfirm :title="'确定删除该配置？若仍有项目选用将无法运行。'" @confirm="del(row)">
               <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
             </el-popconfirm>
-          </template>
-        </el-table-column>
-      </el-table>
+          </div>
+        </div>
+      </div>
       <el-empty v-else :description="'还没有 ' + (ctype === 'llm' ? 'LLM' : 'DrawThings') + ' 配置，点击「＋ 新建」添加。'" />
 
-      <el-dialog v-model="dlg" title="新建配置" width="580px">
+      <el-dialog v-model="dlg" :title="editId ? '编辑配置' : '新建配置'" width="580px">
         <el-form label-position="top">
           <el-form-item label="配置类型">
             <el-select v-model="f.config_type" style="width: 100%">
@@ -65,10 +54,17 @@ Views.configs = {
           </el-form-item>
           <template v-if="f.config_type === 'llm'">
             <el-form-item label="API Key">
-              <el-input v-model="f.api_key" placeholder="本地端点可留空（真实 API 请填写）" />
+              <el-input v-model="f.api_key" :placeholder="editId ? '留空 = 保持原 Key 不变' : '本地端点可留空（真实 API 请填写）'" />
             </el-form-item>
             <el-form-item label="模型">
-              <el-input v-model="f.model" placeholder="例如：qwen2.5:7b" />
+              <div style="display: flex; gap: 8px; width: 100%;">
+                <el-select v-model="f.model" filterable allow-create clearable :loading="loadingModels"
+                           placeholder="选择或输入模型 id" style="flex: 1;">
+                  <el-option v-for="m in modelOpts" :key="m" :value="m" :label="m" />
+                </el-select>
+                <el-button :loading="loadingModels" @click="fetchModels">获取模型</el-button>
+              </div>
+              <div class="hint">点击「获取模型」从端点 /models 自动拉取（OpenAI 协议）；也可手动输入。编辑时 Key 留空 = 用已存 Key。</div>
             </el-form-item>
             <el-form-item label="图片输入">
               <el-select v-model="f.supports_vision" style="width: 100%">
@@ -78,23 +74,21 @@ Views.configs = {
             </el-form-item>
           </template>
           <template v-else>
-            <el-form-item label="模型类型">
-              <el-select v-model="f.media_type" style="width: 100%">
-                <el-option value="image" label="图像模型（用于漫画项目，连续生图）" />
-                <el-option value="video" label="视频模型（用于短剧项目，连续出视频）" />
+            <el-form-item label="模型">
+              <div class="hint">跟随 app 里当前选中的模型（API 不支持指定模型）。</div>
+            </el-form-item>
+            <el-form-item label="最大分辨率（仅最长边，可选）">
+              <el-select v-model="f.max_side" style="width: 220px;">
+                <el-option :value="0" label="不限（跟随 app）" />
+                <el-option :value="512" label="512" />
+                <el-option :value="768" label="768" />
+                <el-option :value="1024" label="1024" />
               </el-select>
+              <div class="hint">具体分辨率由智能体按场景决定，最长边受此上限约束；「不限」= 跟随 app 当前值。</div>
             </el-form-item>
-            <el-form-item label="API 协议">
-              <el-select v-model="f.protocol" style="width: 100%" @change="syncUrl">
-                <el-option value="http" label="HTTP（A1111 兼容，推荐，图/视频都走这个）" />
-                <el-option value="grpc" label="gRPC（ImageGenerationService，7859 端口，TLS）" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="模型（可选）">
-              <el-input v-model="f.dt_model_name" placeholder="留空 = 用 app 里当前选中的模型" />
-            </el-form-item>
-            <el-form-item label="共享密钥（gRPC 可选）">
-              <el-input v-model="f.dt_shared_secret" placeholder="app 设置了共享密钥才需要填" />
+            <el-form-item label="最大帧数上限（视频，可选）">
+              <el-input-number v-model="f.max_frames" :min="0" :max="2048" :step="1" controls-position="right" style="width: 110px;" />
+              <div class="hint">视频帧数上限：实际帧数 = min(app 当前帧数, 此值)；0 = 不设上限</div>
             </el-form-item>
           </template>
         </el-form>
@@ -114,10 +108,13 @@ Views.configs = {
 
     const dlg = ref(false);
     const saving = ref(false);
+    const editId = ref('');          // 非空 = 编辑模式（值为配置 id）
+    const modelOpts = ref([]);      // 从 /models 拉取的模型 id 列表
+    const loadingModels = ref(false);
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
-      supports_vision: 'yes', media_type: 'image', protocol: 'http',
-      dt_model_name: '', dt_shared_secret: '',
+      supports_vision: 'yes',
+      max_side: 0, max_frames: 0,
     });
 
     async function load() {
@@ -138,29 +135,70 @@ Views.configs = {
 
     const urlPh = computed(() => {
       if (f.config_type === 'llm') return 'http://127.0.0.1:11434/v1';
-      return f.protocol === 'grpc' ? '127.0.0.1:7859' : 'http://127.0.0.1:8888';
+      return 'http://127.0.0.1:7860';
     });
     const urlHint = computed(() => {
       if (f.config_type === 'llm') return 'OpenAI 协议 URL（兼容 Ollama / vLLM / 云端 OpenAI）。';
-      return f.protocol === 'grpc'
-        ? 'gRPC 填 host:port（默认 7859，TLS 默认开）。'
-        : 'HTTP 填完整 URL（端口以 Draw Things app 显示为准）。';
+      return 'HTTP 端点 URL（端口以 Draw Things app 显示为准，如 http://127.0.0.1:7860）。';
     });
-    function syncUrl() { /* 提示随 protocol 联动（computed 自动响应） */ }
 
     function openNew() {
+      editId.value = '';
       Object.assign(f, {
         config_type: ctype.value === 'drawthings' ? 'drawthings' : 'llm',
         name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
-        media_type: 'image', protocol: 'http', dt_model_name: '', dt_shared_secret: '',
+        max_side: 0, max_frames: 0,
       });
+      modelOpts.value = [];
       dlg.value = true;
+    }
+
+    function openEdit(row) {
+      editId.value = row.id;
+      if (ctype.value === 'drawthings') {
+        Object.assign(f, {
+          config_type: 'drawthings', name: row.name, base_url: row.base_url,
+          max_side: row.max_side || 0,
+          max_frames: row.max_frames || 0,
+        });
+      } else {
+        Object.assign(f, {
+          config_type: 'llm', name: row.name, base_url: row.base_url,
+          api_key: '', model: row.model, supports_vision: row.supports_vision,
+        });
+        modelOpts.value = row.model ? [row.model] : [];
+      }
+      dlg.value = true;
+    }
+
+    async function fetchModels() {
+      if (!f.base_url) {
+        ElementPlus.ElMessage.warning('请先填写端点地址');
+        return;
+      }
+      loadingModels.value = true;
+      try {
+        let qs = '/api/llm/models?base_url=' + encodeURIComponent(f.base_url) +
+                 '&api_key=' + encodeURIComponent(f.api_key || '');
+        if (editId.value) qs += '&config_id=' + editId.value;  // 编辑时：Key 留空则用库里已存的
+        const data = await API.get(qs);
+        modelOpts.value = data.models;
+        if (!data.models.length) ElementPlus.ElMessage.warning('该端点未返回可用模型');
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        loadingModels.value = false;
+      }
     }
 
     async function save() {
       saving.value = true;
       try {
-        await API.post('/api/configs', { ...f });
+        if (editId.value) {
+          await API.put(`/api/configs/${f.config_type}/${editId.value}`, { ...f });
+        } else {
+          await API.post('/api/configs', { ...f });
+        }
         ElementPlus.ElMessage.success('已保存');
         dlg.value = false;
         load();
@@ -182,10 +220,16 @@ Views.configs = {
     }
 
     const fmt = (s) => (s || '').slice(0, 19).replace('T', ' ');
+    function dtMeta(r) {
+      const p = [];
+      p.push('最大分辨率 ' + (r.max_side ? r.max_side + '（最长边）' : '不限'));
+      if (r.max_frames) p.push('帧数上限 ' + r.max_frames);
+      return p.join(' · ');
+    }
     onMounted(load);
     return {
-      ctype, items, llmCount, dtCount, dlg, saving, f,
-      urlPh, urlHint, syncUrl, load, tabChange, openNew, save, del, fmt,
+      ctype, items, llmCount, dtCount, dlg, saving, f, editId, modelOpts, loadingModels,
+      urlPh, urlHint, load, tabChange, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,
     };
   },
 };

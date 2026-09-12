@@ -28,7 +28,7 @@ from config import data_dir
 from db import get_db, init_db
 from models import Project, Chapter, MicroWork, MicroSession, MicroMessage
 from config_store import ConfigStore
-from services.agent import build_model, to_message_history, user_prompt
+from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
 from services.pipeline import Pipeline, _now
 from services.drawthings import DrawThingsClient
 
@@ -70,6 +70,8 @@ def _chapter_view(ch) -> dict:
         "title": ch.title,
         "description": ch.description,
         "prompt": ch.prompt,
+        "width": ch.width or 0,
+        "height": ch.height or 0,
         "media_url": _media_url(ch.media_path),
         "status": ch.status,
         "error": ch.error,
@@ -86,8 +88,28 @@ def _llm_view(c) -> dict:
 def _dt_view(c) -> dict:
     return {
         "id": c.id, "name": c.name, "base_url": c.base_url,
-        "protocol": c.protocol or "http", "model_name": c.model_name or "",
-        "media_type": c.media_type or "image", "created_at": c.created_at,
+        "max_side": c.max_side or 0,
+        "max_frames": c.max_frames or 0,
+        "created_at": c.created_at,
+    }
+
+
+def _dt_gen_fields(body: dict) -> dict:
+    """DrawThings 个性化参数：0/空 = 跟随 app 当前值。非法值直接 400。"""
+    def num(key, cast, max_v: int) -> int | float:
+        v = body.get(key)
+        if v in (None, ""):
+            return 0
+        try:
+            v = cast(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{key} 需为数字")
+        if v < 0 or v > max_v:
+            raise HTTPException(status_code=400, detail=f"{key} 超出范围（0~{max_v}，0=跟随 app）")
+        return v
+    return {
+        "max_side": int(num("max_side", int, 2048)),
+        "max_frames": int(num("max_frames", int, 2048)),
     }
 
 
@@ -103,12 +125,10 @@ def _project_view(p: Project, chapter_count: int = 0) -> dict:
 
 
 def _config_lists(db: Session, project: Project) -> dict:
-    """项目可选配置：LLM 全部 + DrawThings 按项目类型（漫画=图像/短剧=视频）。"""
+    """项目可选配置：LLM 全部 + DrawThings 全部。"""
     cs = ConfigStore(db)
-    want = "image" if project.kind == "comic" else "video"
-    dts = [c for c in cs.list_drawthing() if (c.media_type or "image") == want]
     return {"llm_configs": [_llm_view(c) for c in cs.list_llm()],
-            "drawthing_configs": [_dt_view(c) for c in dts]}
+            "drawthing_configs": [_dt_view(c) for c in cs.list_drawthing()]}
 
 
 # ---------------- 静态媒体 ----------------
@@ -169,9 +189,6 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
     supports_vision = str(body.get("supports_vision") or "yes").lower()
     if supports_vision not in ("yes", "no"):
         raise HTTPException(status_code=400, detail="图片输入选项无效")
-    media_type = str(body.get("media_type") or "image").lower()
-    if media_type not in ("image", "video"):
-        raise HTTPException(status_code=400, detail="模型类型无效")
     cs = ConfigStore(db)
     try:
         if config_type == "llm":
@@ -181,11 +198,7 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
             cs.create_llm(name, base_url, str(body.get("api_key") or ""), model,
                           supports_vision=supports_vision)
         elif config_type == "drawthings":
-            cs.create_drawthing(name, base_url,
-                                protocol=str(body.get("protocol") or "http"),
-                                model_name=str(body.get("dt_model_name") or ""),
-                                shared_secret=str(body.get("dt_shared_secret") or ""),
-                                media_type=media_type)
+            cs.create_drawthing(name, base_url, **_dt_gen_fields(body))
         else:
             raise HTTPException(status_code=400, detail="未知配置类型")
     except HTTPException:
@@ -194,6 +207,83 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"保存失败：{e}")
     db.commit()
     return {"ok": True}
+
+
+@app.put("/api/configs/{config_type}/{config_id}")
+async def config_update(request: Request, config_type: str, config_id: str, db: Session = Depends(get_db)):
+    """编辑配置。API Key 留空 = 保持原值不变（列表接口不返回 Key）。"""
+    body = await _json_body(request)
+    name = str(body.get("name") or "").strip()
+    base_url = str(body.get("base_url") or "").strip()
+    if not name or not base_url:
+        raise HTTPException(status_code=400, detail="名称和端点地址不能为空")
+    cs = ConfigStore(db)
+    try:
+        if config_type == "llm":
+            model = str(body.get("model") or "").strip()
+            if not model:
+                raise HTTPException(status_code=400, detail="LLM 配置需要模型名")
+            supports_vision = str(body.get("supports_vision") or "yes").lower()
+            if supports_vision not in ("yes", "no"):
+                raise HTTPException(status_code=400, detail="图片输入选项无效")
+            raw_key = body.get("api_key")
+            updated = cs.update_llm(config_id, name=name, base_url=base_url,
+                                    api_key=None if raw_key in (None, "") else str(raw_key),
+                                    model=model, supports_vision=supports_vision)
+        elif config_type == "drawthings":
+            updated = cs.update_drawthing(config_id, name=name, base_url=base_url,
+                                          **_dt_gen_fields(body))
+        else:
+            raise HTTPException(status_code=400, detail="未知配置类型")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"保存失败：{e}")
+    if not updated:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/llm/models")
+def llm_models(base_url: str = "", api_key: str = "", config_id: str = "",
+               db: Session = Depends(get_db)):
+    """从 OpenAI 兼容端点的 /models 接口拉取可用模型 id 列表（新建/编辑 LLM 配置时自动填充）。
+
+    编辑已有配置时前端传 config_id：表单未填地址/Key 时回退用库里已存值
+    （密钥不在列表接口回传，编辑弹窗里是空的，须由服务端代填）。
+    """
+    cfg = ConfigStore(db).get_llm(config_id) if config_id else None
+    base_url = (base_url or "").strip() or (cfg.base_url if cfg else "")
+    if not base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="端点地址需为 http(s) URL")
+    key = (api_key or "").strip() or (cfg.api_key if cfg else "")
+    url = base_url.rstrip("/") + "/models"
+    headers = {}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        with make_httpx_client(base_url, timeout=15.0) as client:
+            r = client.get(url, headers=headers)
+        if r.status_code in (401, 403):
+            detail = "端点鉴权失败：请检查 API Key" if key else "端点需要鉴权（401）：请先填写 API Key"
+            raise HTTPException(status_code=400, detail=detail)
+        if r.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"端点返回 {r.status_code}，请检查地址与 API Key")
+        data = r.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"获取模型失败：{e}")
+    items = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        items = []
+    models: list[str] = []
+    for it in items:
+        mid = str(it.get("id") or it.get("name") or "").strip() if isinstance(it, dict) else str(it).strip()
+        if mid and mid not in models:
+            models.append(mid)
+    return {"models": sorted(models)}
 
 
 @app.post("/api/configs/{config_type}/{config_id}/delete")
@@ -256,7 +346,7 @@ def micro_works(db: Session = Depends(get_db), page: int = 1):
     return {
         "works": [{
             "id": w.id, "title": w.title, "llm_config_id": w.llm_config_id,
-            "drawthings_config_id": w.drawthings_config_id, "media_type": w.media_type,
+            "drawthings_config_id": w.drawthings_config_id,
             "updated_at": w.updated_at, "session_count": counts.get(w.id, 0),
         } for w in works],
         "total": total, "page": page, "size": MC_PAGE_SIZE,
@@ -274,15 +364,11 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
         raise HTTPException(status_code=400, detail="请选择有效的 LLM 配置")
-    media_type = str(body.get("media_type") or "image")
-    if media_type not in ("image", "video"):
-        media_type = "image"
     w = MicroWork(
         id=uuid.uuid4().hex[:12],
         title=str(body.get("title") or "").strip()[:200],
         llm_config_id=llm_config_id,
         drawthings_config_id=str(body.get("drawthings_config_id") or "").strip(),
-        media_type=media_type,
         created_at=_now(), updated_at=_now(),
     )
     db.add(w)
@@ -304,7 +390,7 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "id": work.id, "title": work.title,
             "llm_config_id": work.llm_config_id,
             "drawthings_config_id": work.drawthings_config_id,
-            "media_type": work.media_type, "created_at": work.created_at,
+            "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "（无）",
             "dt_name": dt_cfg.name if dt_cfg else "不选（纯对话）",
             "vision": bool(llm_cfg and llm_cfg.supports_vision == "yes"),
@@ -353,7 +439,7 @@ def micro_session_page(work_id: str, session_id: str, db: Session = Depends(get_
 
 @app.post("/api/micro/{work_id}/settings")
 async def micro_work_settings(request: Request, work_id: str, db: Session = Depends(get_db)):
-    """修改作品选项（标题/LLM/DrawThings/产出类型），作用于其下全部会话。"""
+    """修改作品选项（标题/LLM/DrawThings），作用于其下全部会话。"""
     body = await _json_body(request)
     work = db.get(MicroWork, work_id)
     if not work:
@@ -362,13 +448,9 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
         raise HTTPException(status_code=400, detail="请选择有效的 LLM 配置")
-    media_type = str(body.get("media_type") or "image")
-    if media_type not in ("image", "video"):
-        media_type = "image"
     work.title = str(body.get("title") or "").strip()[:200]
     work.llm_config_id = llm_config_id
     work.drawthings_config_id = str(body.get("drawthings_config_id") or "").strip()
-    work.media_type = media_type
     work.updated_at = _now()
     db.commit()
     return {"ok": True}
@@ -488,7 +570,13 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(work.llm_config_id or "")
     dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
-    media = work.media_type or "image"
+    # 产出类型不再手动选择：按 app 当前加载的模型自动判断（视频模型 → 视频）
+    media = "image"
+    if dt_cfg:
+        try:
+            media = DrawThingsClient(dt_cfg, data_dir).detect_media_type()
+        except Exception:
+            media = "image"
 
     # 用户附图：仅所选 LLM 支持视觉时可用（存 MEDIA_DIR，随消息落库）
     image_urls = []
@@ -660,14 +748,6 @@ async def project_create(request: Request, db: Session = Depends(get_db)):
     dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
     if not llm_cfg or not dt_cfg:
         raise HTTPException(status_code=400, detail="请选择有效的 LLM 与 DrawThings 配置")
-    # DrawThings 按模型类型选用：漫画项目=图像模型，短剧项目=视频模型
-    want = "image" if kind == "comic" else "video"
-    if (dt_cfg.media_type or "image") != want:
-        kind_cn = "漫画" if kind == "comic" else "短剧"
-        type_cn = "图像模型" if want == "image" else "视频模型"
-        raise HTTPException(status_code=400,
-                            detail=f"{kind_cn}项目需要选用「{type_cn}」类型的 DrawThings 配置，"
-                                   f"请到「配置管理」新建（模型类型选 {type_cn}）")
     project = pipeline.create(db, kind, origin, llm_cfg.id, dt_cfg.id,
                                style=style, title=str(body.get("title") or "").strip()[:200])
     return {"id": project.id}
@@ -741,12 +821,6 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
     if not llm_cfg or not dt_cfg:
         raise HTTPException(status_code=400, detail="请选择有效的 LLM 与 DrawThings 配置")
-    want = "image" if project.kind == "comic" else "video"
-    if (dt_cfg.media_type or "image") != want:
-        kind_cn = "漫画" if project.kind == "comic" else "短剧"
-        type_cn = "图像模型" if want == "image" else "视频模型"
-        raise HTTPException(status_code=400,
-                            detail=f"{kind_cn}项目需要选用「{type_cn}」类型的 DrawThings 配置")
     project.llm_config_id = llm_cfg.id
     project.drawthings_config_id = dt_cfg.id
     project.updated_at = _now()

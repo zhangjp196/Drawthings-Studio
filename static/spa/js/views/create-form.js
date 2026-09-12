@@ -23,11 +23,10 @@ Views.createForm = {
       </el-form-item>
       <el-form-item label="DrawThings 配置" required>
         <el-select v-model="f.dt" placeholder="选择 DrawThings 配置" style="width: 100%">
-          <el-option v-for="c in dts" :key="c.id" :value="c.id"
-                     :label="c.name + '（' + (c.media_type === 'image' ? '图像' : '视频') + '模型 / ' + c.protocol + '）'" />
-          <el-option v-if="!dts.length" value="" :label="'（无' + (want === 'image' ? '图像' : '视频') + '模型配置，请先创建）'" />
+          <el-option v-for="c in dts" :key="c.id" :value="c.id" :label="c.name" />
+          <el-option v-if="!dts.length" value="" label="（无 DrawThings 配置，请先创建）" />
         </el-select>
-        <div class="hint">漫画项目用「图像模型」配置，短剧项目用「视频模型」配置。<el-link :underline="false" type="primary" @click="toConfigs">＋ 新建配置</el-link></div>
+        <div class="hint">出图/出视频由 app 里当前加载的模型决定。<el-link :underline="false" type="primary" @click="toConfigs">＋ 新建配置</el-link></div>
       </el-form-item>
       <el-form-item label="标题">
         <el-input v-model="f.title" maxlength="100" placeholder="例如：猫的四季旅行（留空则以主题作为标题）" />
@@ -69,12 +68,11 @@ Views.createForm = {
       dtsAll.value = data.drawthing_configs;
     }
 
-    const want = computed(() => f.kind === 'drama' ? 'video' : 'image');
-    const dts = computed(() => dtsAll.value.filter(c => (c.media_type || 'image') === want.value));
+    const dts = computed(() => dtsAll.value);
 
     async function submit() {
       if (!f.llm) { ElementPlus.ElMessage.warning('请选择 LLM 配置'); return; }
-      if (!f.dt) { ElementPlus.ElMessage.warning('请选择 DrawThings 配置（类型需匹配）'); return; }
+      if (!f.dt) { ElementPlus.ElMessage.warning('请选择 DrawThings 配置'); return; }
       if (!f.origin.trim()) { ElementPlus.ElMessage.warning('请填写主题（一句话）'); return; }
       saving.value = true;
       try {
@@ -93,7 +91,7 @@ Views.createForm = {
     }
 
     onMounted(load);
-    return { f, llms, dts, want, presets, saving, submit,
+    return { f, llms, dts, presets, saving, submit,
              toConfigs: () => router.push('/configs?ctype=drawthings') };
   },
 };

@@ -37,6 +37,27 @@ class ConfigStore:
         self.db.refresh(cfg)
         return cfg
 
+    def update_llm(self, config_id, name=None, base_url=None, api_key=None,
+                   model=None, supports_vision=None) -> LLMConfig | None:
+        """编辑 LLM 配置：传 None 的字段保持不变（api_key 空串由调用方转 None=保留原值）。"""
+        cfg = self.db.get(LLMConfig, config_id)
+        if not cfg:
+            return None
+        if name is not None:
+            cfg.name = name
+        if base_url is not None:
+            cfg.base_url = base_url
+        if api_key is not None:
+            cfg.api_key = api_key
+        if model is not None:
+            cfg.model = model
+        if supports_vision is not None:
+            cfg.supports_vision = supports_vision
+        cfg.updated_at = _now()
+        self.db.commit()
+        self.db.refresh(cfg)
+        return cfg
+
     def list_llm(self) -> list[LLMConfig]:
         return self.db.query(LLMConfig).order_by(LLMConfig.created_at.desc()).all()
 
@@ -51,21 +72,35 @@ class ConfigStore:
         self.db.commit()
         return True
 
-    # ---------------- DrawThings 配置 ----------------
-    def create_drawthing(self, name, base_url, protocol="http",
-                         model_name="", shared_secret="", media_type="image") -> DrawThingConfig:
+    # ---------------- DrawThings 配置（HTTP 协议；个性化参数 0/空 = 跟随 app）----------------
+    def create_drawthing(self, name, base_url, **gen) -> DrawThingConfig:
+        """gen：width/height/max_frames 个性化参数。"""
         cfg = DrawThingConfig(
             id=uuid.uuid4().hex[:12],
             name=name,
             base_url=base_url,
-            protocol=(protocol or "http").lower(),
-            model_name=model_name or "",
-            shared_secret=shared_secret or "",
-            media_type=(media_type or "image").lower(),
             created_at=_now(),
             updated_at=_now(),
+            **gen,
         )
         self.db.add(cfg)
+        self.db.commit()
+        self.db.refresh(cfg)
+        return cfg
+
+    def update_drawthing(self, config_id, name=None, base_url=None, **gen) -> DrawThingConfig | None:
+        """编辑 DrawThings 配置：传 None 的字段保持不变；gen 同 create_drawthing。"""
+        cfg = self.db.get(DrawThingConfig, config_id)
+        if not cfg:
+            return None
+        if name is not None:
+            cfg.name = name
+        if base_url is not None:
+            cfg.base_url = base_url
+        for k, v in gen.items():
+            if v is not None:
+                setattr(cfg, k, v)
+        cfg.updated_at = _now()
         self.db.commit()
         self.db.refresh(cfg)
         return cfg

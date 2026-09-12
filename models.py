@@ -34,22 +34,19 @@ class LLMConfig(Base):
 class DrawThingConfig(Base):
     """Draw Things 配置（Mac 本地出图/出视频）。
 
-    Draw Things 有两种 API 协议（app 内开启）：
-    - http：A1111/SD-WebUI 兼容 REST（/sdapi/v1/txt2img、/sdapi/v1/img2img），
-            base_url 形如 http://127.0.0.1:8888（端口以 app 显示为准）
-    - grpc：ImageGenerationService（默认 7859 端口，TLS 默认开），
-            base_url 形如 127.0.0.1:7859
+    使用 app 内置 HTTP API（A1111/SD-WebUI 兼容：/sdapi/v1/txt2img、/sdapi/v1/img2img），
+    base_url 形如 http://127.0.0.1:7860（端口以 app 显示为准）。
+    不使用 gRPC（app 的 gRPC 服务收到生成请求会闪退）。
+    模型只能跟随 app 当前选择（API 不支持指定）；其余为个性化参数，0/空 = 跟随 app 当前值。
     """
 
     __tablename__ = "drawthing_configs"
 
     id = Column(String(12), primary_key=True)
     name = Column(String(100), nullable=False)
-    base_url = Column(String(500), nullable=False)       # 端点地址（http 为 URL，grpc 为 host:port）
-    protocol = Column(String(10), default="http")        # http | grpc
-    model_name = Column(String(200), default="")         # 模型文件名（留空=用 app 当前选中的模型）
-    shared_secret = Column(String(200), default="")      # gRPC 共享密钥（app 里若设置了 secret 则必填）
-    media_type = Column(String(10), default="image")     # image|video：图像模型 / 视频模型（项目按类型选用）
+    base_url = Column(String(500), nullable=False)       # HTTP 端点 URL（http://host:port）
+    max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随 app）
+    max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限，跟随 app）
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 
@@ -87,6 +84,8 @@ class Chapter(Base):
     title = Column(String(200), default="")
     description = Column(Text, default="")                 # 剧本描述
     prompt = Column(Text, default="")                      # 出图/出视频提示词
+    width = Column(Integer, default=0)                     # 智能体决定的具体分辨率宽（0=跟随 app）
+    height = Column(Integer, default=0)                    # 智能体决定的具体分辨率高（0=跟随 app）
     ref_path = Column(String(500), default="")             # 参考（上一张图/上一视频末帧）
     media_path = Column(String(500), default="")           # 生成的图/视频路径
     status = Column(String(10), default="pending")         # pending|done|error
@@ -108,7 +107,6 @@ class MicroWork(Base):
     title = Column(String(200), default="")               # 作品标题（留空自动取）
     llm_config_id = Column(String(12), nullable=False)
     drawthings_config_id = Column(String(12), default="")   # 空 = 纯对话
-    media_type = Column(String(10), default="image")       # image|video
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     sessions = relationship("MicroSession", back_populates="work",

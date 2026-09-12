@@ -95,7 +95,10 @@ Views.project = {
         <template #header>
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <b>第{{ c.index + 1 }}章 · {{ c.title }}</b>
-            <el-tag size="small" :type="c.status === 'done' ? 'success' : (c.status === 'error' ? 'danger' : 'info')" effect="light">{{ c.status }}</el-tag>
+            <span>
+              <el-tag v-if="c.width && c.height" size="small" effect="plain" style="margin-right: 6px;">{{ c.width }}×{{ c.height }}</el-tag>
+              <el-tag size="small" :type="c.status === 'done' ? 'success' : (c.status === 'error' ? 'danger' : 'info')" effect="light">{{ c.status }}</el-tag>
+            </span>
           </div>
         </template>
         <el-alert v-if="c.status === 'error'" type="error" :closable="false" class="mb8"
@@ -133,11 +136,10 @@ Views.project = {
           </el-form-item>
           <el-form-item label="DrawThings 配置">
             <el-select v-model="cfg.dt" style="width: 100%">
-              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id"
-                         :label="c.name + '（' + (c.media_type === 'image' ? '图像' : '视频') + '模型 / ' + c.protocol + '）'" />
-              <el-option v-if="!data.drawthing_configs.length" value="" label="（无匹配的 DrawThings 配置，请先创建）" />
+              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
+              <el-option v-if="!data.drawthing_configs.length" value="" label="（无 DrawThings 配置，请先创建）" />
             </el-select>
-            <div class="hint">当前项目类型只列出匹配的模型配置。<el-link :underline="false" type="primary" @click="router.push('/configs?ctype=drawthings')">＋ 新建配置</el-link></div>
+            <div class="hint">出图/出视频由 app 里当前加载的模型决定。<el-link :underline="false" type="primary" @click="router.push('/configs?ctype=drawthings')">＋ 新建配置</el-link></div>
           </el-form-item>
         </el-form>
         <template #footer>

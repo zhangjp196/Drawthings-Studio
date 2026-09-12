@@ -110,9 +110,11 @@ class ChaptersOut(BaseModel):
 
 
 class ScriptOut(BaseModel):
-    """阶段 4：单章剧本 + 提示词。"""
+    """阶段 4：单章剧本 + 提示词 + 具体分辨率。"""
     description: str
     prompt: str
+    width: int = 0    # 智能体按场景构图决定的分辨率宽（64 的倍数，0=跟随默认）
+    height: int = 0   # 智能体按场景构图决定的分辨率高（64 的倍数，0=跟随默认）
 
 
 def make_agent(model: Model, system: str, output_type: type = str) -> Agent:

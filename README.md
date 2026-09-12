@@ -50,7 +50,7 @@
 
 - **三级结构**（与创作中心的 项目→章节 同款思路）：
   - `/micro` **作品列表页**：卡片网格（进入/删除），分页每页 10 条、按最近活跃排序，
-    点「＋ 新建作品」弹框创建（作品标题/LLM/DrawThings/产出类型）。
+    点「＋ 新建作品」弹框创建（作品标题/LLM/DrawThings）。
   - `/micro/{id}` 与 `/micro/{id}/{sid}` **同一作品页**（左右布局，无需分开；有会话时自动定位最近会话）：
     **进入作品自动打开最近更新的会话**（无会话时显示空状态）；
     **左侧**为该作品下的多个独立会话（进入/重命名/删除 +「＋ 新建会话」弹框，选中高亮），
@@ -69,8 +69,10 @@
   非视觉模型不提供该入口。
 - **Markdown 渲染**：助手回复按 Markdown 渲染（标题/嵌套列表/表格/代码块/引用等，
   先转义后转换，防 XSS）；代码块支持一键复制，宽表格横向滚动；打开会话自动定位最新消息。
-- **作品选项**：LLM 配置 / DrawThings 配置（按 图像/视频 类型过滤，可不选 = 纯对话）/
-  产出类型（纯对话时自动置灰）；随作品保存（供其下全部会话共用），作品页可修改。
+- **作品选项**：LLM 配置 / DrawThings 配置（可不选 = 纯对话）；随作品保存
+  （供其下全部会话共用），作品页可修改。
+  产出类型（图像/视频）**无需选择**：每次生成时按 app 当前加载的模型自动判断
+  （模型名含 svd/wan/i2v 等视频关键词 → 出视频，否则出图像）。
 - **删除会话/作品**时同步清理其生成的媒体文件与用户附图。
 
 后端统一使用 **Pydantic AI v2**（`services/agent.py`）：流水线各阶段（篇幅/分章/剧本）
@@ -80,8 +82,12 @@
 
 - **LLM 配置**：`supports_vision`（图片输入）= 支持图片输入（多模态，剧本阶段可参考
   上一帧/首图）/ 纯文本（不附带任何参考图）。
-- **DrawThings 配置**：`media_type`（模型类型）= **图像模型**（漫画项目用）/
-  **视频模型**（短剧项目用）。新建项目时按类型只显示匹配的 DrawThings 配置。
+- **DrawThings 配置**：无模型类型（出图/出视频由 app 里当前加载的模型决定，
+  所有项目/作品可选任意 DrawThings 配置）。
+  个性化参数：`max_side`（最大分辨率，仅最长边，具体分辨率由智能体按场景决定、
+  最长边超过上限时等比缩小）、`max_frames`（视频最大帧数上限，
+  实际帧数 = min(app 当前帧数, 上限)）——**0 = 不限/跟随 app 当前值**。
+  模型不能指定，永远跟随 app 当前选择。
 
 ## 目录结构
 
@@ -95,7 +101,7 @@
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 统一 Agent 层（模型构造 / 结构化输出 / 消息历史）
-│   ├── drawthings.py    # Draw Things 客户端（可配置；HTTP / gRPC 双协议）
+│   ├── drawthings.py    # Draw Things 客户端（可配置；HTTP 协议）
 │   └── pipeline.py      # 流水线编排（按项目所选 config 运行时构建 Agent）
 ├── static/
 │   ├── vendor/          # 前端依赖（本地下载，免构建/离线）：vue / vue-router / element-plus（js+css+dark+zh-cn）/ icons
@@ -103,11 +109,6 @@
 │       ├── index.html   #   外壳：顶栏 + <router-view> + 主题预渲染
 │       ├── css/app.css  #   应用样式（Element Plus 主题变量映射 + 布局 + 对话区）
 │       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）theme.js md.js（Markdown）views/（7 个视图组件）
-├── drawthings_proto/    # Draw Things gRPC 协议：proto/FlatBuffer 源 + 生成代码 + 根证书
-│   ├── config.fbs       #   GenerationConfiguration（gRPC configuration 字段，FlatBuffer）
-│   ├── imageService.proto # ImageGenerationService（GenerateImage/UploadFile/Echo…）
-│   ├── *_pb2*.py / *.py #   protoc/flatc 生成的 Python 存根（可直接 import）
-│   └── root_ca.crt      #   gRPC TLS 官方根 CA（app 服务器证书由它签发）
 └── data/                # app.db（SQLite） media/（图片/视频）
 ```
 
@@ -188,8 +189,8 @@ python main.py                # 访问 http://127.0.0.1:8010
 
 1. **LLM**：任意 OpenAI 协议端点（Ollama `http://127.0.0.1:11434/v1`、vLLM、云端 OpenAI 等），
    在 **⚙ 配置管理** 里新增配置；按模型能力勾选「图片输入」（多模态 / 纯文本）。
-2. **Draw Things**：Mac 上运行 Draw Things app，开启 HTTP 或 gRPC 服务（见下节），
-   分别创建「图像模型」配置（漫画用）与「视频模型」配置（短剧用）。
+2. **Draw Things**：Mac 上运行 Draw Things app，开启 HTTP 服务器（见下节），
+   在 **⚙ 配置管理** 里创建 DrawThings 配置（出图/出视频由 app 里加载的模型决定）。
 
 端点未启动时，对应步骤会在项目页显示**友好错误提示**（如连接失败、未开启服务等），
 修复后重新点该步骤即可，不影响已生成内容。
@@ -199,12 +200,10 @@ python main.py                # 访问 http://127.0.0.1:8010
 
 ## 接入真实 Draw Things
 
-Draw Things 提供**两种 API 协议**（均已在 app 内开启），本应用两种都支持，
-协议字段已按 `drawthingsai/Draw-Things-community` 源码逐一对齐（2026-09）：
+使用 Draw Things app 内置 **HTTP API**（A1111 / SD-WebUI 兼容，图、视频都走这条），
+协议字段已按 `drawthingsai/Draw-Things-community` 源码逐一对齐（2026-09）。
 
-### 1) HTTP（A1111 / SD-WebUI 兼容，推荐；图、视频都走这条）
-
-在 Draw Things app 内开启 HTTP 服务器，端口以 app 显示为准。端点：
+在 Draw Things app 内开启 HTTP 服务器，端口以 app 显示为准（如 `http://127.0.0.1:7860`）。端点：
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
@@ -216,37 +215,22 @@ Draw Things 提供**两种 API 协议**（均已在 app 内开启），本应用
   `prompt, negative_prompt, model, width, height, steps, guidance_scale(=cfg_scale),
   seed, sampler, batch_count(=n_iter), batch_size, strength(=denoising_strength),
   restore_faces, init_images([base64 原图字节])`，
-  视频另加 `num_frames, fps, motion_scale, guiding_frame_noise, start_frame_guidance,
+  视频另加 `num_frames, motion_scale, guiding_frame_noise, start_frame_guidance,
   stage_2_steps, stage_2_guidance, stage_2_shift, compression_artifacts(h264/h265/jpeg/disabled)`。
 - `sampler` 取枚举缩写：`"DPM++ 2M Karras"` / `"Euler a"` / `"DDIM"` / `"UniPC"` / `"LCM"` …
 - 响应：`{"images": ["<base64 原始字节>", ...]}`。
 - **注意**：`img2img` 的 `init_images` 尺寸必须与 `width`/`height` **完全一致**，
   否则 422——本应用会自动读 `/sdapi/v1/options` 的当前宽高并把参考图缩放到该尺寸。
 
-本应用默认策略：只发 `prompt`（+参考图），其余参数留空 = 用 app 当前选中的设置；
-调用方可通过 `params` 显式覆盖（如 `width`/`steps`/视频参数）。
+分辨率由**智能体在剧本阶段按场景构图决定**（`ScriptOut.width/height`，64 的倍数），
+流水线生成时传给客户端；客户端按配置 `max_side`（最大分辨率，仅最长边）限幅
+（超长边等比缩小到上限内）。微创作等无智能体决定的场景只发 `prompt`（+参考图），
+其余参数留空 = 用 app 当前选中的设置；调用方也可通过 `params` 显式覆盖。
 
-### 2) gRPC（ImageGenerationService；适合远程 GPU 服务器）
+在 **⚙ 配置管理 → 新建配置 → DrawThings** 里填端点地址（`http://host:port`），
+可按需设置：最大分辨率（仅最长边：不限 / 512 / 768 / 1024）、
+最大帧数上限（视频，实际帧数 = min(app 当前帧数, 上限)）
+（**0 = 跟随 app 当前值**）。模型不能指定，永远跟随 app 里当前选中的模型。
 
-默认 **7859** 端口，**TLS 默认开**（信任 `drawthings_proto/root_ca.crt`，
-本应用会自动尝试 TLS→明文），认证用 `Echo` + 可选 `sharedSecret`。
-
-- `ImageGenerationRequest.configuration` 是 **FlatBuffer**（`GenerationConfiguration`，
-  由 `drawthings_proto/config.fbs` 经 `flatc` 生成），本应用按需构建。
-- 参考图走**内容寻址**：先 `UploadFile`（`InitUploadRequest` → `FileChunk` 流）上传，
-  再把 **sha256 摘要字节**传给 `image` 字段（先 `FilesExist` 查重）。
-- 响应为**流**：`generatedImages` 分块（`chunkState` = MORE_CHUNKS/LAST_CHUNK），
-  本应用自动拼接落盘；视频经 `compression_artifacts=h264/h265` 返回 mp4 流。
-
-### 两种模式怎么选
-
-- **本地 Mac 出图/出视频**：用 **HTTP**（最简单，一个端点搞定图+视频）。
-- **远程 GPU 服务器 / 需要内容寻址复用参考图**：用 **gRPC**。
-
-在 **⚙ 配置管理 → 新建配置 → DrawThings** 里选「API 协议」（HTTP / gRPC），
-端点地址分别填 `http://host:port` 或 `host:port`；模型留空 = 用 app 当前选中的模型。
-
-> 存根已随仓库提交（`drawthings_proto/`），无需重新生成；如需更新：
-> `tools/flatc --python config.fbs` +
-> `python -m grpc_tools.protoc --python_out=. --grpc_python_out=. --proto_path=. imageService.proto controlPanel.proto`
-> （生成后把 `*_pb2_grpc.py` 顶部的绝对 import 改成相对 import 即可）。
+> 不使用 gRPC（ImageGenerationService）：app 的 gRPC 服务收到生成请求会闪退，
+> 本应用已移除 gRPC 支持，app 内也请只开启 HTTP 服务器。
