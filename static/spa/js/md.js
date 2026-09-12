@@ -56,7 +56,7 @@
         const buf = []; i++;
         while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
         i++;
-        out.push('<div class="code-wrap"><button type="button" class="copy-code">复制</button>'
+        out.push('<div class="code-wrap"><button type="button" class="copy-code">' + I18N.t('common.copy') + '</button>'
                  + '<pre><code>' + buf.join('\n') + '</code></pre></div>');
         continue;
       }

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from pydantic_ai.messages import ImageUrl
 
+from i18n import L
 from models import Project, Chapter, LLMConfig, DrawThingConfig
 
 from config_store import ConfigStore
@@ -44,21 +45,22 @@ class Pipeline:
         self.data_dir = str(data_dir)
 
     # ---------------- 客户端构造 ----------------
-    def _configs(self, db, project) -> tuple[LLMConfig, DrawThingConfig]:
+    def _configs(self, db, project, lang: str = "zh") -> tuple[LLMConfig, DrawThingConfig]:
         cs = ConfigStore(db)
         llm_cfg = cs.get_llm(project.llm_config_id)
         dt_cfg = cs.get_drawthing(project.drawthings_config_id)
         if not llm_cfg or not dt_cfg:
-            raise RuntimeError("项目所选配置已被删除，请到「配置管理」重新选择或新建")
+            raise RuntimeError(L(lang, "项目所选配置已被删除，请到「配置管理」重新选择或新建",
+                                 "The selected config was deleted — re-select or create one in Settings"))
         return llm_cfg, dt_cfg
 
-    def _clients(self, db, project):
+    def _clients(self, db, project, lang: str = "zh"):
         """DrawThings 客户端（出图/出视频用）。"""
-        _, dt_cfg = self._configs(db, project)
+        _, dt_cfg = self._configs(db, project, lang)
         return DrawThingsClient(dt_cfg, data_dir=self.data_dir)
 
-    def _llm_cfg(self, db, project) -> LLMConfig:
-        llm_cfg, _ = self._configs(db, project)
+    def _llm_cfg(self, db, project, lang: str = "zh") -> LLMConfig:
+        llm_cfg, _ = self._configs(db, project, lang)
         return llm_cfg
 
     # ---------------- 项目生命周期 ----------------
@@ -125,8 +127,8 @@ class Pipeline:
         db.refresh(project)
 
     # ---------------- 阶段 1：设定篇幅 ----------------
-    async def step_scope(self, db, project: Project) -> Project:
-        llm_cfg = self._llm_cfg(db, project)
+    async def step_scope(self, db, project: Project, lang: str = "zh") -> Project:
+        llm_cfg = self._llm_cfg(db, project, lang)
         style = ((project.scope or {}).get("style") or "").strip()
         system = "你是一个漫画/短剧策划。根据一句话创意规划篇幅与风格。"
         agent = make_agent(build_model(llm_cfg), system, output_type=ScopeOut)
@@ -145,10 +147,10 @@ class Pipeline:
         return project
 
     # ---------------- 阶段 2：整体路线（故事总纲） ----------------
-    async def step_arc(self, db, project: Project) -> Project:
+    async def step_arc(self, db, project: Project, lang: str = "zh") -> Project:
         """生成整体故事总纲（开端→发展→高潮→结局），作为章节拆分的总路线。
         用户可编辑总纲（save_arc）后重新生成章节，实现“整体路线控制”。"""
-        llm_cfg = self._llm_cfg(db, project)
+        llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         system = ("你是资深编剧。根据一句话创意、风格与篇幅，为整部作品设计整体故事总纲：\n"
                   "分 开端、发展、高潮、结局 四段，每段用 1-2 句话讲清楚发生什么、如何承接到下一段；\n"
@@ -164,7 +166,8 @@ class Pipeline:
             out = (await agent.run(user)).output
         project.arc = (out or "").strip()
         if not project.arc:
-            raise RuntimeError("模型未返回总纲内容，请重试")
+            raise RuntimeError(L(lang, "模型未返回总纲内容，请重试",
+                                 "The model returned no arc content — please retry"))
         project.status = "arced"
         self._save(db, project)
         return project
@@ -176,8 +179,8 @@ class Pipeline:
         return project
 
     # ---------------- 阶段 3：章节设定 ----------------
-    async def step_chapters(self, db, project: Project) -> Project:
-        llm_cfg = self._llm_cfg(db, project)
+    async def step_chapters(self, db, project: Project, lang: str = "zh") -> Project:
+        llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope
         system = ("你是分集/分章策划。把规划拆成若干章，每章给标题和一句话场景。"
                   "若提供了整体故事总纲，必须按总纲的节奏（开端→发展→高潮→结局）分配章节。")
@@ -207,8 +210,8 @@ class Pipeline:
                 .order_by(Chapter.index).all())
 
     # ---------------- 阶段 4：剧本编写 ----------------
-    async def step_script(self, db, project: Project) -> Project:
-        llm_cfg, dt_cfg = self._configs(db, project)
+    async def step_script(self, db, project: Project, lang: str = "zh") -> Project:
+        llm_cfg, dt_cfg = self._configs(db, project, lang)
         supports_vision = (getattr(llm_cfg, "supports_vision", None) or "yes").lower() == "yes"
         chapters = self._load_chapters(db, project)
         media_dir = Path(self.data_dir) / "media"
@@ -262,12 +265,13 @@ class Pipeline:
         return project
 
     # ---------------- 阶段 5：单任务进行 ----------------
-    def step_generate(self, db, project: Project, index: int | None = None) -> Project:
+    def step_generate(self, db, project: Project, index: int | None = None,
+                      lang: str = "zh") -> Project:
         """index 为 None 时生成所有未完成的章；否则只生成第 index 章（支持单个调整/重生成）。
 
         连续性参考：第 1 章用首图（若已设置）——漫画作 img2img 参考、短剧作视频首帧；
         其余章沿用上一章媒体（漫画=上一张图，短剧=上一视频）。"""
-        dt = self._clients(db, project)
+        dt = self._clients(db, project, lang)
         chapters = self._load_chapters(db, project)
         if index is not None:
             targets = [chapters[index]]
@@ -306,9 +310,9 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    def regenerate(self, db, project: Project, index: int) -> Project:
+    def regenerate(self, db, project: Project, index: int, lang: str = "zh") -> Project:
         """单独重生成第 index 章（用其提示词 + 上一章作参考）。"""
-        return self.step_generate(db, project, index=index)
+        return self.step_generate(db, project, index=index, lang=lang)
 
     # ---------------- 首图 ----------------
     def set_first_image_path(self, db, project: Project, path: str) -> Project:
@@ -317,13 +321,14 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    async def generate_first_image(self, db, project: Project, prompt: str = "") -> Project:
+    async def generate_first_image(self, db, project: Project, prompt: str = "",
+                                   lang: str = "zh") -> Project:
         """用 DrawThings 生成首图（文生图）。
 
         prompt 为空时让 LLM 根据一句话创意+风格自动写首图提示词。
         产物存为 data/media/first_<项目id>.<ext>，供第 1 章作参考（可重复生成覆盖）。"""
-        llm_cfg = self._llm_cfg(db, project)
-        dt = self._clients(db, project)
+        llm_cfg = self._llm_cfg(db, project, lang)
+        dt = self._clients(db, project, lang)
         prompt = (prompt or "").strip()
         if not prompt:
             scope = project.scope or {}
@@ -334,7 +339,8 @@ class Pipeline:
             async with agent:
                 prompt = ((await agent.run(user)).output or "").strip()
         if not prompt:
-            raise RuntimeError("未能获得首图提示词，请填写后重试")
+            raise RuntimeError(L(lang, "未能获得首图提示词，请填写后重试",
+                                 "Could not obtain a first-image prompt — please fill one in and retry"))
         path = dt.generate_image(prompt)
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"

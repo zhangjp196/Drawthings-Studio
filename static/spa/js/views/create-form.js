@@ -7,48 +7,46 @@ Views.createForm = {
   emits: ['created'],
   template: `
     <el-form label-position="top">
-      <el-form-item label="选择类型">
+      <el-form-item :label="I18N.t('cf.type')">
         <el-radio-group v-model="f.kind" @change="f.dt = ''">
-          <el-radio value="comic">漫画走向（连续生图）</el-radio>
-          <el-radio value="drama">短剧走向（连续出视频）</el-radio>
+          <el-radio value="comic">{{ I18N.t('cf.comic') }}</el-radio>
+          <el-radio value="drama">{{ I18N.t('cf.drama') }}</el-radio>
         </el-radio-group>
       </el-form-item>
-      <el-form-item label="LLM 配置" required>
-        <el-select v-model="f.llm" placeholder="选择 LLM 配置" style="width: 100%">
+      <el-form-item :label="I18N.t('cf.llm')" required>
+        <el-select v-model="f.llm" :placeholder="I18N.t('cf.llmPh')" style="width: 100%">
           <el-option v-for="c in llms" :key="c.id" :value="c.id"
-                     :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / 纯文本' : '') + '）'" />
-          <el-option v-if="!llms.length" value="" label="（无 LLM 配置，请先创建）" />
+                     :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / ' + I18N.t('cfg.textOnly') : '') + '）'" />
+          <el-option v-if="!llms.length" value="" :label="I18N.t('cf.llmNone')" />
         </el-select>
-        <div class="hint">「支持图片输入」的模型可在剧本阶段看参考帧。<el-link :underline="false" type="primary" @click="toConfigs">＋ 新建 LLM 配置</el-link></div>
+        <div class="hint">{{ I18N.t('cf.llmHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newLlm') }}</el-link></div>
       </el-form-item>
-      <el-form-item label="DrawThings 配置" required>
-        <el-select v-model="f.dt" placeholder="选择 DrawThings 配置" style="width: 100%">
+      <el-form-item :label="I18N.t('cf.dt')" required>
+        <el-select v-model="f.dt" :placeholder="I18N.t('cf.dtPh')" style="width: 100%">
           <el-option v-for="c in dts" :key="c.id" :value="c.id" :label="c.name" />
-          <el-option v-if="!dts.length" value="" label="（无 DrawThings 配置，请先创建）" />
+          <el-option v-if="!dts.length" value="" :label="I18N.t('cf.dtNone')" />
         </el-select>
-        <div class="hint">出图/出视频由 app 里当前加载的模型决定。<el-link :underline="false" type="primary" @click="toConfigs">＋ 新建配置</el-link></div>
+        <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newCfg') }}</el-link></div>
       </el-form-item>
-      <el-form-item label="标题">
-        <el-input v-model="f.title" maxlength="100" placeholder="例如：猫的四季旅行（留空则以主题作为标题）" />
+      <el-form-item :label="I18N.t('cf.title')">
+        <el-input v-model="f.title" maxlength="100" :placeholder="I18N.t('cf.titlePh')" />
       </el-form-item>
-      <el-form-item label="主题" required>
-        <el-input v-model="f.origin" type="textarea" :rows="3"
-                  placeholder="用一句话描述故事，例如：一只猫旅行穿越四季，从春到冬" />
+      <el-form-item :label="I18N.t('cf.origin')" required>
+        <el-input v-model="f.origin" type="textarea" :rows="3" :placeholder="I18N.t('cf.originPh')" />
       </el-form-item>
-      <el-form-item label="风格">
+      <el-form-item :label="I18N.t('cf.style')">
         <el-select v-model="f.style" style="width: 100%">
-          <el-option value="" label="自动（由 LLM 推荐）" />
-          <el-option v-for="s in presets" :key="s" :value="s" :label="s" />
-          <el-option value="custom" label="自定义…" />
+          <el-option value="" :label="I18N.t('cf.styleAuto')" />
+          <el-option v-for="(s, i) in presets" :key="s" :value="s" :label="s" />
+          <el-option value="custom" :label="I18N.t('cf.styleCustom')" />
         </el-select>
-        <el-input v-if="f.style === 'custom'" v-model="f.styleCustom" class="mt8"
-                  placeholder="自定义风格描述，例如：吉卜力式暖色调手绘" />
+        <el-input v-if="f.style === 'custom'" v-model="f.styleCustom" class="mt8" :placeholder="I18N.t('cf.styleCustomPh')" />
       </el-form-item>
-      <el-button type="primary" :loading="saving" @click="submit">开始创作</el-button>
+      <el-button type="primary" :loading="saving" @click="submit">{{ I18N.t('cf.start') }}</el-button>
     </el-form>
   `,
   setup(props, { emit }) {
-    const presets = ['日系漫画风', '国风水墨', 'Q版可爱', '写实电影感', '皮克斯3D风', '赛博朋克风'];
+    const presets = computed(() => [0, 1, 2, 3, 4, 5].map(i => I18N.t('cf.preset.' + i)));
     const llms = ref([]);
     const dtsAll = ref([]);
     const saving = ref(false);
@@ -71,9 +69,9 @@ Views.createForm = {
     const dts = computed(() => dtsAll.value);
 
     async function submit() {
-      if (!f.llm) { ElementPlus.ElMessage.warning('请选择 LLM 配置'); return; }
-      if (!f.dt) { ElementPlus.ElMessage.warning('请选择 DrawThings 配置'); return; }
-      if (!f.origin.trim()) { ElementPlus.ElMessage.warning('请填写主题（一句话）'); return; }
+      if (!f.llm) { ElementPlus.ElMessage.warning(I18N.t('cf.wLlm')); return; }
+      if (!f.dt) { ElementPlus.ElMessage.warning(I18N.t('cf.wDt')); return; }
+      if (!f.origin.trim()) { ElementPlus.ElMessage.warning(I18N.t('cf.wOrigin')); return; }
       saving.value = true;
       try {
         const data = await API.post('/api/projects', {

@@ -1,4 +1,20 @@
-# 漫剧坊
+# Drawthings Studio
+
+> 从一句话到连续漫画 / 短剧（图 + 视频），本地一体化创作台。
+> From a single sentence to a full continuous comic / short drama (images + video) — a local, all-in-one creation studio.
+
+本仓库包含一份**中文**文档与一份**英文**文档（内容一致，便于中英双语团队阅读）。
+
+This repository ships a **Chinese** document and an **English** document (identical content, so both Chinese- and English-speaking teams can read it comfortably).
+
+- [中文文档](#中文文档)
+- [English Documentation](#english-documentation)
+
+---
+
+## 中文文档
+
+### 简介
 
 本地一体化应用：**FastAPI（JSON API + SSE）后端 + Vue 3 / Element Plus 单页前端（SPA）**。
 前端为**本地 vendor、免构建**（Vue / vue-router / Element Plus 均下载至 `static/vendor/` 以 UMD 引入），
@@ -8,34 +24,36 @@
 
 > 一句话 → 设定篇幅 → 整体路线（总纲）→ 章节设定 → 剧本编写 → 单任务进行
 
-生成环节通过 OpenAI 协议走大模型，出图/出视频由 Mac 上的 **Draw Things** 生成。
+生成环节通过 OpenAI 协议走大模型，出图 / 出视频由 Mac 上的 **Draw Things** 生成。
 因为支持图片，**生成下一章时参考上一张图（漫画）/ 上一视频末帧（短剧）**，保证画面连贯。
 
-## 两个功能
+界面**支持中文 / English 双语**，顶栏一键切换（前端 `I18N` 切换 + 后端按 `Accept-Language` 本地化错误文案）。
+
+### 两个功能
 
 | 功能 | 走向 | 产出 | 连续性参考 |
 |------|------|------|------------|
 | 漫画 | 连续生图 | 每章一张图 | 第 1 章 = 首图；其余 = 上一张图 |
 | 短剧 | 连续出视频 | 每章一段视频 | 第 1 章 = 首图（首帧）；其余 = 上一视频末帧 |
 
-## 首页（/）
+### 首页（/）
 
-- **品牌区**：平台名 + 一句话价值主张 + 主 CTA（进入创作中心 / ✨ 微创作）。
+- **品牌区**：平台名（Drawthings Studio）+ 一句话价值主张 + 主 CTA（进入创作中心 / ✨ 微创作）。
 - **两大功能入口**：漫画走向（连续生图）/ 短剧走向（连续出视频），说明连续性参考策略。
 - **流水线说明**：一句话主题 → 篇幅 → 总纲 → 章节 → 剧本 → 逐章生成，六步流程卡片。
 
-## 我的创作（列表页 /projects）
+### 我的创作（列表页 /projects）
 
 - **管理**：表格行内可**打开 / 重命名 / 删除**（删除带二次确认）；项目页头部也有「删除该创作」。
   删除会连同全部章节记录与已生成的图/视频文件一并清理。
-- **筛选**：按类型（漫画/短剧）、状态（中文标签）、排序（最新/最早）、每页条数（10/20/50）。
+- **筛选**：按类型（漫画/短剧）、状态、排序（最新/最早）、每页条数（10/20/50）。
 - **信息**：类型标签、标题/主题、状态标签、章节进度（已定/总篇幅）、首图缩略图（点击预览）、创建日期；
   工具条显示总数，「＋ 新建创作」弹框（与 /new 页同一表单组件）。
 
-## 创作控制（项目页）
+### 创作控制（项目页）
 
-- **首图**：项目页可**上传首图**或**提示词生成首图**（留空提示词时由 LLM 按一句话创意+风格
-  自动撰写）。首图作为第 1 章的参考（漫画 = img2img 参考图；短剧 = 视频首帧），
+- **首图**：项目页可**上传首图**或**提示词生成首图**（留空提示词时由 LLM 按一句话创意+风格自动撰写）。
+  首图作为第 1 章的参考（漫画 = 图生图参考图；短剧 = 视频首帧），
   并在剧本阶段作为全片角色/风格基准（多模态 LLM 可见）。
 - **风格选择（支持自定义）**：新建项目时选预设风格（日系漫画风 / 国风水墨 / Q版 /
   写实电影感 / 皮克斯3D / 赛博朋克）或「自定义…」填任意描述；
@@ -44,7 +62,7 @@
   总纲可在项目页直接**编辑**（改剧情走向），改完点「按总纲重新生成章节」重排章节；
   也可「重新生成总纲」。章节拆分严格遵循总纲节奏。
 
-## 微创作（/micro，作品 → 独立会话）
+### 微创作（/micro，作品 → 独立会话）
 
 不建项目的轻量创作台（顶栏「✨ 微创作」）——**一个微创作包含多个独立会话**，历史持久化：
 
@@ -61,8 +79,8 @@
   （`micro_works` / `micro_sessions` / `micro_messages`），刷新不丢；多轮上下文从数据库取最近 20 条。
   空标题的会话/作品自动取首条用户消息命名；旧库（配置随会话的旧结构）启动时自动迁移。
 - **统一对话 + 流式输出（SSE）**：与所选 LLM 多轮对话（构思/编剧/提示词），回复逐字流式显示。
-- **function call 自动生成**：需要出图/出视频时，由模型**自动调用 `generate_media`
-  工具**（结合上下文提炼详细英文提示词），再调 DrawThings 产出单张图/单个视频，
+- **function call 自动生成**：需要出图/出视频时，由模型**自动调用 `generate_media` 工具**
+  （结合上下文提炼详细英文提示词），再调 DrawThings 产出单张图/单个视频，
   结果直接嵌进对话气泡（含提示词）。
 - **用户附图**：所选 LLM 支持视觉（`supports_vision`）时，输入框可点 📎 上传、**粘贴**或**拖拽**
   图片（每条最多 4 张，可只发图不发文字）；附图随消息落库，并随多轮上下文回传给模型。
@@ -78,10 +96,9 @@
 后端统一使用 **Pydantic AI v2**（`services/agent.py`）：流水线各阶段（篇幅/分章/剧本）
 走结构化输出（Pydantic 模型），微创作走流式 + 工具调用，全部 OpenAI 兼容协议。
 
-## 配置字段
+### 配置字段
 
-- **LLM 配置**：`supports_vision`（图片输入）= 支持图片输入（多模态，剧本阶段可参考
-  上一帧/首图）/ 纯文本（不附带任何参考图）。
+- **LLM 配置**：`supports_vision`（图片输入）= 支持图片输入（多模态，剧本阶段可参考上一帧/首图）/ 纯文本（不附带任何参考图）。
 - **DrawThings 配置**：无模型类型（出图/出视频由 app 里当前加载的模型决定，
   所有项目/作品可选任意 DrawThings 配置）。
   个性化参数：`max_side`（最大分辨率，仅最长边，具体分辨率由智能体按场景决定、
@@ -89,7 +106,7 @@
   实际帧数 = min(app 当前帧数, 上限)）——**0 = 不限/跟随 app 当前值**。
   模型不能指定，永远跟随 app 当前选择。
 
-## 目录结构
+### 目录结构
 
 ```
 .
@@ -98,24 +115,25 @@
 ├── db.py                # SQLAlchemy 引擎 / 会话 / init_db（含旧库结构迁移）
 ├── models.py            # ORM 模型：LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
 ├── config_store.py      # 配置增删查（含删除前的“被项目/微创作作品引用”保护）
+├── i18n.py              # 后端中英文本地化（Accept-Language → zh|en + L() 文案助手）
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 统一 Agent 层（模型构造 / 结构化输出 / 消息历史）
 │   ├── drawthings.py    # Draw Things 客户端（可配置；HTTP 协议）
 │   └── pipeline.py      # 流水线编排（按项目所选 config 运行时构建 Agent）
 ├── static/
-│   ├── vendor/          # 前端依赖（本地下载，免构建/离线）：vue / vue-router / element-plus（js+css+dark+zh-cn）/ icons
+│   ├── vendor/          # 前端依赖（本地下载，免构建/离线）：vue / vue-router / element-plus（js+css+dark+zh-cn+en）/ icons
 │   └── spa/             # 单页前端（UMD 引入，无打包）
-│       ├── index.html   #   外壳：顶栏 + <router-view> + 主题预渲染
+│       ├── index.html   #   外壳：顶栏 + <router-view> + 主题/语言预渲染
 │       ├── css/app.css  #   应用样式（Element Plus 主题变量映射 + 布局 + 对话区）
-│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）theme.js md.js（Markdown）views/（7 个视图组件）
+│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）theme.js i18n.js（中英词典）md.js（Markdown）views/（7 个视图组件）
 └── data/                # app.db（SQLite） media/（图片/视频）
 ```
 
-## 前端架构（Vue 3 + Element Plus，免构建）
+### 前端架构（Vue 3 + Element Plus，免构建）
 
 - **技术栈**：Vue 3（组合式 API，UMD 全局构建）+ vue-router（history 模式）+ Element Plus 2.x
-  （组件 / 暗色主题变量 / 中文 locale / 图标包），全部以 `<script>`/`<link>` 从 `static/vendor/` 本地加载，
+  （组件 / 暗色主题变量 / 中英文 locale / 图标包），全部以 `<script>`/`<link>` 从 `static/vendor/` 本地加载，
   **无需 Node / 构建工具**，改 `static/spa/` 下文件即生效。
 - **路由**：`/` 首页 · `/projects` 列表 · `/new` 新建 · `/project/:id` 详情 · `/configs` 配置 ·
   `/micro` 作品列表 · `/micro/:id(/:sid)` 作品对话。未知路径由 FastAPI 兜底返回 SPA 外壳，
@@ -125,8 +143,10 @@
 - **组件**：列表用 `el-table`+筛选+`el-pagination`，弹窗用 `el-dialog`，删除用 `el-popconfirm`，
   步骤用 `el-steps`，首图/章节图用 `el-image`（teleported 预览），图片放大用 `el-image-viewer`，
   表单用 `el-form`/`el-select`/`el-radio-group`；提示统一 `ElMessage`。
+- **国际化**：`static/spa/js/i18n.js` 内置完整中英词典（约 250 键/语言），`I18N.t(key, ...)` 按当前语言取词，
+  缺失键回退中文；语言存 `localStorage`，切换时重建应用实例以应用 Element Plus 语言包（`zh-cn.js` / `en.js`）。
 
-## 配置与存储（本次重构重点）
+### 配置与存储（本次重构重点）
 
 - **配置搬到页面**：LLM / DrawThings 的端点、模型、API Key 等都在 **⚙ 配置管理**（`/configs`）
   页面里新增、选用、删除，**不再使用配置文件**。支持**多套配置**，建项目时下拉选择。
@@ -137,15 +157,17 @@
 - **安全删除**：删除配置前会检查是否仍被项目或微创作作品选用，避免变成“孤儿”无法运行。
 - ⚠️ API Key 以**明文**存于本地 SQLite（本地单用户应用）；若部署为多用户服务请改用加密存储。
 
-## 页面风格（light / dark / system）
+### 页面风格与语言（light / dark / system · 中文 / EN）
 
-- 顶栏右侧三键切换：**☀ 浅色 / ⚙ 系统 / ☾ 深色**；选择存入 `localStorage`，
+- **主题**：顶栏右侧三键切换：**☀ 浅色 / ⚙ 系统 / ☾ 深色**；选择存入 `localStorage`，
   刷新/重开浏览器保持。`system` 时跟随系统 `prefers-color-scheme`（并实时响应切换）。
-- 首屏前用内联脚本先落 `data-theme` 与 `html.dark`，**无白屏闪烁**；主题同时驱动
+  首屏前用内联脚本先落 `data-theme` 与 `html.dark`，**无白屏闪烁**；主题同时驱动
   Element Plus 暗色模式（`static/vendor/element-plus/dark.css` 变量）与应用自定义 CSS 变量，
   组件（表格/弹窗/标签/输入）与布局底色整体联动。
+- **语言**：顶栏 **中文 / EN** 一键切换；选择存 `localStorage`，刷新保持。首屏前内联脚本先落
+  `<html lang>`，避免语言闪烁。切换时整个 Vue 应用重建，Element Plus 组件文案随之刷新。
 
-## 性能优化
+### 性能优化
 
 - **SQLite WAL 模式**：读写不互斥，`synchronous=NORMAL` 减少 fsync，`busy_timeout` 抗锁竞争。
 - **常用索引**：`chapters.project_id`、`projects.status/kind/created_at`。
@@ -155,7 +177,7 @@
 - **图片懒加载**：章节图 `loading="lazy"`；列表/作品页按需拉取 JSON，媒体不随列表下发。
 - **本地响应**：API 均为本地调用，页面数据毫秒级返回。
 
-## 为什么继续用 SQLite（而非换成 Postgres/MySQL）
+### 为什么继续用 SQLite（而非换成 Postgres/MySQL）
 
 本机单用户应用、数据量小（配置/项目/章节数百行级）、媒体在磁盘：
 - SQLite 零运维、零网络跳，WAL 下并发读 + 串行写完全够用，**比 client-server 数据库更快**（少一次 socket 往返）。
@@ -163,7 +185,7 @@
   反而多一个要维护的服务与连接管理。故保留 SQLite，并用 WAL + 索引把它的性能吃满。
 - 将来若真要多用户服务化，再迁移 Postgres（SQLAlchemy 层已抽象，换 `DATABASE_URL` 即可）。
 
-## 快速开始
+### 快速开始
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -175,7 +197,7 @@ python main.py                # 访问 http://127.0.0.1:8010
 > 若遇到 SSL 证书校验失败（macOS Python 常见），装包时加：
 > `SSL_CERT_FILE=/etc/ssl/cert.pem pip install -r requirements.txt`
 
-## 环境变量（见 .env.example）
+### 环境变量（见 .env.example）
 
 > 配置项已迁到页面管理，环境变量仅保留数据目录。
 
@@ -183,7 +205,7 @@ python main.py                # 访问 http://127.0.0.1:8010
 |------|------|------|
 | `DATA_DIR` | 数据库与媒体文件存放目录 | `./data` |
 
-## 运行前提（真实端点）
+### 运行前提（真实端点）
 
 本应用直接调用真实服务，无内置模拟模式：
 
@@ -192,13 +214,13 @@ python main.py                # 访问 http://127.0.0.1:8010
 2. **Draw Things**：Mac 上运行 Draw Things app，开启 HTTP 服务器（见下节），
    在 **⚙ 配置管理** 里创建 DrawThings 配置（出图/出视频由 app 里加载的模型决定）。
 
-端点未启动时，对应步骤会在项目页显示**友好错误提示**（如连接失败、未开启服务等），
+端点未启动时，对应步骤会在项目页显示**友好错误提示**（如连接失败、未开启服务等，按语言本地化），
 修复后重新点该步骤即可，不影响已生成内容。
 
 > 系统代理（Clash 等）：本地回环端点（127.0.0.1 / localhost）自动**直连、不走系统代理**
 > （系统代理常把 127.* 转到远端导致 502）；云端 LLM 端点保留系统代理设置。
 
-## 接入真实 Draw Things
+### 接入真实 Draw Things
 
 使用 Draw Things app 内置 **HTTP API**（A1111 / SD-WebUI 兼容，图、视频都走这条），
 协议字段已按 `drawthingsai/Draw-Things-community` 源码逐一对齐（2026-09）。
@@ -234,3 +256,250 @@ python main.py                # 访问 http://127.0.0.1:8010
 
 > 不使用 gRPC（ImageGenerationService）：app 的 gRPC 服务收到生成请求会闪退，
 > 本应用已移除 gRPC 支持，app 内也请只开启 HTTP 服务器。
+
+---
+
+## English Documentation
+
+### Overview
+
+A local, all-in-one app: **FastAPI (JSON API + SSE) backend + a Vue 3 / Element Plus single-page frontend (SPA)**.
+The frontend uses **local, build-free vendor files** (Vue / vue-router / Element Plus are all downloaded into `static/vendor/` and loaded as UMD),
+so it runs fully offline; FastAPI falls back to serving the SPA shell, so refreshing on any route works (history routing).
+
+Start from **one sentence** and run it through a single pipeline to produce a **continuous comic** or a **continuous short drama**:
+
+> one sentence → set length → overall arc → chapters → script → per-chapter generation
+
+The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
+Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent.
+
+The UI **supports both Chinese and English**; toggle with one click in the top bar (frontend `I18N` switch + the backend localizes error messages via `Accept-Language`).
+
+### The two features
+
+| Feature | Path | Output | Continuity reference |
+|---------|------|--------|----------------------|
+| Comic | Continuous image generation | one image per chapter | ch.1 = first image; the rest = the previous image |
+| Short drama | Continuous video generation | one clip per chapter | ch.1 = first image (first frame); the rest = the last frame of the previous clip |
+
+### Home (/)
+
+- **Brand area**: platform name (Drawthings Studio) + a one-line value proposition + the primary CTAs (Enter Studio / ✨ Quick Create).
+- **Two feature entries**: the comic path (continuous images) and the drama path (continuous video), each explaining its continuity strategy.
+- **Pipeline explainer**: idea → length → arc → chapters → script → generate, shown as a six-step flow.
+
+### My Creations (list page /projects)
+
+- **Management**: each table row can be **opened / renamed / deleted** (delete has a second confirmation); the project page header also has "Delete this project".
+  Deleting also removes all chapter records and the generated image/video files.
+- **Filters**: by type (comic/drama), status, sort (newest/oldest), and page size (10/20/50).
+- **Info**: type tag, title/idea, status tag, chapter progress (set/total), first-image thumbnail (click to preview), created date;
+  the toolbar shows the total count and a "＋ New Project" dialog (the same form component as the /new page).
+
+### Creation control (project page)
+
+- **First image**: the project page lets you **upload a first image** or **generate one from a prompt** (leave the prompt empty and the LLM writes one from the idea + style).
+  The first image is the reference for chapter 1 (comic = img2img reference; drama = the first video frame),
+  and serves as the character/style baseline for the whole work during scripting (visible to a multimodal LLM).
+- **Style selection (with custom)**: when creating a project, pick a preset style (Japanese manga / Chinese ink wash / chibi /
+  realistic cinematic / Pixar 3D / cyberpunk) or choose "Custom…" and type any description;
+  the style carries through the length/arc/chapter/script stages, and a user-specified style takes priority over the LLM's recommendation.
+- **Overall route control**: after the length is set, the app first generates an **overall story arc** (beginning → development → climax → ending).
+  The arc can be **edited directly** on the project page (to change the story direction); after editing, click "Rebuild chapters from arc" to re-plan chapters;
+  you can also "Regenerate arc". Chapter splitting strictly follows the arc's rhythm.
+
+### Quick Create (/micro, work → independent sessions)
+
+A lightweight, no-project creation desk (top bar "✨ Quick Create") — **a Quick Create work contains multiple independent sessions**, with persisted history:
+
+- **Three-level structure** (same idea as Studio's project→chapters):
+  - `/micro` **work list page**: card grid (open/delete), paginated 10 per page, sorted by most recently active;
+    "＋ New work" opens a dialog to create one (work title / LLM / DrawThings).
+  - `/micro/{id}` and `/micro/{id}/{sid}` are the **same work page** (left/right layout, no need to split; auto-locates the most recent session when one exists):
+    **entering a work opens its most recently updated session** (empty state shown when there are none);
+    **left side** lists the work's independent sessions (open/rename/delete + "＋ New session" dialog, selected one highlighted),
+    and can be **collapsed/expanded** (collapse via «, expand via the left-edge vertical tab, state remembered per work);
+    **right side** is the current session's chat; a work-options dialog (applies to all sessions) + return to work list / delete work,
+    with each session's history and context fully independent.
+- **Chat history persisted**: user messages and assistant replies (including generated media and prompts) are stored in SQLite
+  (`micro_works` / `micro_sessions` / `micro_messages`), so they survive refreshes; multi-turn context is pulled from the database (last 20 messages).
+  Untitled sessions/works are auto-named from the first user message; old databases (the legacy per-session config structure) are migrated on startup.
+- **Unified chat + streaming output (SSE)**: multi-turn conversation with the chosen LLM (ideation / scripting / prompts), with replies displayed token by token.
+- **Auto-generation via function calling**: when an image/video is needed, the model **auto-calls the `generate_media` tool**
+  (distilling a detailed English prompt from the context), then calls Draw Things to produce a single image/video;
+  the result is embedded directly into the chat bubble (with the prompt).
+- **User image attachments**: when the chosen LLM supports vision (`supports_vision`), the input box lets you click 📎 to upload, **paste**, or **drag**
+  images (up to 4 per message; you can send images without text). Attachments are stored with the message and sent back to the model as part of the multi-turn context.
+  Non-vision models do not show this entry.
+- **Markdown rendering**: assistant replies are rendered as Markdown (headings / nested lists / tables / code blocks / quotes, etc.,
+  escaped first then converted, to prevent XSS); code blocks support one-click copy, wide tables scroll horizontally; opening a session auto-scrolls to the latest message.
+- **Work options**: LLM config / Draw Things config (optional = chat only); saved with the work
+  (shared by all its sessions) and editable on the work page.
+  The output type (image/video) **needs no selection**: each generation auto-detects from the model currently loaded in the app
+  (model names containing svd/wan/i2v and other video keywords → video, otherwise image).
+- **Deleting a session/work** also cleans up its generated media files and user attachments.
+
+The backend uses **Pydantic AI v2** uniformly (`services/agent.py`): the pipeline stages (length/chapters/script)
+use structured output (Pydantic models), while Quick Create uses streaming + tool calls, all over the OpenAI-compatible protocol.
+
+### Configuration fields
+
+- **LLM config**: `supports_vision` (image input) = supports image input (multimodal; can reference the previous frame/first image during scripting) / text-only (no reference images).
+- **Draw Things config**: no model type (image/video output is decided by the model currently loaded in the app,
+  and any project/work can use any Draw Things config).
+  Personalized params: `max_side` (max resolution, longest side only; the exact resolution is decided by the agent per scene,
+  downscaled proportionally if the longest side exceeds the cap) and `max_frames` (max video frame cap;
+  actual frames = min(app current frames, cap)) — **0 = unlimited / follow the app's current value**.
+  The model cannot be specified; it always follows the app's current selection.
+
+### Directory structure
+
+```
+.
+├── main.py              # FastAPI entry + /api routes + SSE + SPA shell fallback (db session injected per request)
+├── config.py            # keeps only the data directory (reads env DATA_DIR, optional)
+├── db.py                # SQLAlchemy engine / session / init_db (incl. legacy-structure migration)
+├── models.py            # ORM models: LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
+├── config_store.py      # config CRUD (with "referenced by a project/work" protection before delete)
+├── i18n.py              # backend zh/en localization (Accept-Language → zh|en + L() text helper)
+├── requirements.txt
+├── services/
+│   ├── agent.py         # Pydantic AI v2 unified agent layer (model construction / structured output / message history)
+│   ├── drawthings.py    # Draw Things client (configurable; HTTP protocol)
+│   └── pipeline.py      # pipeline orchestration (builds the agent at runtime from the project's config)
+├── static/
+│   ├── vendor/          # frontend deps (downloaded locally, build-free/offline): vue / vue-router / element-plus (js+css+dark+zh-cn+en) / icons
+│   └── spa/             # single-page frontend (UMD, no bundler)
+│       ├── index.html   #   shell: top bar + <router-view> + pre-paint theme/lang
+│       ├── css/app.css  #   app styles (Element Plus theme variable mapping + layout + chat area)
+│       └── js/          #   app.js (entry/router) api.js (fetch+SSE) theme.js i18n.js (zh/en dict) md.js (Markdown) views/ (7 view components)
+└── data/                # app.db (SQLite) media/ (images/videos)
+```
+
+### Frontend architecture (Vue 3 + Element Plus, build-free)
+
+- **Stack**: Vue 3 (Composition API, UMD global build) + vue-router (history mode) + Element Plus 2.x
+  (components / dark theme variables / zh & en locales / icon package), all loaded locally from `static/vendor/` via `<script>`/`<link>`,
+  **no Node / build tooling required** — editing files under `static/spa/` takes effect immediately.
+- **Routes**: `/` home · `/projects` list · `/new` create · `/project/:id` detail · `/configs` settings ·
+  `/micro` work list · `/micro/:id(/:sid)` work chat. Unknown paths fall back to the SPA shell from FastAPI,
+  so deep-link refreshes work (the frontend router re-matches; unmatched routes redirect home).
+- **Data**: every page calls `/api/*` through `static/spa/js/api.js` (fetch wrapper + SSE parser);
+  the chat page reads SSE via a fetch stream (`POST /api/micro/{id}/{sid}/chat`), updating bubbles/media/status per event.
+- **Components**: lists use `el-table`+filters+`el-pagination`, dialogs use `el-dialog`, deletes use `el-popconfirm`,
+  steps use `el-steps`, first/chapter images use `el-image` (teleported preview), image zoom uses `el-image-viewer`,
+  forms use `el-form`/`el-select`/`el-radio-group`; toasts use `ElMessage` uniformly.
+- **Internationalization**: `static/spa/js/i18n.js` ships a full zh/en dictionary (~250 keys per language); `I18N.t(key, ...)`
+  picks the string for the current language, falling back to Chinese for missing keys; the language is stored in `localStorage`,
+  and switching rebuilds the app instance so the Element Plus locale (`zh-cn.js` / `en.js`) is applied.
+
+### Configuration & storage (the focus of this refactor)
+
+- **Configs moved to the UI**: the endpoint, model, API key, etc. for LLM / Draw Things are all added, selected, and deleted on the
+  **⚙ Settings** (`/configs`) page — **no config files are used**. **Multiple configs** are supported, chosen via a dropdown when creating a project.
+- **Storage**: structured data (configs / projects / chapters) uses **SQLite + SQLAlchemy ORM**;
+  media files (images/videos) still live in `data/media/`, with the database storing only path references.
+- **List pages**: Studio (/projects) supports **type / status / time filters** and **pagination** (10/20/50 per page);
+  Quick Create (/micro) paginates by most recently active (10 per page).
+- **Safe delete**: before deleting a config, the app checks whether it is still used by a project or Quick Create work, to avoid creating an orphan that can no longer run.
+- ⚠️ API Keys are stored in **plaintext** in local SQLite (a local single-user app); if you deploy it as a multi-user service, switch to encrypted storage.
+
+### Appearance & language (light / dark / system · Chinese / EN)
+
+- **Theme**: three buttons in the top bar: **☀ Light / ⚙ System / ☾ Dark**; the choice is stored in `localStorage`
+  and persists across refreshes/restarts. `system` follows the OS `prefers-color-scheme` (and reacts live to changes).
+  Before first paint, an inline script sets `data-theme` and `html.dark` first, **with no white flash**; the theme drives both
+  the Element Plus dark mode (`static/vendor/element-plus/dark.css` variables) and the app's custom CSS variables,
+  so components (tables/dialogs/tags/inputs) and layout colors all change together.
+- **Language**: **中文 / EN** toggle in the top bar; the choice is stored in `localStorage` and persists across refreshes.
+  An inline script sets `<html lang>` before first paint to avoid a language flash. On switch, the whole Vue app is rebuilt and Element Plus component text updates with it.
+
+### Performance
+
+- **SQLite WAL mode**: reads and writes don't block each other; `synchronous=NORMAL` reduces fsyncs; `busy_timeout` resists lock contention.
+- **Common indexes**: `chapters.project_id`, `projects.status/kind/created_at`.
+- **Response compression**: JSON/HTML/CSS/JS go through GZip (`GZipMiddleware`, only >500B is compressed).
+- **Static caching**: `/static/*` (vendor deps + SPA files) gets `Cache-Control: max-age=3600`;
+  the SPA shell returns `no-cache` (so path changes take effect immediately).
+- **Image lazy loading**: chapter images use `loading="lazy"`; list/work pages fetch JSON on demand; media is not bundled with lists.
+- **Local responsiveness**: all APIs are local calls, so page data returns in milliseconds.
+
+### Why keep SQLite (instead of switching to Postgres/MySQL)
+
+A local single-user app, small data (hundreds of rows for configs/projects/chapters), media on disk:
+- SQLite is zero-ops and zero network hops; under WAL, concurrent reads + serial writes are plenty, and it's **faster than a client-server database** (one fewer socket round trip).
+- Postgres/MySQL are only worth introducing when you need **multi-process/multi-machine writes, concurrent writes, very large tables, or row-level locking** — none of which this app needs, and it would add another service and connection management to maintain. So we keep SQLite and squeeze out its performance with WAL + indexes.
+- If it truly needs to become a multi-user service later, migrate to Postgres then (the SQLAlchemy layer is abstracted, so just change `DATABASE_URL`).
+
+### Quick start
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # only adjust the data directory if needed
+python main.py                # visit http://127.0.0.1:8010
+```
+
+> If you hit an SSL certificate verification failure (common on macOS Python), install with:
+> `SSL_CERT_FILE=/etc/ssl/cert.pem pip install -r requirements.txt`
+
+### Environment variables (see .env.example)
+
+> Config items have moved to the UI; the only remaining env variable is the data directory.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATA_DIR` | Directory for the database and media files | `./data` |
+
+### Prerequisites (real endpoints)
+
+This app calls real services directly; there is no built-in mock mode:
+
+1. **LLM**: any OpenAI-protocol endpoint (Ollama `http://127.0.0.1:11434/v1`, vLLM, cloud OpenAI, etc.);
+   add a config in **⚙ Settings**; check "image input" per model capability (multimodal / text-only).
+2. **Draw Things**: run the Draw Things app on the Mac and enable its HTTP server (see below);
+   create a Draw Things config in **⚙ Settings** (image/video output is decided by the model loaded in the app).
+
+When an endpoint is not running, the relevant step shows a **friendly error** on the project page (e.g. connection failed, service not enabled — localized per language);
+fix it and re-run that step; already-generated content is unaffected.
+
+> System proxy (Clash, etc.): local loopback endpoints (127.0.0.1 / localhost) **connect directly, bypassing the system proxy**
+> (proxies often forward 127.* to a remote host, causing 502); cloud LLM endpoints keep the system proxy settings.
+
+### Connecting to a real Draw Things
+
+Use the Draw Things app's built-in **HTTP API** (A1111 / SD-WebUI compatible; both images and video go through it).
+The protocol fields are aligned one-to-one with the `drawthingsai/Draw-Things-community` source (2026-09).
+
+Enable the HTTP server inside the Draw Things app; the port is whatever the app shows (e.g. `http://127.0.0.1:7860`). Endpoints:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/sdapi/v1/txt2img` | text-to-image |
+| POST | `/sdapi/v1/img2img` | image-to-image / video (with `init_images`) |
+| GET  | `/`, `/sdapi/v1/options` | returns the app's current parameter set (incl. `width`/`height`) |
+
+- Requests accept only these fields (**unknown fields are rejected with 422**):
+  `prompt, negative_prompt, model, width, height, steps, guidance_scale(=cfg_scale),
+  seed, sampler, batch_count(=n_iter), batch_size, strength(=denoising_strength),
+  restore_faces, init_images([base64 raw bytes])`,
+  plus for video: `num_frames, motion_scale, guiding_frame_noise, start_frame_guidance,
+  stage_2_steps, stage_2_guidance, stage_2_shift, compression_artifacts(h264/h265/jpeg/disabled)`.
+- `sampler` takes an enum abbreviation: `"DPM++ 2M Karras"` / `"Euler a"` / `"DDIM"` / `"UniPC"` / `"LCM"` …
+- Response: `{"images": ["<base64 raw bytes>", ...]}`.
+- **Note**: `img2img`'s `init_images` size must **exactly match** `width`/`height`,
+  or you get 422 — this app reads the current width/height from `/sdapi/v1/options` and resizes the reference image to that size automatically.
+
+Resolution is **decided by the agent during the scripting stage based on scene composition** (`ScriptOut.width/height`, multiples of 64),
+and passed to the client at generation time; the client caps it by the config's `max_side` (max resolution, longest side only)
+(downscaling the over-long side proportionally). In scenarios without an agent decision (e.g. Quick Create), only `prompt` (+ reference image) is sent;
+the remaining params are left empty = use the app's current settings; callers can also override via `params`.
+
+In **⚙ Settings → New config → Draw Things**, fill in the endpoint address (`http://host:port`);
+optionally set: max resolution (longest side only: unlimited / 512 / 768 / 1024) and
+max frame cap (video; actual frames = min(app current frames, cap))
+(**0 = follow the app's current value**). The model cannot be specified; it always follows the model currently selected in the app.
+
+> gRPC (ImageGenerationService) is not used: the app's gRPC service crashes when it receives a generation request;
+> this app has removed gRPC support, so enable only the HTTP server in the app.

@@ -8,60 +8,60 @@ Views.microWork = {
       <div class="mc-head">
         <div>
           <el-tag size="small" :type="tagType" effect="plain">{{ tagLabel }}</el-tag>
-          <h1 class="ptitle">{{ data.work.title || '（未命名作品）' }}</h1>
-          <p class="meta muted">LLM：{{ data.work.llm_name }} · DrawThings：{{ data.work.dt_name }}</p>
+          <h1 class="ptitle">{{ data.work.title || I18N.t('mw.unnamedWork') }}</h1>
+          <p class="meta muted">{{ I18N.t('p.metaLlm', data.work.llm_name) }} · {{ I18N.t('p.metaDt', data.work.dt_name || I18N.t('mw.dtNone')) }}</p>
         </div>
         <div class="proj-head-actions">
-          <el-button @click="openCfg">⚙ 作品选项</el-button>
-          <el-button @click="router.push('/micro')">← 返回</el-button>
-          <el-popconfirm title="删除该作品？全部会话/消息与已生成的媒体将一并删除。" @confirm="delWork">
-            <template #reference><el-button type="danger" plain>🗑 删除</el-button></template>
+          <el-button @click="openCfg">{{ I18N.t('mw.options') }}</el-button>
+          <el-button @click="router.push('/micro')">{{ I18N.t('p.back') }}</el-button>
+          <el-popconfirm :title="I18N.t('mw.delWorkConfirm')" @confirm="delWork">
+            <template #reference><el-button type="danger" plain>{{ I18N.t('mw.delWork') }}</el-button></template>
           </el-popconfirm>
         </div>
       </div>
 
       <div class="mc-body" :class="{ 'side-hidden': sideHidden }">
-        <button v-if="sideHidden" type="button" class="mc-expand" title="展开会话列表" @click="setSide(false)">‹ 会话</button>
+        <button v-if="sideHidden" type="button" class="mc-expand" :title="I18N.t('mw.expandTitle')" @click="setSide(false)">{{ I18N.t('mw.expand') }}</button>
         <aside class="mc-side" v-show="!sideHidden">
           <div class="mc-side-head">
-            <b>会话（{{ data.sessions.length }}）</b>
+            <b>{{ I18N.t('mw.sessions', data.sessions.length) }}</b>
             <div style="display: flex; gap: 4px;">
-              <el-button size="small" type="primary" plain @click="openSess">＋ 新建</el-button>
-              <el-button size="small" text title="收起" @click="setSide(true)">«</el-button>
+              <el-button size="small" type="primary" plain @click="openSess">{{ I18N.t('mw.new') }}</el-button>
+              <el-button size="small" text :title="I18N.t('mw.collapse')" @click="setSide(true)">«</el-button>
             </div>
           </div>
           <div class="mc-sess-list">
             <div v-for="s in data.sessions" :key="s.id" class="mc-sess" :class="{ active: s.id === sid }" @click="pick(s.id)">
-              <div class="ms-title">{{ s.title || '（新会话）' }}</div>
-              <div class="ms-meta muted">{{ s.created_at.slice(0, 10) }} · {{ s.msg_count }} 条消息</div>
+              <div class="ms-title">{{ s.title || I18N.t('mw.newSession') }}</div>
+              <div class="ms-meta muted">{{ s.created_at.slice(0, 10) }} · {{ I18N.t('mw.msgs', s.msg_count) }}</div>
               <div class="ms-actions">
-                <el-button size="small" text :icon="EditPen" @click.stop="askRename(s)">重命名</el-button>
-                <el-popconfirm title="删除该会话？消息与媒体将一并删除。" @confirm="delSess(s)">
+                <el-button size="small" text :icon="EditPen" @click.stop="askRename(s)">{{ I18N.t('mw.rename') }}</el-button>
+                <el-popconfirm :title="I18N.t('mw.delSessConfirm')" @confirm="delSess(s)">
                   <template #reference>
-                    <el-button size="small" text type="danger" :icon="Delete" @click.stop>删除</el-button>
+                    <el-button size="small" text type="danger" :icon="Delete" @click.stop>{{ I18N.t('mw.delete') }}</el-button>
                   </template>
                 </el-popconfirm>
               </div>
             </div>
-            <el-empty v-if="!data.sessions.length" description="暂无会话，点「＋ 新建」" :image-size="48" />
+            <el-empty v-if="!data.sessions.length" :description="I18N.t('mw.noSessions')" :image-size="48" />
           </div>
         </aside>
 
         <section class="mc-main">
           <div class="mc-chat" ref="chatBox">
-            <el-empty v-if="!hasSession" description="暂无会话。点左上「＋ 新建」开始对话。" :image-size="72" />
+            <el-empty v-if="!hasSession" :description="I18N.t('mw.noSessionEmpty')" :image-size="72" />
             <template v-else>
               <div v-for="m in msgs" :key="m.index" class="msg" :class="m.role">
                 <div v-if="m.role === 'user'">
-                  <span class="msg-text">{{ m.content || '（图片）' }}</span>
+                  <span class="msg-text">{{ m.content || I18N.t('mw.image') }}</span>
                   <div class="msg-imgs" v-if="m.images.length">
-                    <img v-for="(u, i) in m.images" :key="i" :src="u" alt="附图" @click="openLb(m.images, i)">
+                    <img v-for="(u, i) in m.images" :key="i" :src="u" :alt="I18N.t('mw.attachAlt')" @click="openLb(m.images, i)">
                   </div>
                 </div>
                 <div v-else>
                   <div class="msg-media" v-if="m.media_url">
                     <video v-if="isMediaVideo(m.media_url)" :src="m.media_url" controls preload="metadata"></video>
-                    <img v-else :src="m.media_url" alt="生成结果" @click="openLb([m.media_url], 0)">
+                    <img v-else :src="m.media_url" :alt="I18N.t('mw.resultAlt')" @click="openLb([m.media_url], 0)">
                     <div class="media-cap" v-if="m.prompt">{{ m.prompt }}</div>
                   </div>
                   <div class="md" v-html="renderMd(m.content)"></div>
@@ -75,7 +75,7 @@ Views.microWork = {
                 </div>
                 <div v-for="(md2, i) in stream.media" :key="'m' + i" class="msg-media">
                   <video v-if="md2.media === 'video'" :src="md2.url" controls preload="metadata"></video>
-                  <img v-else :src="md2.url" alt="生成结果" @click="openLb([md2.url], 0)">
+                  <img v-else :src="md2.url" :alt="I18N.t('mw.resultAlt')" @click="openLb([md2.url], 0)">
                   <div class="media-cap" v-if="md2.prompt">{{ md2.prompt }}</div>
                 </div>
                 <div class="md" v-html="streamHtml"></div>
@@ -88,62 +88,62 @@ Views.microWork = {
                @dragover.prevent="drag = true" @dragleave="drag = false" @drop.prevent="onDrop">
             <div class="mc-previews" v-if="attached.length">
               <div v-for="(d, i) in attached" :key="i" class="mc-prev">
-                <img :src="d" alt="附图">
-                <button type="button" class="mc-prev-x" title="移除" @click="attached.splice(i, 1)">×</button>
+                <img :src="d" :alt="I18N.t('mw.attachAlt')">
+                <button type="button" class="mc-prev-x" :title="I18N.t('mw.delete')" @click="attached.splice(i, 1)">×</button>
               </div>
             </div>
             <div class="mc-inputrow">
-              <button v-if="data.work.vision" type="button" class="mc-attach" title="附图（仅视觉模型；可粘贴 / 拖拽，最多 4 张）"
+              <button v-if="data.work.vision" type="button" class="mc-attach" :title="I18N.t('mw.attachTip')"
                       @click="fileInput.click()">🖼</button>
               <input type="file" ref="fileInput" accept="image/*" multiple hidden @change="onFiles">
               <textarea v-model="input" class="mc-input" rows="1" :placeholder="ph"
                         @keydown.enter.exact="onEnter" @input="autoResize" @paste="onPaste"></textarea>
-              <el-button type="primary" :disabled="busy" @click="send">发送</el-button>
+              <el-button type="primary" :disabled="busy" @click="send">{{ I18N.t('mw.send') }}</el-button>
             </div>
             <div class="mc-status">{{ status }}</div>
           </div>
         </section>
       </div>
 
-      <el-dialog v-model="sessDlg" title="新建会话" width="440px">
-        <el-input v-model="sessTitle" placeholder="标题（可选，留空自动取首条消息）" maxlength="200" />
+      <el-dialog v-model="sessDlg" :title="I18N.t('mw.dlgSess')" width="440px">
+        <el-input v-model="sessTitle" :placeholder="I18N.t('mw.sessTitlePh')" maxlength="200" />
         <template #footer>
-          <el-button @click="sessDlg = false">取消</el-button>
-          <el-button type="primary" @click="createSess">创建</el-button>
+          <el-button @click="sessDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="createSess">{{ I18N.t('common.create') }}</el-button>
         </template>
       </el-dialog>
 
-      <el-dialog v-model="renameDlg" title="重命名会话" width="440px">
+      <el-dialog v-model="renameDlg" :title="I18N.t('mw.dlgRename')" width="440px">
         <el-input v-model="renameTitle" maxlength="200" />
         <template #footer>
-          <el-button @click="renameDlg = false">取消</el-button>
-          <el-button type="primary" @click="doRename">保存</el-button>
+          <el-button @click="renameDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="doRename">{{ I18N.t('common.save') }}</el-button>
         </template>
       </el-dialog>
 
-      <el-dialog v-model="cfgDlg" title="作品选项" width="560px">
-        <p class="hint">作用于该作品的全部会话。</p>
+      <el-dialog v-model="cfgDlg" :title="I18N.t('mw.dlgCfg')" width="560px">
+        <p class="hint">{{ I18N.t('mw.cfgHint') }}</p>
         <el-form label-position="top">
-          <el-form-item label="标题">
-            <el-input v-model="cfg.title" maxlength="200" placeholder="留空自动取首条消息" />
+          <el-form-item :label="I18N.t('mc.fTitle')">
+            <el-input v-model="cfg.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
           </el-form-item>
-          <el-form-item label="LLM 配置">
+          <el-form-item :label="I18N.t('mc.llm')">
             <el-select v-model="cfg.llm" style="width: 100%">
               <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
-                         :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / 纯文本' : '') + '）'" />
+                         :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / ' + I18N.t('cfg.textOnly') : '') + '）'" />
             </el-select>
           </el-form-item>
-          <el-form-item label="DrawThings 配置">
+          <el-form-item :label="I18N.t('mc.dt')">
             <el-select v-model="cfg.dt" clearable style="width: 100%">
-              <el-option value="" label="不选（纯对话，不出媒体）" />
+              <el-option value="" :label="I18N.t('mw.dtNone')" />
               <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
             </el-select>
-            <div class="hint">产出类型（图像/视频）由 app 当前加载的模型自动判断，无需选择。</div>
+            <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
           </el-form-item>
         </el-form>
         <template #footer>
-          <el-button @click="cfgDlg = false">取消</el-button>
-          <el-button type="primary" :loading="cfgBusy" @click="saveCfg">保存</el-button>
+          <el-button @click="cfgDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
         </template>
       </el-dialog>
 
@@ -201,10 +201,11 @@ Views.microWork = {
     }
     const tagLabel = computed(() => {
       if (!data.value) return '';
-      return (data.value.work.dt_name && data.value.work.dt_name !== '不选（纯对话）') ? '生成' : '纯对话';
+      return data.value.work.dt_name ? I18N.t('mw.tagGen') : I18N.t('mw.tagChat');
     });
-    const tagType = computed(() => tagLabel.value === '纯对话' ? 'info' : 'primary');
-    const ph = computed(() => '对话…（Enter 发送，Shift+Enter 换行' + (data.value?.work.vision ? '，可附图）' : '）'));
+    const tagType = computed(() => tagLabel.value === I18N.t('mw.tagChat') ? 'info' : 'primary');
+    const ph = computed(() => (data.value?.work.vision ? I18N.t('mw.phVision') : I18N.t('mw.phPlain')));
+    const mwDtNone = computed(() => I18N.t('mw.dtNone'));
 
     async function load() {
       try {
@@ -261,7 +262,7 @@ Views.microWork = {
       try {
         await API.post(`/api/micro/${props.id}/${renameTarget.value.id}/rename`, { title: renameTitle.value });
         renameDlg.value = false;
-        ElementPlus.ElMessage.success('已重命名');
+        ElementPlus.ElMessage.success(I18N.t('mw.renamed'));
         load();
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -270,7 +271,7 @@ Views.microWork = {
     async function delSess(s) {
       try {
         await API.post(`/api/micro/${props.id}/${s.id}/delete`);
-        ElementPlus.ElMessage.success('已删除会话');
+        ElementPlus.ElMessage.success(I18N.t('mw.sessDeleted'));
         if (s.id === props.sid) {
           const rest = data.value.sessions.filter(x => x.id !== s.id);
           if (rest.length) router.replace(`/micro/${props.id}/${rest[0].id}`);
@@ -296,7 +297,7 @@ Views.microWork = {
           title: cfg.title, llm_config_id: cfg.llm,
           drawthings_config_id: cfg.dt,
         });
-        ElementPlus.ElMessage.success('已保存，作用于全部会话');
+        ElementPlus.ElMessage.success(I18N.t('mw.cfgSaved'));
         cfgDlg.value = false;
         load();
       } catch (e) {
@@ -309,7 +310,7 @@ Views.microWork = {
     async function delWork() {
       try {
         await API.post(`/api/micro/${props.id}/delete`);
-        ElementPlus.ElMessage.success('已删除作品');
+        ElementPlus.ElMessage.success(I18N.t('mw.workDeleted'));
         router.push('/micro');
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -320,7 +321,7 @@ Views.microWork = {
     function addFiles(files) {
       for (const f of files) {
         if (!f.type || !f.type.startsWith('image/')) continue;
-        if (attached.value.length >= 4) { status.value = '最多附带 4 张图片'; break; }
+        if (attached.value.length >= 4) { status.value = I18N.t('mw.maxAttach'); break; }
         const r = new FileReader();
         r.onload = () => { attached.value.push(r.result); };
         r.readAsDataURL(f);
@@ -390,7 +391,7 @@ Views.microWork = {
       autoResize();
       startTimer();
 
-      msgs.value.push({ index: Date.now(), role: 'user', content: message || '（图片）',
+      msgs.value.push({ index: Date.now(), role: 'user', content: message || I18N.t('mw.image'),
                         images: shot, media_url: '' });
       streaming.value = true;
       stream.text = '';
@@ -407,27 +408,27 @@ Views.microWork = {
             status.value = '';
             scrollBottom();
           } else if (ev === 'tool') {
-            stream.chips.push({ text: d.label || '生成中…', err: false, prompt: d.prompt || '' });
+            stream.chips.push({ text: d.label || I18N.t('mw.saving'), err: false, prompt: d.prompt || '' });
             status.value = '';
           } else if (ev === 'media') {
             stream.media.push(d);
             scrollBottom();
           } else if (ev === 'tool_error') {
-            stream.chips.push({ text: '⚠ ' + (d.message || '生成失败'), err: true, prompt: d.prompt || '' });
+            stream.chips.push({ text: '⚠ ' + (d.message || I18N.t('mw.genFail')), err: true, prompt: d.prompt || '' });
           } else if (ev === 'error') {
             failed = true;
-            stream.chips.push({ text: '⚠ ' + (d.message || '出错了'), err: true });
+            stream.chips.push({ text: '⚠ ' + (d.message || I18N.t('mw.err')), err: true });
           }
         });
         if (failed) {
-          status.value = '出错了，可修改后重试';
+          status.value = I18N.t('mw.errRetry');
         } else {
           // 落库完成：重新拉取持久化历史（含左侧列表/标题同步）
           await load();
         }
       } catch (e) {
         stream.chips.push({ text: '⚠ ' + e.message, err: true });
-        status.value = '出错了，可修改后重试';
+        status.value = I18N.t('mw.errRetry');
       } finally {
         stopTimer();
         busy.value = false;
@@ -442,8 +443,8 @@ Views.microWork = {
       const code = btn.parentElement.querySelector('code');
       if (code && navigator.clipboard) {
         navigator.clipboard.writeText(code.textContent).then(() => {
-          btn.textContent = '已复制';
-          setTimeout(() => { btn.textContent = '复制'; }, 1500);
+          btn.textContent = I18N.t('common.copied');
+          setTimeout(() => { btn.textContent = I18N.t('common.copy'); }, 1500);
         });
       }
     }
@@ -469,7 +470,7 @@ Views.microWork = {
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
       cfgDlg, cfgBusy, cfg, openCfg, saveCfg, delWork,
       lb, openLb, input, attached, busy, status, drag, streaming, stream, streamHtml,
-      isMediaVideo, tagLabel, tagType, ph,
+      isMediaVideo, tagLabel, tagType, ph, mwDtNone,
       chatBox, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter, send,
       streamElapsed,
       renderMd, router, pick, openSess,

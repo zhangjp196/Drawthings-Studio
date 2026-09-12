@@ -6,97 +6,100 @@ Views.projects = {
     <div class="page">
       <div class="list-toolbar">
         <div class="list-head">
-          <h1>创作中心</h1>
-          <span class="muted">共 {{ total }} 个</span>
+          <h1>{{ I18N.t('proj.title') }}</h1>
+          <span class="muted">{{ I18N.t('proj.total', total) }}</span>
         </div>
-        <el-button type="primary" @click="newDlg = true">＋ 新建创作</el-button>
+        <el-button type="primary" @click="newDlg = true">{{ I18N.t('proj.new') }}</el-button>
       </div>
 
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
-          <el-select v-model="f.kind" placeholder="类型" clearable style="width: 120px" @change="apply">
-            <el-option label="全部" value="" />
-            <el-option label="漫画" value="comic" />
-            <el-option label="短剧" value="drama" />
+          <el-select v-model="f.kind" :placeholder="I18N.t('proj.type')" clearable style="width: 120px" @change="apply">
+            <el-option :label="I18N.t('proj.all')" value="" />
+            <el-option :label="I18N.t('proj.comic')" value="comic" />
+            <el-option :label="I18N.t('proj.drama')" value="drama" />
           </el-select>
-          <el-select v-model="f.status" placeholder="状态" clearable style="width: 140px" @change="apply">
-            <el-option label="全部" value="" />
+          <el-select v-model="f.status" :placeholder="I18N.t('proj.status')" clearable style="width: 140px" @change="apply">
+            <el-option :label="I18N.t('proj.all')" value="" />
             <el-option v-for="(v, k) in statusLabels" :key="k" :label="v" :value="k" />
           </el-select>
           <el-select v-model="f.sort" style="width: 130px" @change="apply">
-            <el-option label="最新在前" value="desc" />
-            <el-option label="最早在前" value="asc" />
+            <el-option :label="I18N.t('proj.sortNew')" value="desc" />
+            <el-option :label="I18N.t('proj.sortOld')" value="asc" />
           </el-select>
           <el-select v-model="f.size" style="width: 110px" @change="apply">
-            <el-option v-for="n in [10, 20, 50]" :key="n" :label="n + ' / 页'" :value="n" />
+            <el-option v-for="n in [10, 20, 50]" :key="n" :label="I18N.t('proj.perPage', n)" :value="n" />
           </el-select>
-          <el-button @click="reset">重置</el-button>
+          <el-button @click="reset">{{ I18N.t('proj.reset') }}</el-button>
         </div>
       </el-card>
 
       <el-table v-if="rows.length" :data="rows" style="width: 100%;">
-        <el-table-column label="类型" width="90">
+        <el-table-column :label="I18N.t('proj.type')" width="90">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.kind === 'comic' ? 'primary' : 'success'" effect="light">{{ row.kind === 'comic' ? '漫画' : '短剧' }}</el-tag>
+            <el-tag size="small" :type="row.kind === 'comic' ? 'primary' : 'success'" effect="light">{{ row.kind === 'comic' ? I18N.t('proj.comic') : I18N.t('proj.drama') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="标题 / 主题" min-width="240">
+        <el-table-column :label="I18N.t('proj.colTitle')" min-width="240">
           <template #default="{ row }">
             <el-link type="primary" :underline="false" @click="open(row)">{{ row.title || row.origin }}</el-link>
             <div class="muted small" v-if="row.title && row.origin">{{ row.origin }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column :label="I18N.t('proj.status')" width="110">
           <template #default="{ row }">
             <el-tag size="small" :type="statusTag(row.status)" effect="light">{{ statusLabels[row.status] || row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="章节" width="90" align="center">
+        <el-table-column :label="I18N.t('proj.colChapters')" width="90" align="center">
           <template #default="{ row }">{{ row.chapter_count }}{{ row.total_chapters ? ' / ' + row.total_chapters : '' }}</template>
         </el-table-column>
-        <el-table-column label="首图" width="100">
+        <el-table-column :label="I18N.t('proj.colFirst')" width="100">
           <template #default="{ row }">
             <el-image v-if="row.first_image_url" :src="row.first_image_url" :preview-src-list="[row.first_image_url]"
                       fit="cover" class="thumb" :preview-teleported="true" />
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="创建" width="110">
+        <el-table-column :label="I18N.t('proj.colCreated')" width="110">
           <template #default="{ row }">{{ row.created_at.slice(0, 10) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column :label="I18N.t('proj.colActions')" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="open(row)">打开</el-button>
-            <el-button size="small" @click="askRename(row)">重命名</el-button>
-            <el-popconfirm title="删除该创作？全部章节与已生成的图/视频将一并删除，不可恢复。" @confirm="del(row)">
-              <template #reference><el-button size="small" type="danger" plain>删除</el-button></template>
+            <el-button size="small" @click="open(row)">{{ I18N.t('proj.open') }}</el-button>
+            <el-button size="small" @click="askRename(row)">{{ I18N.t('proj.rename') }}</el-button>
+            <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del(row)">
+              <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-else description="还没有创作。点击「＋ 新建创作」，从一句话开始。" />
+      <el-empty v-else :description="I18N.t('proj.empty')" />
 
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
                      :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
-      <el-dialog v-model="newDlg" title="新建创作" width="580px">
+      <el-dialog v-model="newDlg" :title="I18N.t('proj.newDlg')" width="580px">
         <create-form @created="created" />
       </el-dialog>
 
-      <el-dialog v-model="renameDlg" title="重命名创作" width="440px">
-        <el-input v-model="renameTitle" placeholder="新标题" maxlength="200" />
+      <el-dialog v-model="renameDlg" :title="I18N.t('proj.renameDlg')" width="440px">
+        <el-input v-model="renameTitle" :placeholder="I18N.t('proj.newTitlePh')" maxlength="200" />
         <template #footer>
-          <el-button @click="renameDlg = false">取消</el-button>
-          <el-button type="primary" :loading="busy" @click="doRename">保存</el-button>
+          <el-button @click="renameDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="busy" @click="doRename">{{ I18N.t('common.save') }}</el-button>
         </template>
       </el-dialog>
     </div>
   `,
   setup() {
-    const statusLabels = {
-      planning: '规划中', scoped: '篇幅已定', arced: '总纲已定',
-      chaptered: '章节已定', scripted: '剧本已定', done: '已完成',
-    };
+    const statusLabels = computed(() => {
+      const t = I18N.t;
+      return {
+        planning: t('proj.status.planning'), scoped: t('proj.status.scoped'), arced: t('proj.status.arced'),
+        chaptered: t('proj.status.chaptered'), scripted: t('proj.status.scripted'), done: t('proj.status.done'),
+      };
+    });
     const f = reactive({ page: 1, size: 10, kind: '', status: '', sort: 'desc' });
     const rows = ref([]);
     const total = ref(0);
@@ -137,7 +140,7 @@ Views.projects = {
       try {
         await API.post('/api/projects/' + renameId.value + '/rename', { title: renameTitle.value });
         renameDlg.value = false;
-        ElementPlus.ElMessage.success('已重命名');
+        ElementPlus.ElMessage.success(I18N.t('proj.msgRenamed'));
         load();
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -148,7 +151,7 @@ Views.projects = {
     async function del(row) {
       try {
         await API.post('/api/projects/' + row.id + '/delete');
-        ElementPlus.ElMessage.success('已删除');
+        ElementPlus.ElMessage.success(I18N.t('proj.msgDeleted'));
         if (rows.value.length === 1 && f.page > 1) f.page--;
         load();
       } catch (e) {
