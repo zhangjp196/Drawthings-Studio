@@ -221,7 +221,8 @@ class Pipeline:
         system = ("你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
                   "写本章详细剧本描述和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
                   f"同时按本章构图决定出图分辨率 width/height（横构图/竖构图/方形，均为 64 的倍数，"
-                  f"最长边不超过 {limit} 像素）。")
+                  f"最长边不超过 {limit} 像素；参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、"
+                  f"9:16 竖=576×1024、16:9 横=1024×576）。")
         agent = make_agent(build_model(llm_cfg), system, output_type=ScriptOut)
         async with agent:
             for i, ch in enumerate(chapters):

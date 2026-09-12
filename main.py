@@ -640,9 +640,16 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
         return
 
     # 未选 DrawThings 配置 = 纯对话模式：不注册生成工具，并明确告知模型
-    instructions = MC_SYSTEM if dt_cfg else (
-        MC_SYSTEM + "当前未配置生成服务，无法出图/出视频：用户要求生成时，请说明暂时无法生成，"
-                   "但可以代为撰写详细的英文提示词供其后续使用。")
+    if dt_cfg:
+        limit = int(getattr(dt_cfg, "max_side", 0) or 0) or 1024
+        instructions = MC_SYSTEM + (
+            f"图像比例：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
+            f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
+            f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
+            f"用户未指定时 width/height 传 0，跟随 app 当前分辨率。")
+    else:
+        instructions = MC_SYSTEM + "当前未配置生成服务，无法出图/出视频：用户要求生成时，请说明暂时无法生成，" \
+                                   "但可以代为撰写详细的英文提示词供其后续使用。"
     model = build_model(llm_cfg)
     agent = Agent(model, instructions=instructions)
 
@@ -656,21 +663,27 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                     dt = DrawThingsClient(dt_cfg, data_dir)
 
                     @agent.tool
-                    async def generate_media(ctx: RunContext, prompt: str) -> str:
+                    async def generate_media(ctx: RunContext, prompt: str,
+                                             width: int = 0, height: int = 0) -> str:
                         """生成图片/视频：根据详细英文提示词产出单张图或单个视频。
 
                         Args:
                             prompt: 详细英文提示词（主体、场景、构图、光线、风格；视频补充运镜与动态）
+                            width: 图像宽（64 的倍数；用户未指定比例时传 0 = 跟随 app 当前分辨率）
+                            height: 图像高（64 的倍数；用户未指定比例时传 0 = 跟随 app 当前分辨率）
                         """
                         kind_cn = "图像" if media == "image" else "视频"
                         await out.put(("tool", {"label": f"正在生成{kind_cn}…"}))
+                        params = {}
+                        if width and height:
+                            params = {"width": int(width), "height": int(height)}
                         try:
                             if media == "image":
                                 path = await anyio.to_thread.run_sync(
-                                    lambda: dt.generate_image(prompt))
+                                    lambda: dt.generate_image(prompt, params=params))
                             else:
                                 path = await anyio.to_thread.run_sync(
-                                    lambda: dt.generate_video(prompt))
+                                    lambda: dt.generate_video(prompt, params=params))
                         except Exception as e:
                             await out.put(("tool_error", {"message": str(e)}))
                             return f"生成失败：{e}。请向用户说明原因并建议如何调整。"

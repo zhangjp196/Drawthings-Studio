@@ -22,9 +22,10 @@
 > 仅保留 HTTP 一种协议（app 内只需开启 HTTP 服务器，端口以 app 显示为准）。
 
 模型只能跟随 app 当前选择（API 不支持指定）。
-分辨率由智能体按场景决定（调用方 params 传 width/height），受配置 max_side
-（最大分辨率，仅最长边）约束：最长边超过上限时等比缩小（64 的倍数）；
+图像分辨率由智能体按场景/用户要求决定（调用方 params 传 width/height），受配置
+max_side（最大分辨率，仅最长边）约束：最长边超过上限时等比缩小（64 的倍数）；
 未指定分辨率时跟随 app 当前值，若 app 值超过上限同样限幅。
+视频分辨率由 app/视频模型决定（模型专属，不发送 width/height）。
 max_frames 为视频最大帧数上限：实际帧数 = min(app 当前帧数, 上限)。
 """
 import base64
@@ -167,13 +168,16 @@ class DrawThingsClient:
                 v = getattr(self, key, 0)
             return v if v not in (None, "", 0) else None
 
-        # 分辨率：智能体决定（调用方 params）> app 当前值；再受配置 max_side 限幅
-        w, h = eff("width"), eff("height")
-        if not (w and h) and self.max_side > 0:
-            o = self._http_options()
-            w, h = int(o.get("width") or 0), int(o.get("height") or 0)
-        if w and h:
-            payload["width"], payload["height"] = self._cap_size(int(w), int(h))
+        # 分辨率：图像 = 智能体决定（调用方 params）> app 当前值，再受 max_side 限幅；
+        # 视频 = 分辨率由 app/视频模型决定（模型专属，不可任意指定）
+        w = h = None
+        if not video:
+            w, h = eff("width"), eff("height")
+            if not (w and h) and self.max_side > 0:
+                o = self._http_options()
+                w, h = int(o.get("width") or 0), int(o.get("height") or 0)
+            if w and h:
+                payload["width"], payload["height"] = self._cap_size(int(w), int(h))
         for k in ("seed", "batch_size", "sampler"):
             v = eff(k)
             if v is not None:
