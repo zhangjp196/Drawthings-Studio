@@ -71,6 +71,7 @@ Views.microWork = {
               <div v-if="streaming" class="msg assistant">
                 <div v-for="(c, i) in stream.chips" :key="'c' + i" class="tool-chip" :class="{ error: c.err }">
                   <span v-if="!c.err" class="spinner"></span>{{ c.text }}
+                  <div class="tool-prompt" v-if="c.prompt">{{ c.prompt }}</div>
                 </div>
                 <div v-for="(md2, i) in stream.media" :key="'m' + i" class="msg-media">
                   <video v-if="md2.media === 'video'" :src="md2.url" controls preload="metadata"></video>
@@ -406,13 +407,13 @@ Views.microWork = {
             status.value = '';
             scrollBottom();
           } else if (ev === 'tool') {
-            stream.chips.push({ text: d.label || '生成中…', err: false });
+            stream.chips.push({ text: d.label || '生成中…', err: false, prompt: d.prompt || '' });
             status.value = '';
           } else if (ev === 'media') {
             stream.media.push(d);
             scrollBottom();
           } else if (ev === 'tool_error') {
-            stream.chips.push({ text: '⚠ ' + (d.message || '生成失败'), err: true });
+            stream.chips.push({ text: '⚠ ' + (d.message || '生成失败'), err: true, prompt: d.prompt || '' });
           } else if (ev === 'error') {
             failed = true;
             stream.chips.push({ text: '⚠ ' + (d.message || '出错了'), err: true });

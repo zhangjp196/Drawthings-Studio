@@ -315,11 +315,15 @@ h1, h2, h3 { line-height: 1.4; }
   margin-left: 2px; vertical-align: -2px; animation: blink 1s infinite;
 }
 .tool-chip {
-  display: flex; align-items: center; gap: 8px; width: fit-content;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: fit-content; max-width: 100%;
   background: var(--chat-bubble); border: 1px solid var(--line); border-radius: 8px;
   padding: 6px 12px; margin: 0 0 8px; font-size: 13px; color: var(--muted);
 }
 .tool-chip.error { color: var(--err); border-color: var(--err); }
+.tool-chip .tool-prompt {
+  flex-basis: 100%; font-size: 12px; line-height: 1.6; color: var(--muted);
+  white-space: pre-wrap; word-break: break-word; margin-top: 2px;
+}
 .spinner {
   width: 14px; height: 14px; flex-shrink: 0;
   border: 2px solid var(--line); border-top-color: var(--primary);

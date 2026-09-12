@@ -678,7 +678,8 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             height: 图像高（64 的倍数；用户未指定比例时传 0 = 跟随 app 当前分辨率）
                         """
                         kind_cn = "图像" if media == "image" else "视频"
-                        await out.put(("tool", {"label": f"正在生成{kind_cn}…"}))
+                        # 提示词随工具事件立即下发：生成期间（可达数十秒）气泡内先展示提示词，图片就绪后同气泡出现
+                        await out.put(("tool", {"label": f"正在生成{kind_cn}…", "prompt": prompt}))
                         params = {}
                         if width and height:
                             params = {"width": int(width), "height": int(height)}
@@ -690,7 +691,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                                 path = await anyio.to_thread.run_sync(
                                     lambda: dt.generate_video(prompt, params=params))
                         except Exception as e:
-                            await out.put(("tool_error", {"message": str(e)}))
+                            await out.put(("tool_error", {"message": str(e), "prompt": prompt}))
                             return f"生成失败：{e}。请向用户说明原因并建议如何调整。"
                         url = _media_url(path)
                         media_info["url"] = url
