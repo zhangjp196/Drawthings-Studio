@@ -12,6 +12,7 @@
 import asyncio
 import base64
 import json
+import time
 import uuid
 from pathlib import Path
 
@@ -431,6 +432,8 @@ def micro_session_page(work_id: str, session_id: str, db: Session = Depends(get_
             except (ValueError, TypeError):
                 pass
         msgs.append({"index": m.index, "role": m.role, "content": m.content,
+                     "created_at": m.created_at or "",
+                     "duration": m.duration or 0,
                      "images": imgs, "media_url": m.media_url or "", "prompt": m.prompt or ""})
     view["session_id"] = session.id
     view["messages"] = msgs
@@ -595,6 +598,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
         .order_by(MicroMessage.index.desc()).first()
     user_idx = (last.index + 1) if last else 0
     db.add(MicroMessage(session_id=session_id, index=user_idx, role="user", content=message,
+                        created_at=_now(),
                         images=json.dumps(image_urls, ensure_ascii=False) if image_urls else None))
     if not session.title.strip():
         session.title = message[:50]
@@ -634,6 +638,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
 
     对话成功后把助手消息（文本 + 媒体）持久化到会话。
     """
+    t0 = time.monotonic()  # 本条回复耗时起点（流式开始 → 落库完成）
     if not llm_cfg:
         yield _sse("error", {"message": "请选择有效的 LLM 配置"})
         yield _sse("done", {})
@@ -702,7 +707,8 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
             text = "".join(text_parts).strip()
             if text or media_info.get("url"):
                 db.add(MicroMessage(session_id=session.id, index=assistant_idx,
-                                    role="assistant", content=text,
+                                    role="assistant", content=text, created_at=_now(),
+                                    duration=round(time.monotonic() - t0, 1),
                                     media_url=media_info.get("url", ""),
                                     prompt=media_info.get("prompt", "")))
                 session.updated_at = _now()

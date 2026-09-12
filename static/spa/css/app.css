@@ -267,6 +267,7 @@ h1, h2, h3 { line-height: 1.4; }
   border-radius: 4px 14px 14px 14px; padding: 10px 14px;
   max-width: 85%; display: inline-block;
 }
+.msg-time { font-size: 11px; color: var(--muted); margin-top: 4px; opacity: .85; user-select: none; }
 
 /* Markdown（对话气泡内） */
 .md { line-height: 1.65; word-break: break-word; }

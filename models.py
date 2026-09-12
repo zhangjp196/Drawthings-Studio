@@ -6,7 +6,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, Integer, ForeignKey, JSON
+from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 
 from db import Base
@@ -137,6 +137,8 @@ class MicroMessage(Base):
     session_id = Column(String(12), ForeignKey("micro_sessions.id"), nullable=False)
     index = Column(Integer, nullable=False)                # 会话内序号（0 起）
     role = Column(String(10), nullable=False)              # user | assistant
+    created_at = Column(String(40), default="")            # 消息时间（ISO）
+    duration = Column(Float, default=0)                    # 助手消息耗时（秒：开始输出 → 完成）
     content = Column(Text, nullable=False)                 # 文本内容
     images = Column(Text, nullable=True)                  # 用户附带的图片（JSON 列表，/media/xxx；仅视觉模型）
     media_url = Column(String(500), default="")            # 助手消息附带的生成媒体（/media/xxx）

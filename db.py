@@ -69,6 +69,8 @@ def _migrate():
         },
         "micro_messages": {
             "images": "TEXT",
+            "created_at": "VARCHAR(40) DEFAULT ''",
+            "duration": "REAL DEFAULT 0",
         },
     }
     with engine.connect() as conn:

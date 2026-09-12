@@ -65,6 +65,7 @@ Views.microWork = {
                     <div class="media-cap" v-if="m.prompt">{{ m.prompt }}</div>
                   </div>
                   <div class="md" v-html="renderMd(m.content)"></div>
+                  <div class="msg-time" v-if="m.duration">{{ m.duration }}s</div>
                 </div>
               </div>
               <div v-if="streaming" class="msg assistant">
@@ -77,6 +78,7 @@ Views.microWork = {
                   <div class="media-cap" v-if="md2.prompt">{{ md2.prompt }}</div>
                 </div>
                 <div class="md" v-html="streamHtml"></div>
+                <div class="msg-time">{{ streamElapsed }}s</div>
               </div>
             </template>
           </div>
@@ -94,7 +96,7 @@ Views.microWork = {
                       @click="fileInput.click()">🖼</button>
               <input type="file" ref="fileInput" accept="image/*" multiple hidden @change="onFiles">
               <textarea v-model="input" class="mc-input" rows="1" :placeholder="ph"
-                        @keydown.enter.exact.prevent="send" @input="autoResize" @paste="onPaste"></textarea>
+                        @keydown.enter.exact="onEnter" @input="autoResize" @paste="onPaste"></textarea>
               <el-button type="primary" :disabled="busy" @click="send">发送</el-button>
             </div>
             <div class="mc-status">{{ status }}</div>
@@ -352,6 +354,28 @@ Views.microWork = {
       lb.show = true;
     }
 
+    // Enter 发送：中文输入法（拼音候选词）组合中按回车仅确认候选、不发送
+    function onEnter(e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      send();
+    }
+
+    // 助手回复实时秒表：从 0 开始，输出过程中每 100ms 刷新，完成后由落库的 duration 定格
+    const streamElapsed = ref(0);
+    let timer = null;
+    function startTimer() {
+      stopTimer();
+      const t0 = Date.now();
+      streamElapsed.value = 0;
+      timer = setInterval(() => {
+        streamElapsed.value = ((Date.now() - t0) / 1000).toFixed(1);
+      }, 100);
+    }
+    function stopTimer() {
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+
     // ---------- 发送（SSE 流式） ----------
     async function send() {
       if (busy.value || !hasSession.value) return;
@@ -363,8 +387,10 @@ Views.microWork = {
       input.value = '';
       attached.value = [];
       autoResize();
+      startTimer();
 
-      msgs.value.push({ index: Date.now(), role: 'user', content: message || '（图片）', images: shot, media_url: '' });
+      msgs.value.push({ index: Date.now(), role: 'user', content: message || '（图片）',
+                        images: shot, media_url: '' });
       streaming.value = true;
       stream.text = '';
       stream.chips = [];
@@ -402,6 +428,7 @@ Views.microWork = {
         stream.chips.push({ text: '⚠ ' + e.message, err: true });
         status.value = '出错了，可修改后重试';
       } finally {
+        stopTimer();
         busy.value = false;
         streaming.value = false;
       }
@@ -425,7 +452,7 @@ Views.microWork = {
     });
     onMounted(load);
     onBeforeUnmount(() => {
-      // 组件卸载时解绑委托事件（若有）
+      stopTimer();
       const el = chatBox.value;
       if (el) el.removeEventListener('click', onChatClick);
     });
@@ -442,7 +469,8 @@ Views.microWork = {
       cfgDlg, cfgBusy, cfg, openCfg, saveCfg, delWork,
       lb, openLb, input, attached, busy, status, drag, streaming, stream, streamHtml,
       isMediaVideo, tagLabel, tagType, ph,
-      chatBox, fileInput, onFiles, onPaste, onDrop, autoResize, send,
+      chatBox, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter, send,
+      streamElapsed,
       renderMd, router, pick, openSess,
       EditPen: ElementPlusIconsVue.EditPen, Delete: ElementPlusIconsVue.Delete,
     };
