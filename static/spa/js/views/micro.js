@@ -86,9 +86,19 @@ Views.micro = {
       }
     }
 
-    function openNew() {
+    async function openNew() {
       Object.assign(f, { title: '', llm: '', dt: '' });
       dlg.value = true;
+      // 基础配置里的默认配置 → 预填（仅当对应配置仍存在时）
+      try {
+        const s = await API.get('/api/settings');
+        if (s.default_llm_config_id && llms.value.some(c => c.id === s.default_llm_config_id)) {
+          f.llm = s.default_llm_config_id;
+        }
+        if (s.default_dt_config_id && dts.value.some(c => c.id === s.default_dt_config_id)) {
+          f.dt = s.default_dt_config_id;
+        }
+      } catch (e) { /* 无默认配置则保持手选 */ }
     }
 
     async function create() {

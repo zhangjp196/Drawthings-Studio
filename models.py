@@ -1,6 +1,6 @@
 """数据模型（SQLAlchemy）。
 
-两张配置表（LLM / DrawThings，用户可在页面增删）、项目、章节、微创作（作品 → 会话 → 消息）。
+两张配置表（LLM / DrawThings，用户可在页面增删）、全局基础配置（单行 JSON）、项目、章节、微创作（作品 → 会话 → 消息）。
 媒体文件本身存 data/media 目录，这里只存路径引用。
 """
 import uuid
@@ -49,6 +49,15 @@ class DrawThingConfig(Base):
     max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限，跟随 app）
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
+
+
+class AppSettings(Base):
+    """全局基础配置（单行 JSON）：新建创作默认配置 / 默认生成参数等。"""
+
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    data = Column(JSON, default=dict)
 
 
 class Project(Base):

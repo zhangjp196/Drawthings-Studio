@@ -160,6 +160,9 @@ def _clamp_page(page: int, size: int) -> tuple[int, int]:
 
 
 # ---------------- 配置管理（JSON API） ----------------
+CFG_LIMITS = {"llm": 3, "drawthings": 3}  # 配置数量上限：LLM 最多 3 个，DrawThings 最多 3 个
+
+
 @app.get("/api/choices")
 def choices(db: Session = Depends(get_db)):
     """新建作品/创作时的可选项：全部 LLM + 全部 DrawThings 配置。"""
@@ -169,15 +172,17 @@ def choices(db: Session = Depends(get_db)):
 
 
 @app.get("/api/configs")
-def configs_list(db: Session = Depends(get_db), ctype: str = ""):
-    """配置列表：ctype=llm|drawthings。"""
+def configs_list(db: Session = Depends(get_db)):
+    """配置列表：一次返回 LLM + DrawThings 两组（页面无 tab，分区展示），附数量与上限。"""
     cs = ConfigStore(db)
-    if ctype == "drawthings":
-        items = [_dt_view(c) for c in cs.list_drawthing()]
-    else:
-        items = [_llm_view(c) for c in cs.list_llm()]
-    return {"ctype": ctype or "llm", "items": items,
-            "llm_count": len(cs.list_llm()), "drawthing_count": len(cs.list_drawthing())}
+    llms = cs.list_llm()
+    dts = cs.list_drawthing()
+    return {
+        "llm_items": [_llm_view(c) for c in llms],
+        "dt_items": [_dt_view(c) for c in dts],
+        "llm_count": len(llms), "drawthing_count": len(dts),
+        "llm_max": CFG_LIMITS["llm"], "dt_max": CFG_LIMITS["drawthings"],
+    }
 
 
 async def _json_body(request: Request) -> dict:
@@ -206,6 +211,17 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400,
                             detail=L(lang, "图片输入选项无效", "Invalid image-input option"))
     cs = ConfigStore(db)
+    limit = CFG_LIMITS.get(config_type)
+    if limit is not None:
+        cur = len(cs.list_llm()) if config_type == "llm" else len(cs.list_drawthing())
+        if cur >= limit:
+            if config_type == "llm":
+                msg = L(lang, f"LLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
+                        f"LLM config limit reached ({limit} max) — delete an unused one first")
+            else:
+                msg = L(lang, f"DrawThings 配置最多 {limit} 个，请先删除现有配置",
+                        f"Only {limit} DrawThings config allowed — delete the existing one first")
+            raise HTTPException(status_code=400, detail=msg)
     try:
         if config_type == "llm":
             model = str(body.get("model") or "").strip()
@@ -330,9 +346,37 @@ def config_delete(request: Request, config_type: str, config_id: str, db: Sessio
     else:
         raise HTTPException(status_code=400, detail=L(lang, "未知配置类型", "Unknown config type"))
     if not ok:
-        raise HTTPException(status_code=404, detail=L(lang, "配置不存在", "Config not found"))
+        raise HTTPException(status_code=404,
+                            detail=L(lang, "配置不存在", "Config not found"))
+    cs.clear_default_ref(config_type, config_id)  # 删掉的配置若被设为默认 → 清空引用
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/settings")
+def settings_get(db: Session = Depends(get_db)):
+    """基础配置：新建创作的默认 LLM / DrawThings 配置。"""
+    return ConfigStore(db).get_settings()
+
+
+@app.put("/api/settings")
+async def settings_update(request: Request, db: Session = Depends(get_db)):
+    """保存基础配置（白名单字段；引用不存在的配置 id 直接 400）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    cs = ConfigStore(db)
+    llm_id = str(body.get("default_llm_config_id") or "").strip()
+    dt_id = str(body.get("default_dt_config_id") or "").strip()
+    if llm_id and not cs.get_llm(llm_id):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "默认 LLM 配置不存在", "Default LLM config not found"))
+    if dt_id and not cs.get_drawthing(dt_id):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "默认 DrawThings 配置不存在", "Default DrawThings config not found"))
+    return cs.update_settings({
+        "default_llm_config_id": llm_id,
+        "default_dt_config_id": dt_id,
+    })
 
 
 # ---------------- 微创作（作品 → 多个独立会话 → 消息：历史持久化 + SSE 流式 + function call 出图/出视频）----------------

@@ -109,15 +109,6 @@ h1, h2, h3 { line-height: 1.4; }
 }
 .tnav:hover { color: var(--ink); background: var(--chat-bubble); }
 .tnav.active { color: var(--primary); background: var(--el-color-primary-light-9); font-weight: 600; }
-.theme-group { display: flex; gap: 4px; }
-.tbtn {
-  border: 1px solid var(--line); background: transparent; color: var(--muted);
-  border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer;
-}
-.tbtn:hover { color: var(--ink); }
-.tbtn.on { color: var(--primary); border-color: var(--primary); background: var(--el-color-primary-light-9); }
-.tsep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
-
 /* ---------- 通用工具条 / 分页 ---------- */
 .list-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; }
 .list-head { display: flex; align-items: baseline; gap: 10px; }
@@ -203,19 +194,55 @@ h1, h2, h3 { line-height: 1.4; }
 .wc-meta { font-size: 12px; }
 .wc-actions { display: flex; gap: 8px; margin-top: auto; }
 
+/* ---------- 配置管理：分区（无 tab，LLM / DrawThings 同页展示） ---------- */
+.cfg-sec {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow); margin-bottom: 18px; overflow: hidden;
+}
+.cfg-sec:last-of-type { margin-bottom: 0; }
+.cfg-sec-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 13px 18px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--chat-bubble), transparent);
+}
+.cfg-sec-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cfg-sec-title h3 { margin: 0; font-size: 15px; font-weight: 700; white-space: nowrap; }
+.cfg-ico {
+  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 800; color: #fff; letter-spacing: .4px;
+}
+.cfg-ico-llm { background: linear-gradient(135deg, var(--primary), var(--primary2)); box-shadow: 0 2px 6px rgba(91, 91, 214, .35); }
+.cfg-ico-dt { background: linear-gradient(135deg, var(--accent), #ffa06e); box-shadow: 0 2px 6px rgba(255, 122, 89, .35); }
+.cfg-ico-basic { background: linear-gradient(135deg, #0ea5e9, var(--ok)); box-shadow: 0 2px 6px rgba(14, 165, 233, .35); font-size: 15px; }
+.cfg-quota {
+  font-size: 12px; color: var(--muted); white-space: nowrap;
+  background: var(--chat-bubble); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 10px; font-variant-numeric: tabular-nums;
+}
+.cfg-quota.full { color: var(--warn); border-color: var(--warn); background: transparent; }
+.cfg-sec-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfg-sec-body { padding: 16px 18px 18px; }
+@media (max-width: 760px) {
+  .cfg-sec-sub { display: none; }
+}
+
 /* ---------- 配置管理：配置卡片 ---------- */
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .cfg-card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-  padding: 14px 16px; box-shadow: var(--shadow);
+  background: var(--chat-bubble); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px;
   display: flex; flex-direction: column; gap: 8px;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
+.cfg-card:hover { border-color: var(--el-color-primary-light-5); box-shadow: var(--shadow); transform: translateY(-1px); }
 .cfg-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; word-break: break-all; }
 .cfg-meta { font-size: 12px; }
 .cfg-url {
-  font-size: 12px; color: var(--muted);
+  font-size: 12px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.cfg-sec-body .el-empty { padding: 18px 0; }
 
 /* ---------- 微创作：作品页（会话列表 + 对话） ---------- */
 .mc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }

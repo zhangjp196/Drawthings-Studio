@@ -8,7 +8,13 @@ from datetime import datetime, timezone
 from sqlalchemy import or_
 
 from db import SessionLocal
-from models import LLMConfig, DrawThingConfig, Project
+from models import LLMConfig, DrawThingConfig, AppSettings, Project
+
+# 基础配置（单行 JSON）：新建创作的默认 LLM / DrawThings 配置
+SETTINGS_DEFAULTS = {
+    "default_llm_config_id": "",
+    "default_dt_config_id": "",
+}
 
 
 def _now() -> str:
@@ -118,6 +124,41 @@ class ConfigStore:
         self.db.delete(cfg)
         self.db.commit()
         return True
+
+    # ---------------- 基础配置（单行 JSON：默认配置 / 默认生成参数） ----------------
+    def get_settings(self) -> dict:
+        row = self.db.get(AppSettings, 1)
+        data = dict(SETTINGS_DEFAULTS)
+        if row and isinstance(row.data, dict):
+            for k in SETTINGS_DEFAULTS:
+                if k in row.data:
+                    data[k] = row.data[k]
+        return data
+
+    def update_settings(self, patch: dict) -> dict:
+        """保存基础配置：仅接受白名单键，返回保存后的完整配置。"""
+        row = self.db.get(AppSettings, 1)
+        if not row:
+            row = AppSettings(id=1, data=dict(SETTINGS_DEFAULTS))
+            self.db.add(row)
+        data = dict(SETTINGS_DEFAULTS)
+        if isinstance(row.data, dict):
+            for k in SETTINGS_DEFAULTS:
+                if k in row.data:
+                    data[k] = row.data[k]
+        for k, v in patch.items():
+            if k in SETTINGS_DEFAULTS:
+                data[k] = v
+        row.data = data
+        self.db.commit()
+        self.db.refresh(row)
+        return self.get_settings()
+
+    def clear_default_ref(self, config_type: str, config_id: str) -> None:
+        """配置被删除时：若它是某个默认配置，清空对应引用（避免悬空 id）。"""
+        key = "default_llm_config_id" if config_type == "llm" else "default_dt_config_id"
+        if self.get_settings().get(key) == config_id:
+            self.update_settings({key: ""})
 
     # ---------------- 引用检查（删除前）----------------
     def is_referenced(self, config_id) -> bool:

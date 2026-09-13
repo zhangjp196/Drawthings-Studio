@@ -1,5 +1,5 @@
 // 应用入口：根组件（顶栏 + 路由出口）+ Element Plus / 图标 / 路由挂载
-// 品牌：Drawthings Studio；顶栏支持 中/EN 语言切换（Element Plus locale 随语言重建生效）。
+// 品牌：Drawthings Studio；语言 / 主题在「配置 → 基础配置」里切换（Element Plus locale 随语言重建生效）。
 (function () {
   const root = {
     template: `
@@ -14,11 +14,6 @@
             <router-link to="/micro" class="tnav" :class="{ active: isMicro }">{{ I18N.t('nav.quick') }}</router-link>
             <router-link to="/configs" class="tnav" :class="{ active: isConfigs }">{{ I18N.t('nav.settings') }}</router-link>
           </nav>
-          <div class="theme-group">
-            <button v-for="l in langs" :key="l" type="button" class="tbtn" :class="{ on: I18N.current() === l }" @click="I18N.set(l)">{{ l === 'zh' ? '中文' : 'EN' }}</button>
-            <span class="tsep"></span>
-            <button v-for="t in themes" :key="t.v" type="button" class="tbtn" :class="{ on: theme === t.v }" @click="Theme.set(t.v)">{{ t.sym }} {{ I18N.t(t.key) }}</button>
-          </div>
         </div>
       </header>
       <main>
@@ -28,18 +23,9 @@
       </main>
     `,
     setup() {
-      const theme = ref(Theme.current());
-      Theme.onChange(v => { theme.value = v; });
       return {
-        theme,
         I18N,
         Theme,
-        langs: ['zh', 'en'],
-        themes: [
-          { v: 'light', key: 'theme.light', sym: '☀' },
-          { v: 'system', key: 'theme.system', sym: '⚙' },
-          { v: 'dark', key: 'theme.dark', sym: '☾' },
-        ],
         isProjects: computed(() => {
           const p = router.currentRoute.value.path;
           return p.startsWith('/projects') || p.startsWith('/project/');
