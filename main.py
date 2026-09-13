@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic_ai import Agent, RunContext
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config import data_dir
@@ -394,13 +394,22 @@ def _sse(event: str, data: dict) -> str:
 MC_PAGE_SIZE = 10  # 微创作作品列表每页条数
 
 
-def _work_paged(db: Session, page: int) -> tuple[int, int, list[MicroWork]]:
-    """分页取作品列表（按最近活跃倒序）：返回 (页码, 总数, 当前页作品)。"""
-    total = db.query(func.count(MicroWork.id)).scalar() or 0
-    total_pages = max((total + MC_PAGE_SIZE - 1) // MC_PAGE_SIZE, 1)
+def _work_paged(db: Session, page: int, size: int = MC_PAGE_SIZE, q: str = "",
+                kind: str = "", sort_desc: bool = True) -> tuple[int, int, list[MicroWork]]:
+    """按条件（标题关键词 / 类型）+ 排序取作品列表，分页：返回 (页码, 总数, 当前页作品)。"""
+    query = db.query(MicroWork)
+    if q:
+        query = query.filter(MicroWork.title.ilike(f"%{q}%"))
+    if kind == "gen":
+        query = query.filter(MicroWork.drawthings_config_id != "")
+    elif kind == "chat":
+        query = query.filter(or_(MicroWork.drawthings_config_id.is_(None),
+                                 MicroWork.drawthings_config_id == ""))
+    total = query.count()
+    total_pages = max((total + size - 1) // size, 1)
     page = min(max(page, 1), total_pages)  # 越界页码收敛到有效范围
-    rows = (db.query(MicroWork).order_by(MicroWork.updated_at.desc())
-            .offset((page - 1) * MC_PAGE_SIZE).limit(MC_PAGE_SIZE).all())
+    rows = (query.order_by(MicroWork.updated_at.desc() if sort_desc else MicroWork.updated_at.asc())
+            .offset((page - 1) * size).limit(size).all())
     return page, total, rows
 
 
@@ -415,9 +424,11 @@ def _session_counts(db: Session, session_ids: list[str]) -> dict:
 
 
 @app.get("/api/micro")
-def micro_works(db: Session = Depends(get_db), page: int = 1):
-    """作品列表（按最近活跃倒序，分页 10/页）+ 新建作品可选配置。"""
-    page, total, works = _work_paged(db, page)
+def micro_works(db: Session = Depends(get_db), page: int = 1, size: int = MC_PAGE_SIZE,
+                q: str = "", kind: str = "", sort: str = "desc"):
+    """作品列表：标题关键词 / 类型（生成 / 纯对话）/ 排序筛选 + 分页 + 新建作品可选配置。"""
+    page, size = _clamp_page(page, size)
+    page, total, works = _work_paged(db, page, size, q.strip(), kind, sort != "asc")
     counts = dict(db.query(MicroSession.micro_id, func.count(MicroSession.id))
                   .filter(MicroSession.micro_id.in_([w.id for w in works] or [""]))
                   .group_by(MicroSession.micro_id).all())
@@ -428,8 +439,8 @@ def micro_works(db: Session = Depends(get_db), page: int = 1):
             "drawthings_config_id": w.drawthings_config_id,
             "updated_at": w.updated_at, "session_count": counts.get(w.id, 0),
         } for w in works],
-        "total": total, "page": page, "size": MC_PAGE_SIZE,
-        "total_pages": max((total + MC_PAGE_SIZE - 1) // MC_PAGE_SIZE, 1),
+        "total": total, "page": page, "size": size,
+        "total_pages": max((total + size - 1) // size, 1),
         "llm_configs": [_llm_view(c) for c in cs.list_llm()],
         "drawthing_configs": [_dt_view(c) for c in cs.list_drawthing()],
     }

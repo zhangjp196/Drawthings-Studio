@@ -14,6 +14,11 @@
             <router-link to="/micro" class="tnav" :class="{ active: isMicro }">{{ I18N.t('nav.quick') }}</router-link>
             <router-link to="/configs" class="tnav" :class="{ active: isConfigs }">{{ I18N.t('nav.settings') }}</router-link>
           </nav>
+          <div class="theme-group">
+            <button v-for="l in langs" :key="l.v" type="button" class="tbtn icon" :title="l.label" :class="{ on: I18N.current() === l.v }" @click="I18N.set(l.v)">{{ l.flag }}</button>
+            <span class="tsep"></span>
+            <button v-for="t in themes" :key="t.v" type="button" class="tbtn icon" :title="I18N.t(t.key)" :class="{ on: theme === t.v }" @click="Theme.set(t.v)">{{ t.sym }}</button>
+          </div>
         </div>
       </header>
       <main>
@@ -23,9 +28,21 @@
       </main>
     `,
     setup() {
+      const theme = ref(Theme.current());
+      Theme.onChange(v => { theme.value = v; });
       return {
         I18N,
         Theme,
+        theme,
+        langs: [
+          { v: 'zh', flag: '🇨🇳', label: '中文' },
+          { v: 'en', flag: '🇺🇸', label: 'English' },
+        ],
+        themes: [
+          { v: 'light', key: 'theme.light', sym: '☀' },
+          { v: 'system', key: 'theme.system', sym: '⚙' },
+          { v: 'dark', key: 'theme.dark', sym: '☾' },
+        ],
         isProjects: computed(() => {
           const p = router.currentRoute.value.path;
           return p.startsWith('/projects') || p.startsWith('/project/');

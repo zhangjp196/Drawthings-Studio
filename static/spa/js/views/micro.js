@@ -1,4 +1,4 @@
-// 微创作作品列表：卡片网格 + 分页 + 新建弹框 + 删除
+// 微创作作品列表：卡片网格 + 筛选（关键词/类型/排序/每页条数）+ 分页 + 新建弹框 + 删除
 window.Views = window.Views || {};
 Views.micro = {
   template: `
@@ -10,6 +10,27 @@ Views.micro = {
         </div>
         <el-button type="primary" @click="openNew">{{ I18N.t('mc.new') }}</el-button>
       </div>
+
+      <el-card class="filter-card" shadow="never">
+        <div class="filter-row">
+          <el-input v-model="flt.q" :placeholder="I18N.t('mc.fQPh')" clearable style="width: 220px"
+                    @keyup.enter="apply" @clear="apply" />
+          <el-select v-model="flt.kind" :placeholder="I18N.t('mc.type')" clearable style="width: 140px" @change="apply">
+            <el-option :label="I18N.t('mc.typeAll')" value="" />
+            <el-option :label="I18N.t('mc.typeGen')" value="gen" />
+            <el-option :label="I18N.t('mc.typeChat')" value="chat" />
+          </el-select>
+          <el-select v-model="flt.sort" style="width: 150px" @change="apply">
+            <el-option :label="I18N.t('mc.sortNew')" value="desc" />
+            <el-option :label="I18N.t('mc.sortOld')" value="asc" />
+          </el-select>
+          <el-select v-model="flt.size" style="width: 120px" @change="apply">
+            <el-option v-for="n in [10, 20, 50]" :key="n" :label="I18N.t('mc.perPage', n)" :value="n" />
+          </el-select>
+          <el-button @click="reset">{{ I18N.t('mc.reset') }}</el-button>
+        </div>
+      </el-card>
+
       <p class="hint" style="margin-top: 0;">{{ I18N.t('mc.hint') }}</p>
 
       <div class="work-grid" v-if="works.length">
@@ -33,7 +54,7 @@ Views.micro = {
       <el-empty v-else :description="I18N.t('mc.empty')" />
 
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
-                     :total="total" :page-size="10" :current-page="page" @current-change="load" />
+                     :total="total" :page-size="flt.size" :current-page="page" @current-change="load" />
 
       <el-dialog v-model="dlg" :title="I18N.t('mc.dlg')" width="540px">
         <el-form label-position="top">
@@ -69,13 +90,16 @@ Views.micro = {
     const total = ref(0);
     const totalPages = ref(1);
     const page = ref(1);
+    const flt = reactive({ q: '', kind: '', sort: 'desc', size: 10 });
     const dlg = ref(false);
     const saving = ref(false);
     const f = reactive({ title: '', llm: '', dt: '' });
 
     async function load() {
       try {
-        const data = await API.get('/api/micro?page=' + page.value);
+        const data = await API.get('/api/micro?' + new URLSearchParams({
+          page: page.value, size: flt.size, q: flt.q, kind: flt.kind, sort: flt.sort,
+        }));
         works.value = data.works;
         llms.value = data.llm_configs;
         dts.value = data.drawthing_configs;
@@ -84,6 +108,12 @@ Views.micro = {
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       }
+    }
+    function apply() { page.value = 1; load(); }
+    function reset() {
+      Object.assign(flt, { q: '', kind: '', sort: 'desc', size: 10 });
+      page.value = 1;
+      load();
     }
 
     async function openNew() {
@@ -133,8 +163,8 @@ Views.micro = {
 
     onMounted(load);
     return {
-      works, llms, dts, total, totalPages, page, dlg, saving, f,
-      load, openNew, create, enter, del,
+      works, llms, dts, total, totalPages, page, flt, dlg, saving, f,
+      load, apply, reset, openNew, create, enter, del,
     };
   },
 };
