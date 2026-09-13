@@ -365,13 +365,26 @@ Views.project = {
       // 确定大纲：只生成 风格/大纲/角色/分辨率，不生成章节
       doAction('outline', { res_width: oW.value, res_height: oH.value });
     }
-    function planChapters() {
-      // 章节规划：按章节数量设定（auto / range min~max）单独生成章节
-      doAction('chapters', {
-        count_mode: cMode.value,
-        count_min: cMode.value === 'range' ? cMin.value : 0,
-        count_max: cMode.value === 'range' ? cMax.value : 0,
-      });
+    async function planChapters() {
+      // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），SSE 实时逐个补入
+      actBusy.value = true; progress.text = '';
+      data.value.chapters = [];      // 后端会先清空旧章节，本地同步清空后逐个补入
+      cur.value = 0;
+      try {
+        await API.sse(`/api/projects/${props.id}/action-stream`, {
+          step: 'chapters',
+          count_mode: cMode.value,
+          count_min: cMode.value === 'range' ? cMin.value : 0,
+          count_max: cMode.value === 'range' ? cMax.value : 0,
+        }, (ev, d) => {
+          if (ev === 'progress') progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
+          else if (ev === 'chapter') applyChapterPlan(d);
+          else if (ev === 'error') throw new Error(d.message);
+        });
+        ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); await load(); }
+      finally { actBusy.value = false; progress.text = ''; }
     }
 
     async function saveOutline() {
@@ -409,6 +422,20 @@ Views.project = {
       if (d.description !== undefined) ch.description = d.description;
       if (d.width) { ch.width = d.width; ch.height = d.height; }
       cur.value = pos;
+    }
+    // 章节规划逐章回调：后端先清空旧章节，这里把规划出的章节按序号补入（新增或更新）并跟随定位到最新章节
+    function applyChapterPlan(d) {
+      const arr = data.value?.chapters || [];
+      const pos = arr.findIndex(c => c.index === d.index);
+      if (pos >= 0) {
+        const ch = arr[pos];
+        ch.title = d.title; ch.summary = d.summary; ch.status = d.status;
+      } else {
+        arr.push({ index: d.index, title: d.title, summary: d.summary, status: d.status,
+                   description: '', prompt: '', media_url: '', error: '', width: 0, height: 0 });
+        arr.sort((a, b) => a.index - b.index);
+      }
+      cur.value = d.index;
     }
     // 生成画面：勾选章节则只生成它们，未勾选则生成全部（两步连贯、逐章进行、后章参考前章已生成图）
     async function genAll() {

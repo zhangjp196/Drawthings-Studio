@@ -1038,37 +1038,34 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
 
 @app.post("/api/projects/{project_id}/action-stream")
 async def project_action_stream(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """逐章生成画面的 SSE 进度流：body 传 { step: 'generate', indices: [...] }（indices 省略/空 = 全部章节）。
-
-    每章两步（出图提示词→生图）连贯进行、按序号逐个推进（后章参考前章已生成的图）；
-    事件：progress(i/total+标题) / chapter(单章两步完成，附提示词/媒体/状态) / done(附新状态) / error(失败)。"""
+    """逐章推进的 SSE 进度流：body 传 { step:'generate', indices:[...] }（省略/空=全部）
+    或 { step:'chapters', count_mode, count_min, count_max }（逐章规划）。
+    事件：progress(i/total+标题) / chapter(单章完成) / done(附新状态) / error(失败)。"""
     lang = _lang(request)
     body = await _json_body(request)
     step = str(body.get("step") or "generate")
-    if step != "generate":
+    if step not in ("generate", "chapters"):
         raise HTTPException(status_code=400,
                              detail=L(lang, f"该步骤不支持流式进度：{step}",
                                       f"Streaming progress not supported for step: {step}"))
-    raw = body.get("indices")
-    indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     return StreamingResponse(
-        _project_action_stream(db, project, lang, indices),
+        _project_action_stream(db, project, lang, step, body),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _project_action_stream(db: Session, project: Project, lang: str, indices):
-    """后台执行「逐章生成画面」并逐事件下发：进度/单章回调入队 → SSE 帧；结束发 done，异常发 error。"""
+async def _project_action_stream(db: Session, project: Project, lang: str, step: str, body: dict):
+    """后台执行逐章推进（生成画面 / 章节规划）并逐事件下发：进度/单章回调入队 → SSE 帧；结束发 done，异常发 error。"""
     queue: asyncio.Queue = asyncio.Queue()
 
     async def progress_cb(current: int, total: int, title: str):
         await queue.put(("progress", {"current": current, "total": total, "title": title or ""}))
 
     async def chapter_cb(ch):
-        # 单章两步完成：实时回传该章提示词/描述/分辨率/媒体/状态，前端逐个刷新（后续章节仍参考它）
+        # 生成画面：单章两步完成 → 回传提示词/描述/分辨率/媒体/状态，前端逐个刷新（后续章节仍参考它）
         await queue.put(("chapter", {"index": ch.index,
                                      "description": ch.description or "",
                                      "prompt": ch.prompt or "",
@@ -1076,15 +1073,31 @@ async def _project_action_stream(db: Session, project: Project, lang: str, indic
                                      "media_url": _media_url(ch.media_path or ""),
                                      "status": ch.status, "error": ch.error or ""}))
 
+    async def plan_cb(ch):
+        # 章节规划：单章规划完成 → 回传标题/摘要/状态，前端逐个补入
+        await queue.put(("chapter", {"index": ch.index, "title": ch.title or "",
+                                     "summary": ch.summary or "", "status": ch.status}))
+
     async def _run():
         try:
-            await pipeline.step_generate(db, project, indices=indices, lang=lang,
-                                         progress_cb=progress_cb, chapter_done_cb=chapter_cb)
+            if step == "chapters":
+                await pipeline.step_chapters_stream(
+                    db, project, lang=lang,
+                    count_mode=str(body.get("count_mode") or "auto"),
+                    count_min=int(body.get("count_min") or 0),
+                    count_max=int(body.get("count_max") or 0),
+                    progress_cb=progress_cb, chapter_done_cb=plan_cb)
+            else:
+                raw = body.get("indices")
+                indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
+                await pipeline.step_generate(db, project, indices=indices, lang=lang,
+                                             progress_cb=progress_cb, chapter_done_cb=chapter_cb)
             fresh = db.get(Project, project.id)
             await queue.put(("done", {"status": fresh.status if fresh else ""}))
         except Exception as e:
-            await queue.put(("error", {"message": L(lang, f"生成画面失败：{e}",
-                                                     f"Generation failed: {e}")}))
+            msg = "规划章节失败：" if step == "chapters" else "生成画面失败："
+            msg_en = "Planning chapters failed: " if step == "chapters" else "Generation failed: "
+            await queue.put(("error", {"message": L(lang, msg + str(e), msg_en + str(e))}))
         finally:
             await queue.put(("__eof__", None))
 

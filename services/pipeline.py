@@ -30,6 +30,8 @@ from models import Project, Chapter, LLMConfig, DrawThingConfig
 
 from config_store import ConfigStore
 from .agent import (
+    ChapterCount,
+    ChapterOut,
     ChaptersOut,
     OutlineOut,
     ScriptOut,
@@ -299,6 +301,75 @@ class Pipeline:
         project.count_max = int(count_max or 0)
         plan = await self._plan_chapters(db, project, lang, project.count_mode, project.count_min, project.count_max)
         self._rebuild_chapters(db, project, plan)
+        project.status = "chaptered"
+        self._save(db, project)
+        return project
+
+    async def _plan_chapter_count(self, db, project: Project, lang: str,
+                                  count_mode: str, count_min: int, count_max: int) -> int:
+        """先定总章数：auto→模型给一个合适数(3-12)；range→在 [count_min, count_max] 内选一个数。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        scope = project.scope or {}
+        gprompt = (project.global_prompt or "").strip()
+        system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
+        agent = make_agent(build_model(llm_cfg), system, output_type=ChapterCount)
+        if (count_mode or "auto") == "range" and int(count_min or 0) > 0:
+            hi = int(count_max) if int(count_max or 0) >= int(count_min) else int(count_min)
+            cnt = f"请从 {int(count_min)} 到 {hi} 之间选一个合适的章数"
+        else:
+            cnt = "请选择合适的章数（一般 3-12）"
+        user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
+                + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
+                + f"{cnt}\n\n整体故事大纲：\n{(project.arc or '').strip()}")
+        async with agent:
+            data = (await agent.run(user)).output
+        return max(1, int(data.count or 0))
+
+    async def _plan_one_chapter(self, db, project: Project, lang: str, i: int, n: int,
+                                prior: list[tuple[str, str]]) -> tuple[str, str]:
+        """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        scope = project.scope or {}
+        chars = (project.characters or "").strip()
+        gprompt = (project.global_prompt or "").strip()
+        system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
+                  "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。")
+        agent = make_agent(build_model(llm_cfg), system, output_type=ChapterOut)
+        prior_text = "\n".join(f"第{k}章：{t}（{s}）" for k, (t, s) in enumerate(prior, 1)) \
+            or "（本章为第一章，尚无前置章节）"
+        user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
+                + (f"角色设定：{chars}\n" if chars else "")
+                + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
+                + f"共 {n} 章，现在规划第 {i} 章。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
+                  f"整体故事大纲：\n{(project.arc or '').strip()}")
+        async with agent:
+            data = (await agent.run(user)).output
+        return ((data.title or f"第{i}章").strip(), (data.scene or "").strip())
+
+    async def step_chapters_stream(self, db, project: Project, lang: str = "zh",
+                                   count_mode: str = "auto", count_min: int = 0, count_max: int = 0,
+                                   progress_cb=None, chapter_done_cb=None) -> Project:
+        """「章节规划」逐章版：先定总章数 N，再逐章规划第 1..N 章（每章一次调用、参考前面章节承接剧情）。
+        会清空已有章节/媒体（按大纲重新拆章）后逐个补入；status → chaptered。
+        progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后（SSE 实时回传标题/摘要，页面逐个刷新）。"""
+        project.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
+        project.count_min = int(count_min or 0)
+        project.count_max = int(count_max or 0)
+        self._rebuild_chapters(db, project, [])  # 清空旧章节/媒体，随后逐个补入
+        n = await self._plan_chapter_count(db, project, lang,
+                                           project.count_mode, project.count_min, project.count_max)
+        prior: list[tuple[str, str]] = []
+        for i in range(1, n + 1):
+            if progress_cb:
+                await progress_cb(i, n, f"第{i}章")
+            title, summary = await self._plan_one_chapter(db, project, lang, i, n, prior)
+            prior.append((title, summary))
+            ch = Chapter(project_id=project.id, index=i - 1, title=title, summary=summary)
+            db.add(ch)
+            db.commit()
+            db.refresh(ch)
+            if chapter_done_cb:
+                await chapter_done_cb(ch)
         project.status = "chaptered"
         self._save(db, project)
         return project
