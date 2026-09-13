@@ -26,6 +26,8 @@
   --glass: blur(24px) saturate(180%);
   --chat-bubble: rgba(255, 255, 255, .55);
   --code-bg: rgba(91, 91, 214, .09);
+  --btn-fill: #ffffff;
+  --btn-line: rgba(24, 28, 45, .22);
 }
 [data-theme="dark"] {
   --bg: #0d1017;
@@ -78,6 +80,8 @@ html.dark {
   /* 覆盖 vendor dark.css 的不透明/透明值 → 暗色下同样走玻璃表面 */
   --el-bg-color: var(--card);
   --el-fill-color-blank: var(--card);
+  --btn-fill: rgba(255, 255, 255, .10);
+  --btn-line: rgba(255, 255, 255, .26);
 }
 
 /* ---------- 基础 ---------- */
@@ -197,6 +201,11 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
   transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease, border-color .16s ease, color .16s ease;
 }
 .el-button--small { border-radius: 8px; }
+/* 默认按钮（无 type）：不透明填充 + 可见边框，防止在玻璃底上"消失"（仅悬停才显形） */
+.el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--text):not(.el-button--link) {
+  --el-button-bg-color: var(--btn-fill);
+  --el-button-border-color: var(--btn-line);
+}
 .el-button--primary {
   background: linear-gradient(135deg, var(--primary), var(--primary2));
   border: none;
