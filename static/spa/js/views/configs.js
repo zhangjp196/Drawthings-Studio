@@ -9,7 +9,6 @@ Views.configs = {
       <div class="list-toolbar">
         <h1 style="margin: 0; font-size: 22px;">{{ I18N.t('cfg.title') }}</h1>
       </div>
-      <p class="hint" style="margin-top: 0;">{{ I18N.t('cfg.hint') }}</p>
 
       <section class="cfg-sec" id="sec-basic">
         <div class="cfg-sec-head">

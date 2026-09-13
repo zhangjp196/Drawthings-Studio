@@ -69,7 +69,6 @@ window.I18N = (function () {
       'proj.status.done': '已完成',
 
       'new.title': '新建创作',
-      'new.hint': '标题 + 主题（一句话）→ 设定篇幅 → 总纲 → 章节 → 剧本 → 逐章生成。点击「开始创作」后进入项目页。',
 
       'cf.type': '选择类型',
       'cf.comic': '漫画走向（连续生图）',
@@ -165,7 +164,6 @@ window.I18N = (function () {
 
       'cfg.title': '配置管理',
       'cfg.new': '＋ 新建',
-      'cfg.hint': '配置存于本地 SQLite，可在不同项目/作品间复用。',
       'cfg.secBasic': '基础配置',
       'cfg.secBasicSub': '语言、主题与新建创作时的默认值',
       'cfg.lang': '语言',
@@ -220,7 +218,6 @@ window.I18N = (function () {
       'mc.title': '✨ 微创作',
       'mc.total': '共 {0} 个',
       'mc.new': '＋ 新建作品',
-      'mc.hint': '作品 → 多会话 → 消息：作品可反复创作、独立会话互不串扰，生成配置随作品保存。',
       'mc.tagGen': '生成',
       'mc.tagChat': '对话',
       'mc.sessions': '{0} 个会话',
@@ -363,7 +360,6 @@ window.I18N = (function () {
       'proj.status.done': 'Done',
 
       'new.title': 'New Project',
-      'new.hint': 'Title + idea (one sentence) → length → arc → chapters → script → per-chapter generation. After "Start creating" you enter the project page.',
 
       'cf.type': 'Type',
       'cf.comic': 'Comic (continuous images)',
@@ -459,7 +455,6 @@ window.I18N = (function () {
 
       'cfg.title': 'Settings',
       'cfg.new': '＋ New',
-      'cfg.hint': 'Configs are stored in local SQLite and can be reused across projects and works.',
       'cfg.secBasic': 'Basic',
       'cfg.secBasicSub': 'Language, theme, and defaults for new creations',
       'cfg.lang': 'Language',
@@ -514,7 +509,6 @@ window.I18N = (function () {
       'mc.title': '✨ Quick Create',
       'mc.total': '{0} total',
       'mc.new': '＋ New work',
-      'mc.hint': 'Work → sessions → messages: works can be revisited; sessions stay independent; generation settings are saved per work.',
       'mc.tagGen': 'Generation',
       'mc.tagChat': 'Chat',
       'mc.sessions': '{0} session(s)',

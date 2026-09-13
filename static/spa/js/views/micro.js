@@ -31,8 +31,6 @@ Views.micro = {
         </div>
       </el-card>
 
-      <p class="hint" style="margin-top: 0;">{{ I18N.t('mc.hint') }}</p>
-
       <div class="work-grid" v-if="works.length">
         <div class="work-card" v-for="w in works" :key="w.id">
           <div class="wc-top">
