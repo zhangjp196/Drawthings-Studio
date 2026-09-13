@@ -22,7 +22,7 @@ This repository ships a **Chinese** document and an **English** document (identi
 
 从**一句话**创意出发，走一条流水线生成**连续漫画**或**连续短剧**：
 
-> 一句话 → 设定篇幅 → 整体路线（总纲）→ 章节设定 → 剧本编写 → 单任务进行
+> 一句话 → 大纲（风格/角色/章节规划）→ 章节（按章剧本 + 出图/出视频）→ 完成（导出 ZIP/PDF）
 
 生成环节通过 OpenAI 协议走大模型，出图 / 出视频由 Mac 上的 **Draw Things** 生成。
 因为支持图片，**生成下一章时参考上一张图（漫画）/ 上一视频末帧（短剧）**，保证画面连贯。
@@ -40,27 +40,45 @@ This repository ships a **Chinese** document and an **English** document (identi
 
 - **品牌区**：平台名（Drawthings Studio）+ 一句话价值主张 + 主 CTA（进入创作中心 / ✨ 微创作）。
 - **两大功能入口**：漫画走向（连续生图）/ 短剧走向（连续出视频），说明连续性参考策略。
-- **流水线说明**：一句话主题 → 篇幅 → 总纲 → 章节 → 剧本 → 逐章生成，六步流程卡片。
+- **流水线说明**：一句话主题 → 大纲（风格/角色/章节规划）→ 章节（按章剧本 + 出图/出视频）→ 完成（导出 ZIP/PDF）；项目页为三个页签（大纲 / 章节 / 完成）。
 
 ### 我的创作（列表页 /projects）
 
-- **管理**：表格行内可**打开 / 重命名 / 删除**（删除带二次确认）；项目页头部也有「删除该创作」。
+- **管理**：点击**标题**打开 / 重命名 / 删除（删除带二次确认）；项目页头部也有「删除该创作」。
   删除会连同全部章节记录与已生成的图/视频文件一并清理。
-- **筛选**：按类型（漫画/短剧）、状态、排序（最新/最早）、每页条数（10/20/50）。
-- **信息**：类型标签、标题/主题、状态标签、章节进度（已定/总篇幅）、首图缩略图（点击预览）、创建日期；
+- **筛选**：关键词（标题/主题）、类型（漫画/短剧）、状态、排序（最新创建 / 最早创建 / 最近活跃）、每页条数（10/20/50）。
+- **信息**：类型标签、标题/主题、状态标签、章节进度（已生成/总章节数）、首图缩略图（点击预览）、最近活跃（含创建日期）；
   工具条显示总数，「＋ 新建创作」弹框（与 /new 页同一表单组件）。
 
 ### 创作控制（项目页）
+
+项目页用**三个页签**组织：**大纲 / 章节 / 完成**，可随时互相切换（章节页可一键「返回大纲」调整）。
 
 - **首图**：项目页可**上传首图**或**提示词生成首图**（留空提示词时由 LLM 按一句话创意+风格自动撰写）。
   首图作为第 1 章的参考（漫画 = 图生图参考图；短剧 = 视频首帧），
   并在剧本阶段作为全片角色/风格基准（多模态 LLM 可见）。
 - **风格选择（支持自定义）**：新建项目时选预设风格（日系漫画风 / 国风水墨 / Q版 /
   写实电影感 / 皮克斯3D / 赛博朋克）或「自定义…」填任意描述；
-  风格贯穿篇幅/总纲/章节/剧本各阶段，用户指定优先于 LLM 推荐。
-- **整体路线控制**：篇幅确定后先生成**整体故事总纲**（开端→发展→高潮→结局）。
-  总纲可在项目页直接**编辑**（改剧情走向），改完点「按总纲重新生成章节」重排章节；
-  也可「重新生成总纲」。章节拆分严格遵循总纲节奏。
+  风格写入大纲，供后续各章保持一致（用户指定优先于 LLM 推荐）。
+
+- **① 大纲**：点「生成大纲」一次性规划 **风格 / 主题 / 基调 + 整体故事大纲（开端→发展→高潮→结局）+ 角色设定**，
+  并按「章节数量」生成**每章标题 + 主题摘要**（章节规划）。
+  大纲、角色设定、**默认分辨率**、章节规划（标题 / 摘要 / 数量）都可**手动编辑**后「保存大纲」；
+  也可「重新生成大纲」（按当前设定重做大纲+角色+章节）或「按大纲重新生成章节」（仅重拆章节）。
+  角色设定供后续各章保持一致（写进每章提示词）。
+- **② 章节**：对大纲规划出的各章做生产。**一键生成**「全部生成剧本 / 全部生成画面 / 重新生成全部画面」（SSE 逐章进度）；
+  每章手风琴卡片（默认**只显照片**，点击展开，一次只展开一章，生成后自动展开）内**按章多步**：
+  「生成剧本」（写剧本/提示词/分辨率，沿用大纲风格+角色+该章摘要）→「生成画面」，
+  还有 **重新生成画面 / 保存提示词 / 调整分辨率 / 上移 / 下移 / 删除**。
+  漫画每章 = **一页多格漫画**（一张图多个分镜、竖版构图，画面带旁白/对白文字）；短剧每章 = 一段视频。
+- **③ 完成**：生成完成后**导出 ZIP**（全部媒体 + 大纲/角色/各章剧本文本）与**导出 PDF**
+  （漫画：各章图拼成多页；短剧为视频不支持 PDF），并点「完成」手动标记项目为「已完成」。
+- **重新设定**：项目页头部可随时点「重新设定」，在弹框里调整**标题 / 一句话创意（主题）/ 风格**。
+  默认**非破坏**——保留现有大纲、角色、章节与已生成媒体；
+  也可勾选「清空并重排下游」，清空大纲/角色/章节/媒体并回到「大纲」阶段（相当于按新设定重开）。
+- **长步骤逐章进度（SSE）**：「全部生成剧本 / 全部生成画面 / 重新生成全部画面」均为较长步骤
+  （LLM 逐章撰写 / 逐章出图出视频，阻塞调用放入线程池、不卡事件循环），
+  走 SSE 流式下发逐章进度（第 x/y 章《标题》），完成后自动刷新；单章仍可用卡片内按钮单独生成剧本/生成画面/重生成。
 
 ### 微创作（/micro，作品 → 独立会话）
 
@@ -93,7 +111,7 @@ This repository ships a **Chinese** document and an **English** document (identi
   （模型名含 svd/wan/i2v 等视频关键词 → 出视频，否则出图像）。
 - **删除会话/作品**时同步清理其生成的媒体文件与用户附图。
 
-后端统一使用 **Pydantic AI v2**（`services/agent.py`）：流水线各阶段（篇幅/分章/剧本）
+后端统一使用 **Pydantic AI v2**（`services/agent.py`）：流水线各阶段（大纲/分章/剧本）
 走结构化输出（Pydantic 模型），微创作走流式 + 工具调用，全部 OpenAI 兼容协议。
 
 ### 配置字段
@@ -126,7 +144,7 @@ This repository ships a **Chinese** document and an **English** document (identi
 │   └── spa/             # 单页前端（UMD 引入，无打包）
 │       ├── index.html   #   外壳：顶栏 + <router-view> + 主题/语言预渲染
 │       ├── css/app.css  #   应用样式（Element Plus 主题变量映射 + 布局 + 对话区）
-│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）theme.js i18n.js（中英词典）md.js（Markdown）views/（7 个视图组件）
+│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）theme.js i18n.js（中英词典）md.js（Markdown）views/（7 个路由视图 + first-image / chapter-card 等子组件）
 └── data/                # app.db（SQLite） media/（图片/视频）
 ```
 
@@ -244,10 +262,12 @@ python main.py                # 访问 http://127.0.0.1:8010
 - **注意**：`img2img` 的 `init_images` 尺寸必须与 `width`/`height` **完全一致**，
   否则 422——本应用会自动读 `/sdapi/v1/options` 的当前宽高并把参考图缩放到该尺寸。
 
-分辨率由**智能体在剧本阶段按场景构图决定**（`ScriptOut.width/height`，64 的倍数），
-流水线生成时传给客户端；客户端按配置 `max_side`（最大分辨率，仅最长边）限幅
-（超长边等比缩小到上限内）。微创作等无智能体决定的场景只发 `prompt`（+参考图），
-其余参数留空 = 用 app 当前选中的设置；调用方也可通过 `params` 显式覆盖。
+分辨率优先级：章节自身的宽/高 > 大纲里的**默认分辨率** > 智能体在剧本阶段按场景构图决定
+ （`ScriptOut.width/height`，64 的倍数）；流水线生成时传给客户端，客户端再按配置 `max_side`
+ （最大分辨率，仅最长边）限幅（超长边等比缩小到上限内）。大纲页可设**默认分辨率**，
+ 每章卡片里也可**手动调整分辨率**（宽×高，保存后重生成生效）。
+ 微创作等无智能体决定的场景只发 `prompt`（+参考图），
+ 其余参数留空 = 用 app 当前选中的设置；调用方也可通过 `params` 显式覆盖。
 
 在 **⚙ 配置管理 → 新建配置 → DrawThings** 里填端点地址（`http://host:port`），
 可按需设置：最大分辨率（仅最长边：不限 / 512 / 768 / 1024）、
@@ -269,7 +289,7 @@ so it runs fully offline; FastAPI falls back to serving the SPA shell, so refres
 
 Start from **one sentence** and run it through a single pipeline to produce a **continuous comic** or a **continuous short drama**:
 
-> one sentence → set length → overall arc → chapters → script → per-chapter generation
+> one sentence → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP/PDF)
 
 The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
 Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent.
@@ -287,27 +307,45 @@ The UI **supports both Chinese and English**; toggle with one click in the top b
 
 - **Brand area**: platform name (Drawthings Studio) + a one-line value proposition + the primary CTAs (Enter Studio / ✨ Quick Create).
 - **Two feature entries**: the comic path (continuous images) and the drama path (continuous video), each explaining its continuity strategy.
-- **Pipeline explainer**: idea → length → arc → chapters → script → generate, shown as a six-step flow.
+- **Pipeline explainer**: idea → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP/PDF); the project page is three tabs (Outline / Chapters / Complete).
 
 ### My Creations (list page /projects)
 
-- **Management**: each table row can be **opened / renamed / deleted** (delete has a second confirmation); the project page header also has "Delete this project".
+- **Management**: click the **title** to open / rename / delete (delete has a second confirmation); the project page header also has "Delete this project".
   Deleting also removes all chapter records and the generated image/video files.
-- **Filters**: by type (comic/drama), status, sort (newest/oldest), and page size (10/20/50).
-- **Info**: type tag, title/idea, status tag, chapter progress (set/total), first-image thumbnail (click to preview), created date;
+- **Filters**: keyword (title/idea), type (comic/drama), status, sort (newest created / oldest created / recently active), and page size (10/20/50).
+- **Info**: type tag, title/idea, status tag, chapter progress (generated/total chapters), first-image thumbnail (click to preview), last active (with created date);
   the toolbar shows the total count and a "＋ New Project" dialog (the same form component as the /new page).
 
 ### Creation control (project page)
+
+The project page is organized into **three tabs — Outline / Chapters / Complete** — you can switch between them at any time (the Chapters tab has a one-click "Back to outline").
 
 - **First image**: the project page lets you **upload a first image** or **generate one from a prompt** (leave the prompt empty and the LLM writes one from the idea + style).
   The first image is the reference for chapter 1 (comic = img2img reference; drama = the first video frame),
   and serves as the character/style baseline for the whole work during scripting (visible to a multimodal LLM).
 - **Style selection (with custom)**: when creating a project, pick a preset style (Japanese manga / Chinese ink wash / chibi /
   realistic cinematic / Pixar 3D / cyberpunk) or choose "Custom…" and type any description;
-  the style carries through the length/arc/chapter/script stages, and a user-specified style takes priority over the LLM's recommendation.
-- **Overall route control**: after the length is set, the app first generates an **overall story arc** (beginning → development → climax → ending).
-  The arc can be **edited directly** on the project page (to change the story direction); after editing, click "Rebuild chapters from arc" to re-plan chapters;
-  you can also "Regenerate arc". Chapter splitting strictly follows the arc's rhythm.
+  the style is stored in the outline and keeps every chapter consistent (a user-specified style takes priority over the LLM's recommendation).
+
+- **① Outline**: click "Generate outline" to plan, in one pass, **style / theme / tone + the overall story outline (beginning → development → climax → ending) + the characters**,
+  and to produce the **chapter plan** — each chapter's title + one-line topic summary — based on the "chapter count".
+  The outline, characters, **default resolution** and the chapter plan (title / summary / count) are all **manually editable**, then "Save outline";
+  you can also "Regenerate outline" (redoes outline + characters + chapters from the current settings) or "Rebuild chapters from outline" (re-plans the chapters only).
+  The character sheet keeps the cast consistent across chapters (fed into each chapter's prompt).
+- **② Chapters**: produce the content for the planned chapters. **One-click generate** — "Generate all scripts / Generate all media / Regenerate all frames" (SSE per-chapter progress);
+  each chapter's accordion card (**shows only its photo** by default; click to expand, one open at a time, auto-expands when generated) supports **per-chapter steps**:
+  "Generate script" (writes script/prompt/resolution, using the outline's style + characters + that chapter's summary) → "Generate media",
+  plus **Regenerate media / Save prompt / adjust resolution / Move up / Move down / Delete**.
+  A comic chapter = **one multi-panel comic page** (several panels in a single image, portrait, with caption/dialogue text); a drama chapter = one video clip.
+- **③ Complete**: once generated, **Export ZIP** (all media + the outline/characters/per-chapter script text) and **Export PDF**
+  (comic: the chapter images combined into a multi-page PDF; drama is video and has no PDF), then click "Complete" to mark the project as done.
+- **Re-set**: at any time, open "Re-set" on the project page to adjust the **title / one-line idea (theme) / style** in a dialog.
+  It is **non-destructive by default** — the existing outline, characters, chapters and generated media are kept;
+  you can optionally tick "Clear & rebuild downstream" to wipe the outline/characters/chapters/media and return to the "Outline" stage (a fresh restart with the new settings).
+- **Per-chapter progress for long steps (SSE)**: "Generate all scripts / Generate all media / Regenerate all frames" are long steps
+  (the LLM writes chapter by chapter / media renders chapter by chapter; blocking calls run in a thread pool so the event loop stays responsive),
+  streamed over SSE with per-chapter progress (chapter x/y "title"), then auto-refreshes; a single chapter can still generate its script/media or regenerate from its own card buttons.
 
 ### Quick Create (/micro, work → independent sessions)
 
@@ -340,7 +378,7 @@ A lightweight, no-project creation desk (top bar "✨ Quick Create") — **a Qui
   (model names containing svd/wan/i2v and other video keywords → video, otherwise image).
 - **Deleting a session/work** also cleans up its generated media files and user attachments.
 
-The backend uses **Pydantic AI v2** uniformly (`services/agent.py`): the pipeline stages (length/chapters/script)
+The backend uses **Pydantic AI v2** uniformly (`services/agent.py`): the pipeline stages (outline/chapters/script)
 use structured output (Pydantic models), while Quick Create uses streaming + tool calls, all over the OpenAI-compatible protocol.
 
 ### Configuration fields
@@ -373,7 +411,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 │   └── spa/             # single-page frontend (UMD, no bundler)
 │       ├── index.html   #   shell: top bar + <router-view> + pre-paint theme/lang
 │       ├── css/app.css  #   app styles (Element Plus theme variable mapping + layout + chat area)
-│       └── js/          #   app.js (entry/router) api.js (fetch+SSE) theme.js i18n.js (zh/en dict) md.js (Markdown) views/ (7 view components)
+│       └── js/          #   app.js (entry/router) api.js (fetch+SSE) theme.js i18n.js (zh/en dict) md.js (Markdown) views/ (7 routed views + sub-components like first-image / chapter-card)
 └── data/                # app.db (SQLite) media/ (images/videos)
 ```
 
@@ -491,10 +529,12 @@ Enable the HTTP server inside the Draw Things app; the port is whatever the app 
 - **Note**: `img2img`'s `init_images` size must **exactly match** `width`/`height`,
   or you get 422 — this app reads the current width/height from `/sdapi/v1/options` and resizes the reference image to that size automatically.
 
-Resolution is **decided by the agent during the scripting stage based on scene composition** (`ScriptOut.width/height`, multiples of 64),
-and passed to the client at generation time; the client caps it by the config's `max_side` (max resolution, longest side only)
-(downscaling the over-long side proportionally). In scenarios without an agent decision (e.g. Quick Create), only `prompt` (+ reference image) is sent;
-the remaining params are left empty = use the app's current settings; callers can also override via `params`.
+Resolution priority: the chapter's own width/height > the outline's **default resolution** > the agent's per-scene choice during scripting
+ (`ScriptOut.width/height`, multiples of 64); the value is passed to the client at generation time, which then caps it by the config's
+ `max_side` (max resolution, longest side only, downscaling the over-long side proportionally). The outline page sets the **default
+ resolution**, and each chapter card can also **adjust resolution manually** (width×height; take effect after re-generating).
+ In scenarios without an agent decision (e.g. Quick Create), only `prompt` (+ reference image) is sent;
+ the remaining params are left empty = use the app's current settings; callers can also override via `params`.
 
 In **⚙ Settings → New config → Draw Things**, fill in the endpoint address (`http://host:port`);
 optionally set: max resolution (longest side only: unlimited / 512 / 768 / 1024) and

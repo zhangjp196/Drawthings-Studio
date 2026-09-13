@@ -61,11 +61,20 @@ def _migrate():
         "chapters": {
             "width": "INTEGER DEFAULT 0",
             "height": "INTEGER DEFAULT 0",
+            "summary": "TEXT DEFAULT ''",
         },
         "projects": {
             "title": "VARCHAR(200) DEFAULT ''",
             "arc": "TEXT DEFAULT ''",
             "first_image": "VARCHAR(500) DEFAULT ''",
+            "cover_as_first_ref": "INTEGER DEFAULT 0",
+            "characters": "TEXT DEFAULT ''",
+            "global_prompt": "TEXT DEFAULT ''",
+            "res_width": "INTEGER DEFAULT 0",
+            "res_height": "INTEGER DEFAULT 0",
+            "count_mode": "VARCHAR(10) DEFAULT 'auto'",
+            "count_min": "INTEGER DEFAULT 0",
+            "count_max": "INTEGER DEFAULT 0",
         },
         "micro_messages": {
             "images": "TEXT",

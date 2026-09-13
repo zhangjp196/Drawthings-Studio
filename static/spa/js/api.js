@@ -24,6 +24,7 @@ window.API = {
   get: (u) => API.req('GET', u),
   post: (u, body) => API.req('POST', u, body),
   put: (u, body) => API.req('PUT', u, body),
+  del: (u) => API.req('DELETE', u),
   postForm: (u, fd) => API.req('POST', u, fd, true),
 
   // SSE：POST JSON，按帧回调 onEvent(event, data)；非 2xx 抛 Error

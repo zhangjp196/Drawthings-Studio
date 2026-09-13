@@ -14,6 +14,8 @@ Views.projects = {
 
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
+          <el-input v-model="f.q" :placeholder="I18N.t('proj.searchPh')" clearable style="width: 220px"
+                    @keyup.enter="apply" @clear="apply" />
           <el-select v-model="f.kind" :placeholder="I18N.t('proj.type')" clearable style="width: 120px" @change="apply">
             <el-option :label="I18N.t('proj.all')" value="" />
             <el-option :label="I18N.t('proj.comic')" value="comic" />
@@ -26,6 +28,7 @@ Views.projects = {
           <el-select v-model="f.sort" style="width: 130px" @change="apply">
             <el-option :label="I18N.t('proj.sortNew')" value="desc" />
             <el-option :label="I18N.t('proj.sortOld')" value="asc" />
+            <el-option :label="I18N.t('proj.sortActive')" value="active" />
           </el-select>
           <el-select v-model="f.size" style="width: 110px" @change="apply">
             <el-option v-for="n in [10, 20, 50]" :key="n" :label="I18N.t('proj.perPage', n)" :value="n" />
@@ -52,7 +55,7 @@ Views.projects = {
           </template>
         </el-table-column>
         <el-table-column :label="I18N.t('proj.colChapters')" width="90" align="center">
-          <template #default="{ row }">{{ row.chapter_count }}{{ row.total_chapters ? ' / ' + row.total_chapters : '' }}</template>
+          <template #default="{ row }">{{ row.chapter_count }}</template>
         </el-table-column>
         <el-table-column :label="I18N.t('proj.colFirst')" width="100">
           <template #default="{ row }">
@@ -61,12 +64,14 @@ Views.projects = {
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="I18N.t('proj.colCreated')" width="110">
-          <template #default="{ row }">{{ row.created_at.slice(0, 10) }}</template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.colActions')" width="200" fixed="right">
+        <el-table-column :label="I18N.t('proj.colUpdated')" width="125">
           <template #default="{ row }">
-            <el-button size="small" @click="open(row)">{{ I18N.t('proj.open') }}</el-button>
+            <div>{{ row.updated_at.slice(0, 10) }}</div>
+            <div class="muted small">{{ I18N.t('proj.colCreated') }} {{ row.created_at.slice(0, 10) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="I18N.t('proj.colActions')" width="170" fixed="right">
+          <template #default="{ row }">
             <el-button size="small" @click="askRename(row)">{{ I18N.t('proj.rename') }}</el-button>
             <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del(row)">
               <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
@@ -96,11 +101,11 @@ Views.projects = {
     const statusLabels = computed(() => {
       const t = I18N.t;
       return {
-        planning: t('proj.status.planning'), scoped: t('proj.status.scoped'), arced: t('proj.status.arced'),
-        chaptered: t('proj.status.chaptered'), scripted: t('proj.status.scripted'), done: t('proj.status.done'),
+        planning: t('proj.status.planning'), arced: t('proj.status.arced'),
+        chaptered: t('proj.status.chaptered'), done: t('proj.status.done'),
       };
     });
-    const f = reactive({ page: 1, size: 10, kind: '', status: '', sort: 'desc' });
+    const f = reactive({ page: 1, size: 10, q: '', kind: '', status: '', sort: 'desc' });
     const rows = ref([]);
     const total = ref(0);
     const totalPages = ref(1);
@@ -113,7 +118,7 @@ Views.projects = {
     async function load() {
       try {
         const data = await API.get('/api/projects?' + new URLSearchParams({
-          page: f.page, size: f.size, kind: f.kind, status: f.status, sort: f.sort,
+          page: f.page, size: f.size, q: f.q, kind: f.kind, status: f.status, sort: f.sort,
         }));
         rows.value = data.projects;
         total.value = data.total;
@@ -124,7 +129,7 @@ Views.projects = {
     }
     function apply() { f.page = 1; load(); }
     function reset() {
-      Object.assign(f, { page: 1, size: 10, kind: '', status: '', sort: 'desc' });
+      Object.assign(f, { page: 1, size: 10, q: '', kind: '', status: '', sort: 'desc' });
       load();
     }
     const statusTag = (s) => (s === 'done' ? 'success' : s === 'planning' ? 'info' : 'primary');

@@ -177,7 +177,9 @@ class DrawThingsClient:
                 o = self._http_options()
                 w, h = int(o.get("width") or 0), int(o.get("height") or 0)
             if w and h:
-                payload["width"], payload["height"] = self._cap_size(int(w), int(h))
+                # 先限幅再同时用于 payload 与参考图缩放：二者尺寸必须完全一致，否则 img2img 422
+                w, h = self._cap_size(int(w), int(h))
+                payload["width"], payload["height"] = w, h
         for k in ("seed", "batch_size", "sampler"):
             v = eff(k)
             if v is not None:

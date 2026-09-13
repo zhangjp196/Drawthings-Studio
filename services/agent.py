@@ -91,12 +91,13 @@ def to_message_history(items: list[dict]) -> list[ModelMessage]:
 
 
 # ---------------- 流水线结构化输出 ----------------
-class ScopeOut(BaseModel):
-    """阶段 1：篇幅 / 风格规划。"""
-    total_chapters: int = 4
+class OutlineOut(BaseModel):
+    """大纲：整体风格 / 主题 / 基调 / 故事大纲 / 角色设定（供后续各章保持一致）。"""
     style: str = ""
     theme: str = ""
     tone: str = ""
+    arc: str = ""
+    characters: str = ""
 
 
 class ChapterOut(BaseModel):

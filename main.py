@@ -77,6 +77,7 @@ def _chapter_view(ch) -> dict:
     return {
         "index": ch.index,
         "title": ch.title,
+        "summary": ch.summary or "",
         "description": ch.description,
         "prompt": ch.prompt,
         "width": ch.width or 0,
@@ -130,7 +131,7 @@ def _project_view(p: Project, chapter_count: int = 0) -> dict:
     return {
         "id": p.id, "kind": p.kind, "title": p.title or "", "origin": p.origin,
         "status": p.status, "created_at": p.created_at, "updated_at": p.updated_at,
-        "scope": scope, "total_chapters": scope.get("total_chapters"),
+        "scope": scope,
         "first_image_url": _media_url(p.first_image or ""),
         "chapter_count": chapter_count,
     }
@@ -850,11 +851,10 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
 # ---------------- 项目（JSON API） ----------------
 @app.get("/api/projects")
 def projects_list(db: Session = Depends(get_db), page: int = 1, size: int = 10,
-                  kind: str = "", status: str = "", sort: str = "desc"):
-    """创作列表：类型/状态/排序筛选 + 分页。"""
+                  kind: str = "", status: str = "", q: str = "", sort: str = "desc"):
+    """创作列表：类型/状态/关键词筛选 + 排序（创建时间 / 最近活跃）+ 分页。"""
     page, size = _clamp_page(page, size)
-    sort_desc = sort != "asc"
-    rows, total = pipeline.list_projects(db, kind or None, status or None, sort_desc,
+    rows, total = pipeline.list_projects(db, kind or None, status or None, q.strip(), sort,
                                          size, (page - 1) * size)
     counts = dict(db.query(Chapter.project_id, func.count(Chapter.id))
                   .group_by(Chapter.project_id).all())
@@ -907,6 +907,30 @@ async def project_rename(request: Request, project_id: str, db: Session = Depend
     return {"ok": True, "title": title}
 
 
+@app.post("/api/projects/{project_id}/reset")
+async def project_reset(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """重新设定：修改标题 / 一句话创意（主题）/ 风格。
+    默认不清空下游（保留大纲/章节/已生成媒体）；clear_downstream=true 时清空大纲/章节/媒体并回到 planning。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    try:
+        pipeline.reset_settings(db, project,
+                                title=str(body.get("title") or ""),
+                                origin=str(body.get("origin") or ""),
+                                style=str(body.get("style") or ""),
+                                clear_downstream=bool(body.get("clear_downstream") or False),
+                                lang=lang)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, f"【重新设定】失败：{e}", f"[Re-set] failed: {e}"))
+    return {"ok": True}
+
+
 @app.post("/api/projects/{project_id}/delete")
 def project_delete(request: Request, project_id: str, db: Session = Depends(get_db)):
     """删除创作（含全部章节与媒体文件）。"""
@@ -937,7 +961,13 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "id": project.id, "kind": project.kind, "title": project.title or "",
             "origin": project.origin, "status": project.status,
             "scope": project.scope or {}, "arc": project.arc or "",
+            "characters": project.characters or "",
+            "global_prompt": project.global_prompt or "",
+            "res_width": project.res_width or 0, "res_height": project.res_height or 0,
+            "count_mode": project.count_mode or "auto",
+            "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
+            "cover_as_first_ref": bool(project.cover_as_first_ref),
             "created_at": project.created_at, "updated_at": project.updated_at,
             "llm_config_id": project.llm_config_id,
             "drawthings_config_id": project.drawthings_config_id,
@@ -974,7 +1004,7 @@ async def project_config_update(request: Request, project_id: str, db: Session =
 
 @app.post("/api/projects/{project_id}/action")
 async def project_action(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """推进流水线：scope/arc/chapters/script/generate（LLM 步骤耗时较长）。"""
+    """推进流水线：outline（总览/大纲）/ chapters（拆章）/ generate（生成未完成章节）。"""
     lang = _lang(request)
     body = await _json_body(request)
     step = str(body.get("step") or "")
@@ -982,16 +1012,19 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     try:
-        if step == "scope":
-            project = await pipeline.step_scope(db, project, lang)
-        elif step == "arc":
-            project = await pipeline.step_arc(db, project, lang)
+        if step == "outline":
+            project = await pipeline.step_outline(
+                db, project, lang,
+                res_width=int(body.get("res_width") or 0),
+                res_height=int(body.get("res_height") or 0))
         elif step == "chapters":
-            project = await pipeline.step_chapters(db, project, lang)
-        elif step == "script":
-            project = await pipeline.step_script(db, project, lang)
+            project = await pipeline.step_chapters(
+                db, project, lang,
+                count_mode=str(body.get("count_mode") or "auto"),
+                count_min=int(body.get("count_min") or 0),
+                count_max=int(body.get("count_max") or 0))
         elif step == "generate":
-            project = pipeline.step_generate(db, project, lang=lang)
+            project = await pipeline.step_generate(db, project, lang=lang)
         else:
             raise HTTPException(status_code=400,
                                 detail=L(lang, f"未知步骤: {step}", f"Unknown step: {step}"))
@@ -999,13 +1032,77 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
         raise
     except Exception as e:
         raise HTTPException(status_code=400,
-                            detail=L(lang, f"【{step}】失败：{e}", f"[{step}] failed: {e}"))
+                             detail=L(lang, f"【{step}】失败：{e}", f"[{step}] failed: {e}"))
     return {"ok": True}
 
 
+@app.post("/api/projects/{project_id}/action-stream")
+async def project_action_stream(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """逐章生成画面的 SSE 进度流：body 传 { step: 'generate', indices: [...] }（indices 省略/空 = 全部章节）。
+
+    每章两步（出图提示词→生图）连贯进行、按序号逐个推进（后章参考前章已生成的图）；
+    事件：progress(i/total+标题) / chapter(单章两步完成，附提示词/媒体/状态) / done(附新状态) / error(失败)。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    step = str(body.get("step") or "generate")
+    if step != "generate":
+        raise HTTPException(status_code=400,
+                             detail=L(lang, f"该步骤不支持流式进度：{step}",
+                                      f"Streaming progress not supported for step: {step}"))
+    raw = body.get("indices")
+    indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    return StreamingResponse(
+        _project_action_stream(db, project, lang, indices),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+async def _project_action_stream(db: Session, project: Project, lang: str, indices):
+    """后台执行「逐章生成画面」并逐事件下发：进度/单章回调入队 → SSE 帧；结束发 done，异常发 error。"""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def progress_cb(current: int, total: int, title: str):
+        await queue.put(("progress", {"current": current, "total": total, "title": title or ""}))
+
+    async def chapter_cb(ch):
+        # 单章两步完成：实时回传该章提示词/描述/分辨率/媒体/状态，前端逐个刷新（后续章节仍参考它）
+        await queue.put(("chapter", {"index": ch.index,
+                                     "description": ch.description or "",
+                                     "prompt": ch.prompt or "",
+                                     "width": ch.width or 0, "height": ch.height or 0,
+                                     "media_url": _media_url(ch.media_path or ""),
+                                     "status": ch.status, "error": ch.error or ""}))
+
+    async def _run():
+        try:
+            await pipeline.step_generate(db, project, indices=indices, lang=lang,
+                                         progress_cb=progress_cb, chapter_done_cb=chapter_cb)
+            fresh = db.get(Project, project.id)
+            await queue.put(("done", {"status": fresh.status if fresh else ""}))
+        except Exception as e:
+            await queue.put(("error", {"message": L(lang, f"生成画面失败：{e}",
+                                                     f"Generation failed: {e}")}))
+        finally:
+            await queue.put(("__eof__", None))
+
+    task = asyncio.create_task(_run())
+    try:
+        while True:
+            event, data = await queue.get()
+            if event == "__eof__":
+                break
+            yield _sse(event, data)
+    finally:
+        if not task.done():
+            task.cancel()
+
+
 @app.post("/api/projects/{project_id}/gen/{index}")
-def project_gen_single(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
-    """生成指定章节（图/视频）。"""
+async def project_gen_single(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
+    """生成指定章节：两步连贯——① (重新)生成出图提示词（参考上一章已生成的图）② 生图/生视频。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
@@ -1016,18 +1113,18 @@ def project_gen_single(request: Request, project_id: str, index: int, db: Sessio
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
     try:
-        project = pipeline.step_generate(db, project, index=index, lang=lang)
+        project = await pipeline.step_generate(db, project, indices=[index], lang=lang)
     except Exception as e:
         raise HTTPException(status_code=400,
-                            detail=L(lang, f"【生成第{index+1}章】失败：{e}",
-                                     f"[Generate chapter {index+1}] failed: {e}"))
+                             detail=L(lang, f"【生成第{index+1}章】失败：{e}",
+                                      f"[Generate chapter {index+1}] failed: {e}"))
     return {"ok": True}
 
 
 @app.post("/api/projects/{project_id}/edit/{index}")
 async def project_edit(request: Request, project_id: str, index: int,
                        db: Session = Depends(get_db)):
-    """保存指定章节的提示词（修改后需重生成应用）。"""
+    """保存指定章节的出图提示词 / 分辨率（宽/高，修改后需重生成应用）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
@@ -1038,36 +1135,75 @@ async def project_edit(request: Request, project_id: str, index: int,
                 .order_by(Chapter.index).all())
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    pipeline.edit_prompt(db, project, index, str(body.get("prompt") or ""))
+    try:
+        w = int(body.get("width") or 0)
+        h = int(body.get("height") or 0)
+    except (TypeError, ValueError):
+        w = h = 0
+    pipeline.save_chapter_fields(db, project, index, str(body.get("prompt") or ""), w, h)
     return {"ok": True}
 
 
-@app.post("/api/projects/{project_id}/regenerate/{index}")
-def project_regenerate(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
-    """重新生成指定章节。"""
+# ---------------- 章节：增删排序 / 手动完成 ----------------
+@app.post("/api/projects/{project_id}/chapters")
+def project_chapter_add(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """在末尾新增一章（可随后「生成剧本」或手改场景）。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    chapters = (db.query(Chapter)
-                .filter(Chapter.project_id == project.id)
-                .order_by(Chapter.index).all())
-    if not (0 <= index < len(chapters)):
-        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    try:
-        project = pipeline.regenerate(db, project, index, lang)
-    except Exception as e:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"【重生成第{index+1}章】失败：{e}",
-                                     f"[Regenerate chapter {index+1}] failed: {e}"))
+    pipeline.add_chapter(db, project)
     return {"ok": True}
 
 
-# ---------------- 首图 / 总纲 ----------------
+@app.delete("/api/projects/{project_id}/chapters/{index}")
+def project_chapter_delete(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
+    """删除第 index 章（连同清理媒体文件），其余章节重新编号。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    chapters = (db.query(Chapter).filter(Chapter.project_id == project.id)
+                .order_by(Chapter.index).all())
+    if not (0 <= index < len(chapters)):
+        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+    pipeline.delete_chapter(db, project, index)
+    return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/chapters/{index}/move")
+async def project_chapter_move(request: Request, project_id: str, index: int,
+                                db: Session = Depends(get_db)):
+    """上移 / 下移第 index 章（body: {"direction": "up"|"down"}）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    chapters = (db.query(Chapter).filter(Chapter.project_id == project.id)
+                .order_by(Chapter.index).all())
+    if not (0 <= index < len(chapters)):
+        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+    pipeline.move_chapter(db, project, index, str(body.get("direction") or ""))
+    return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/complete")
+def project_complete(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """手动标记完成（不再由「全部生成」自动触发）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    pipeline.mark_done(db, project)
+    return {"ok": True}
+
+
+# ---------------- 封面 / 大纲 ----------------
 @app.post("/api/projects/{project_id}/first-image")
 def project_first_image_upload(request: Request, project_id: str, file: UploadFile = File(...),
                                db: Session = Depends(get_db)):
-    """上传首图（作为第 1 章参考图）。"""
+    """上传封面（作品封面；可选作为第 1 章参考图）。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
@@ -1089,7 +1225,7 @@ def project_first_image_upload(request: Request, project_id: str, file: UploadFi
 @app.post("/api/projects/{project_id}/first-image/generate")
 async def project_first_image_generate(request: Request, project_id: str,
                                        db: Session = Depends(get_db)):
-    """提示词生成首图（prompt 为空时由 LLM 依据一句话创意+风格自动撰写）。"""
+    """提示词生成封面（prompt 为空时由 LLM 依据一句话创意+风格自动撰写）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
@@ -1097,23 +1233,84 @@ async def project_first_image_generate(request: Request, project_id: str,
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     try:
         project = await pipeline.generate_first_image(db, project, str(body.get("prompt") or ""),
-                                                      lang=lang)
+                                                       lang=lang)
     except Exception as e:
         raise HTTPException(status_code=400,
-                            detail=L(lang, f"【生成首图】失败：{e}", f"[Generate first image] failed: {e}"))
+                            detail=L(lang, f"【生成封面】失败：{e}", f"[Generate cover] failed: {e}"))
     return {"ok": True}
 
 
-@app.post("/api/projects/{project_id}/arc")
-async def project_arc_save(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """保存用户手改的整体故事总纲（整体路线控制）。"""
+@app.post("/api/projects/{project_id}/first-image/ref")
+async def project_cover_ref(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """设置是否把封面作为第 1 章参考（漫画 img2img / 短剧首帧）。"""
+    lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
-        raise HTTPException(status_code=404,
-                            detail=L(_lang(request), "项目不存在", "Project not found"))
-    pipeline.save_arc(db, project, str(body.get("arc") or "").strip())
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    pipeline.set_cover_ref(db, project, bool(body.get("enabled")))
+    return {"ok": True, "enabled": bool(body.get("enabled"))}
+
+
+@app.post("/api/projects/{project_id}/outline")
+async def project_outline_save(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """保存大纲页手动编辑：大纲 / 角色设定 / 风格 / 默认分辨率 / 每章(标题+摘要)。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    raw = body.get("chapters")
+    chapters = None
+    if isinstance(raw, list):
+        chapters = [{"title": str(c.get("title") or ""), "summary": str(c.get("summary") or "")}
+                    for c in raw if isinstance(c, dict)]
+    try:
+        pipeline.save_outline(
+            db, project,
+            arc=body.get("arc"), characters=body.get("characters"), style=body.get("style"),
+            global_prompt=body.get("global_prompt"),
+            res_width=body.get("res_width"), res_height=body.get("res_height"),
+            count_mode=body.get("count_mode"), count_min=body.get("count_min"),
+            count_max=body.get("count_max"),
+            chapters=chapters)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, f"保存大纲失败：{e}", f"Save outline failed: {e}"))
     return {"ok": True}
+
+
+# ---------------- 导出（ZIP / PDF） ----------------
+@app.get("/api/projects/{project_id}/export/zip")
+def project_export_zip(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """导出 ZIP：全部媒体（图/视频）+ 首图 + 大纲/角色/各章剧本文本。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    try:
+        path, fname = pipeline.export_zip(db, project)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, f"导出 ZIP 失败：{e}", f"Export ZIP failed: {e}"))
+    return FileResponse(path, filename=fname, media_type="application/zip")
+
+
+@app.get("/api/projects/{project_id}/export/pdf")
+def project_export_pdf(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """导出 PDF（漫画：各章图片按序拼成多页；短剧/无图 → 400）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    try:
+        path, fname = pipeline.export_pdf(db, project)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, f"导出 PDF 失败：{e}", f"Export PDF failed: {e}"))
+    return FileResponse(path, filename=fname, media_type="application/pdf")
 
 
 # ---------------- SPA 外壳 ----------------

@@ -6,7 +6,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON
+from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
 
 from db import Base
@@ -71,10 +71,18 @@ class Project(Base):
     origin = Column(Text, nullable=False)                 # 主题（一句话创意）
     llm_config_id = Column(String(12), ForeignKey("llm_configs.id"), nullable=False)
     drawthings_config_id = Column(String(12), ForeignKey("drawthing_configs.id"), nullable=False)
-    status = Column(String(20), default="planning")       # planning|scoped|arced|chaptered|scripted|done
-    scope = Column(JSON, default=dict)                     # 篇幅/风格等
-    arc = Column(Text, default="")                         # 整体故事总纲（开端→发展→高潮→结局，可编辑）
-    first_image = Column(String(500), default="")          # 首图路径（第 1 章参考：漫画 img2img / 短剧首帧）
+    status = Column(String(20), default="planning")       # planning|arced|done
+    scope = Column(JSON, default=dict)                     # 风格/主题/基调（整体，供后续保持一致）
+    arc = Column(Text, default="")                         # 整体故事大纲（开端→发展→高潮→结局，可编辑）
+    characters = Column(Text, default="")                  # 角色设定（主要角色的名字/形象/性格，供后续各章保持一致）
+    global_prompt = Column(Text, default="")               # 全局提示词（要点/约束）：注入到每次章节 LLM 调用
+    res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
+    res_height = Column(Integer, default=0)                # 默认分辨率高（0=跟随智能体/出图端）
+    count_mode = Column(String(10), default="auto")        # 章节数量模式：auto（模型决定）| range（区间内取整）
+    count_min = Column(Integer, default=0)                 # range 模式：最少章节数
+    count_max = Column(Integer, default=0)                 # range 模式：最多章节数
+    first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面；可选作为第 1 章参考）
+    cover_as_first_ref = Column(Boolean, default=False)    # 是否把封面作为第 1 章参考（漫画 img2img / 短剧首帧），默认关
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     llm_config = relationship("LLMConfig")
@@ -91,7 +99,8 @@ class Chapter(Base):
     project_id = Column(String(12), ForeignKey("projects.id"), nullable=False)
     index = Column(Integer, nullable=False)                # 章序号（0 起）
     title = Column(String(200), default="")
-    description = Column(Text, default="")                 # 剧本描述
+    summary = Column(Text, default="")                     # 大纲里的每章主题摘要（规划用，供后续章节保持一致）
+    description = Column(Text, default="")                 # 剧本描述（章节页「生成剧本」产出的详细剧本）
     prompt = Column(Text, default="")                      # 出图/出视频提示词
     width = Column(Integer, default=0)                     # 智能体决定的具体分辨率宽（0=跟随 app）
     height = Column(Integer, default=0)                    # 智能体决定的具体分辨率高（0=跟随 app）
