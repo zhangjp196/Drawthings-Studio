@@ -511,6 +511,62 @@ def micro_work_page(request: Request, work_id: str, db: Session = Depends(get_db
     return _micro_work_view(db, work)
 
 
+# 注意：以下两个 /works 路由必须注册在 {session_id} 系列路由之前，
+# 否则「works」会被当成 session_id 抢先匹配（FastAPI 按注册顺序匹配）。
+@app.get("/api/micro/{work_id}/works")
+def micro_works_gallery(request: Request, work_id: str, db: Session = Depends(get_db)):
+    """作品（= 该作品下所有会话里助手生成的媒体：图/视频）。按生成时间倒序。"""
+    work = db.get(MicroWork, work_id)
+    if not work:
+        raise HTTPException(status_code=404,
+                            detail=L(_lang(request), "作品不存在", "Work not found"))
+    sess_title = {s.id: s.title for s in work.sessions}
+    msgs = (db.query(MicroMessage)
+            .join(MicroSession, MicroMessage.session_id == MicroSession.id)
+            .filter(MicroSession.micro_id == work_id,
+                    MicroMessage.role == "assistant",
+                    MicroMessage.media_url.isnot(None),
+                    MicroMessage.media_url != "")
+            .order_by(MicroMessage.created_at.desc(), MicroMessage.id.desc()).all())
+    items = [{
+        "id": m.id, "session_id": m.session_id,
+        "session_title": sess_title.get(m.session_id, ""),
+        "media_url": m.media_url, "prompt": m.prompt or "",
+        "content": m.content or "", "created_at": m.created_at or "",
+    } for m in msgs]
+    return {"works": items, "total": len(items)}
+
+
+@app.post("/api/micro/{work_id}/works/delete")
+async def micro_works_delete(request: Request, work_id: str, db: Session = Depends(get_db)):
+    """批量删除作品（= 对应的助手媒体消息 + 媒体文件），可跨该作品多个会话。"""
+    lang = _lang(request)
+    work = db.get(MicroWork, work_id)
+    if not work:
+        raise HTTPException(status_code=404, detail=L(lang, "作品不存在", "Work not found"))
+    body = await _json_body(request)
+    ids = []
+    for x in (body.get("ids") or []):
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请选择要删除的作品", "Please select works to delete"))
+    msgs = (db.query(MicroMessage)
+            .join(MicroSession, MicroMessage.session_id == MicroSession.id)
+            .filter(MicroSession.micro_id == work_id, MicroMessage.id.in_(ids)).all())
+    if not msgs:
+        raise HTTPException(status_code=404, detail=L(lang, "作品不存在", "Work not found"))
+    _cleanup_message_media(msgs)
+    for m in msgs:
+        db.delete(m)
+    work.updated_at = _now()
+    db.commit()
+    return {"ok": True, "deleted": len(msgs)}
+
+
 @app.get("/api/micro/{work_id}/{session_id}")
 def micro_session_page(request: Request, work_id: str, session_id: str, db: Session = Depends(get_db)):
     """作品 + 选中会话的消息历史。"""

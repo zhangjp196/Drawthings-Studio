@@ -457,13 +457,36 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 }
 .cfg-sec-body .el-empty { padding: 18px 0; }
 
-/* ---------- 微创作：作品页（会话列表 + 对话） ---------- */
-.mc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+/* ---------- 微创作：作品页（tab：对话 / 作品 / 设置） ---------- */
+.mc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
+.mc-tabs { margin-top: 2px; }
 .mc-body {
   display: flex; gap: 14px; align-items: stretch;
-  height: calc(100vh - 265px); min-height: 420px;
+  height: calc(100vh - 305px); min-height: 420px;
   position: relative;
 }
+/* 作品（生成媒体）画廊：多选批量删除 */
+.works-toolbar { display: flex; align-items: center; gap: 12px; margin: 2px 0 12px; flex-wrap: wrap; }
+.works-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.work-piece {
+  border-radius: 14px; border: 1px solid var(--line); overflow: hidden;
+  background: var(--chat-bubble);
+  display: flex; flex-direction: column;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.work-piece.sel { border-color: var(--el-color-primary); box-shadow: 0 0 0 2px var(--el-color-primary-light-7); }
+.wp-media { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; overflow: hidden; }
+.wp-media img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block; }
+.wp-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.work-piece.sel .wp-media::after {
+  content: ''; position: absolute; inset: 0; background: var(--el-color-primary); opacity: .18; pointer-events: none;
+}
+.wp-check { position: absolute; top: 8px; right: 8px; z-index: 2; background: rgba(255, 255, 255, .78); border-radius: 999px; padding: 3px 6px; }
+.wp-cap {
+  padding: 8px 12px 0; font-size: 12px; line-height: 1.5; color: var(--ink);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.wp-src { padding: 4px 12px 12px; font-size: 12px; }
 .mc-side {
   width: 280px; flex-shrink: 0; display: flex; flex-direction: column;
   border-radius: 16px; overflow: hidden;

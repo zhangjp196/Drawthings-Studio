@@ -1,4 +1,4 @@
-// 微创作作品页：左=会话列表（折叠记忆），右=当前会话对话
+// 微创作作品页：tab = 对话（左会话列表+右对话）/ 作品（生成媒体画廊，多选批量删）/ 设置（作品选项）
 // 对话：SSE 流式（token/tool/media/tool_error/error/done）+ Markdown + 附图（视觉模型：选择/粘贴/拖拽）+ 图片放大
 window.Views = window.Views || {};
 Views.microWork = {
@@ -12,7 +12,7 @@ Views.microWork = {
           <p class="meta muted">{{ I18N.t('p.metaLlm', data.work.llm_name) }} · {{ I18N.t('p.metaDt', data.work.dt_name || I18N.t('mw.dtNone')) }}</p>
         </div>
         <div class="proj-head-actions">
-          <el-button @click="openCfg">{{ I18N.t('mw.options') }}</el-button>
+          <el-button @click="tab = 'settings'">{{ I18N.t('mw.options') }}</el-button>
           <el-button @click="router.push('/micro')">{{ I18N.t('p.back') }}</el-button>
           <el-popconfirm :title="I18N.t('mw.delWorkConfirm')" @confirm="delWork">
             <template #reference><el-button type="danger" plain>{{ I18N.t('mw.delWork') }}</el-button></template>
@@ -20,6 +20,8 @@ Views.microWork = {
         </div>
       </div>
 
+      <el-tabs v-model="tab" class="mc-tabs">
+      <el-tab-pane :label="I18N.t('mw.tabChat')" name="chat">
       <div class="mc-body" :class="{ 'side-hidden': sideHidden }">
         <button v-if="sideHidden" type="button" class="mc-expand" :title="I18N.t('mw.expandTitle')" @click="setSide(false)">{{ I18N.t('mw.expand') }}</button>
         <aside class="mc-side" v-show="!sideHidden">
@@ -104,6 +106,62 @@ Views.microWork = {
           </div>
         </section>
       </div>
+      </el-tab-pane>
+
+      <!-- ============ 作品（该作品下所有会话生成的媒体：图/视频，多选批量删除）============ -->
+      <el-tab-pane :label="I18N.t('mw.tabWorks')" name="works">
+        <div class="works-toolbar">
+          <b class="muted small">{{ I18N.t('mw.works', works.length) }}</b>
+          <div style="flex: 1"></div>
+          <el-checkbox :model-value="allWSel" :disabled="!works.length" @change="toggleAllWorks">{{ I18N.t('mw.worksSelAll') }}</el-checkbox>
+          <el-popconfirm :title="I18N.t('mw.worksDelConfirm', selWorks.length)" @confirm="delWorks">
+            <template #reference>
+              <el-button type="danger" plain :disabled="!selWorks.length || worksBusy">{{ I18N.t('mw.worksDelSel', selWorks.length) }}</el-button>
+            </template>
+          </el-popconfirm>
+        </div>
+        <div class="works-grid" v-if="works.length">
+          <div v-for="w in works" :key="w.id" class="work-piece" :class="{ sel: isWSel(w.id) }">
+            <div class="wp-media">
+              <video v-if="isMediaVideo(w.media_url)" :src="w.media_url" controls preload="metadata"></video>
+              <img v-else :src="w.media_url" :alt="I18N.t('mw.resultAlt')" @click="openLb([w.media_url], 0)">
+              <el-checkbox class="wp-check" :model-value="isWSel(w.id)" @click.stop @change="toggleWSel(w.id)"></el-checkbox>
+            </div>
+            <div class="wp-cap" v-if="w.prompt || w.content">{{ w.prompt || w.content }}</div>
+            <div class="wp-src muted">{{ (w.session_title || I18N.t('mw.newSession')) }} · {{ w.created_at.slice(0, 10) }}</div>
+          </div>
+        </div>
+        <el-empty v-else :description="I18N.t('mw.worksEmpty')" :image-size="72" />
+      </el-tab-pane>
+
+      <!-- ============ 设置（作品选项，作用于全部会话）============ -->
+      <el-tab-pane :label="I18N.t('mw.tabSettings')" name="settings">
+        <el-card shadow="never" style="max-width: 640px">
+          <p class="hint">{{ I18N.t('mw.cfgHint') }}</p>
+          <el-form label-position="top">
+            <el-form-item :label="I18N.t('mc.fTitle')">
+              <el-input v-model="cfg.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
+            </el-form-item>
+            <el-form-item :label="I18N.t('mc.llm')">
+              <el-select v-model="cfg.llm" style="width: 100%">
+                <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
+                           :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / ' + I18N.t('cfg.textOnly') : '') + '）'" />
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="I18N.t('mc.dt')">
+              <el-select v-model="cfg.dt" clearable style="width: 100%">
+                <el-option value="" :label="I18N.t('mw.dtNone')" />
+                <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
+              </el-select>
+              <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
+            </el-form-item>
+          </el-form>
+          <div class="actions">
+            <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
+          </div>
+        </el-card>
+      </el-tab-pane>
+      </el-tabs>
 
       <el-dialog v-model="sessDlg" :title="I18N.t('mw.dlgSess')" width="440px">
         <el-input v-model="sessTitle" :placeholder="I18N.t('mw.sessTitlePh')" maxlength="200" />
@@ -121,32 +179,6 @@ Views.microWork = {
         </template>
       </el-dialog>
 
-      <el-dialog v-model="cfgDlg" :title="I18N.t('mw.dlgCfg')" width="560px">
-        <p class="hint">{{ I18N.t('mw.cfgHint') }}</p>
-        <el-form label-position="top">
-          <el-form-item :label="I18N.t('mc.fTitle')">
-            <el-input v-model="cfg.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
-          </el-form-item>
-          <el-form-item :label="I18N.t('mc.llm')">
-            <el-select v-model="cfg.llm" style="width: 100%">
-              <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
-                         :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / ' + I18N.t('cfg.textOnly') : '') + '）'" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="I18N.t('mc.dt')">
-            <el-select v-model="cfg.dt" clearable style="width: 100%">
-              <el-option value="" :label="I18N.t('mw.dtNone')" />
-              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
-            </el-select>
-            <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="cfgDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
-        </template>
-      </el-dialog>
-
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>
     <div v-else class="page loading"><el-skeleton :rows="8" animated /></div>
@@ -155,6 +187,7 @@ Views.microWork = {
     const data = ref(null);
     const msgs = ref([]);
     const hasSession = ref(false);
+    const tab = ref('chat');  // 作品详情页 tab：对话（默认）/ 作品 / 设置
 
     // 侧栏折叠（按作品记忆）
     const sideHidden = ref(false);
@@ -175,10 +208,55 @@ Views.microWork = {
     const renameTitle = ref('');
     const renameTarget = ref(null);
 
-    // 作品选项
-    const cfgDlg = ref(false);
+    // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
     const cfg = reactive({ title: '', llm: '', dt: '' });
+    function syncCfg() {
+      cfg.title = data.value.work.title;
+      cfg.llm = data.value.work.llm_config_id;
+      cfg.dt = data.value.work.drawthings_config_id || '';
+    }
+
+    // 作品（该作品下所有会话生成的媒体：图/视频）画廊：多选批量删除
+    const works = ref([]);
+    const worksLoaded = ref(false);
+    const selWorks = ref([]);
+    const worksBusy = ref(false);
+    const allWSel = computed(() => works.value.length > 0 && selWorks.value.length === works.value.length);
+    function isWSel(id) { return selWorks.value.indexOf(id) >= 0; }
+    function toggleWSel(id) {
+      const k = selWorks.value.indexOf(id);
+      if (k >= 0) selWorks.value.splice(k, 1);
+      else selWorks.value.push(id);
+    }
+    function toggleAllWorks() {
+      selWorks.value = allWSel.value ? [] : works.value.map(w => w.id);
+    }
+    async function loadWorks() {
+      try {
+        const r = await API.get(`/api/micro/${props.id}/works`);
+        works.value = r.works || [];
+        worksLoaded.value = true;
+        selWorks.value = [];
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
+    async function delWorks() {
+      if (!selWorks.value.length) return;
+      worksBusy.value = true;
+      try {
+        await API.post(`/api/micro/${props.id}/works/delete`, { ids: selWorks.value });
+        ElementPlus.ElMessage.success(I18N.t('mw.worksDeleted'));
+        selWorks.value = [];
+        await loadWorks();
+        await load();  // 同步左侧会话列表的消息数
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        worksBusy.value = false;
+      }
+    }
 
     // 图片放大
     const lb = reactive({ show: false, list: [], idx: 0 });
@@ -213,10 +291,12 @@ Views.microWork = {
           data.value = await API.get(`/api/micro/${props.id}/${props.sid}`);
           msgs.value = data.value.messages || [];
           hasSession.value = true;
+          syncCfg();
         } else {
           data.value = await API.get(`/api/micro/${props.id}`);
           msgs.value = [];
           hasSession.value = false;
+          syncCfg();
           if (data.value.sessions.length) {
             router.replace(`/micro/${props.id}/${data.value.sessions[0].id}`);
             return;
@@ -284,12 +364,6 @@ Views.microWork = {
       }
     }
 
-    function openCfg() {
-      cfg.title = data.value.work.title;
-      cfg.llm = data.value.work.llm_config_id;
-      cfg.dt = data.value.work.drawthings_config_id || '';
-      cfgDlg.value = true;
-    }
     async function saveCfg() {
       cfgBusy.value = true;
       try {
@@ -298,7 +372,6 @@ Views.microWork = {
           drawthings_config_id: cfg.dt,
         });
         ElementPlus.ElMessage.success(I18N.t('mw.cfgSaved'));
-        cfgDlg.value = false;
         load();
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -449,9 +522,14 @@ Views.microWork = {
       }
     }
 
+    watch(() => props.id, () => {
+      worksLoaded.value = false;
+      selWorks.value = [];
+    });
     watch(() => [props.id, props.sid], () => {
       if (!busy.value) load();
     });
+    watch(tab, (v) => { if (v === 'works' && !worksLoaded.value) loadWorks(); });
     onMounted(load);
     onBeforeUnmount(() => {
       stopTimer();
@@ -466,9 +544,10 @@ Views.microWork = {
     });
 
     return {
-      data, msgs, hasSession, sideHidden, setSide,
+      data, msgs, hasSession, sideHidden, setSide, tab,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgDlg, cfgBusy, cfg, openCfg, saveCfg, delWork,
+      cfgBusy, cfg, saveCfg, delWork,
+      works, worksBusy, selWorks, allWSel, isWSel, toggleWSel, toggleAllWorks, delWorks,
       lb, openLb, input, attached, busy, status, drag, streaming, stream, streamHtml,
       isMediaVideo, tagLabel, tagType, ph, mwDtNone,
       chatBox, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter, send,

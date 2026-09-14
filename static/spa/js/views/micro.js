@@ -11,6 +11,8 @@ Views.micro = {
         <el-button type="primary" @click="openNew">{{ I18N.t('mc.new') }}</el-button>
       </div>
 
+      <el-tabs v-model="tab" class="mc-tabs">
+      <el-tab-pane :label="I18N.t('mc.tabWorks')" name="works">
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
           <el-input v-model="flt.q" :placeholder="I18N.t('mc.fQPh')" clearable style="width: 220px"
@@ -53,6 +55,8 @@ Views.micro = {
 
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
                      :total="total" :page-size="flt.size" :current-page="page" @current-change="load" />
+      </el-tab-pane>
+      </el-tabs>
 
       <el-dialog v-model="dlg" :title="I18N.t('mc.dlg')" width="540px">
         <el-form label-position="top">
@@ -92,6 +96,7 @@ Views.micro = {
     const dlg = ref(false);
     const saving = ref(false);
     const f = reactive({ title: '', llm: '', dt: '' });
+    const tab = ref('works');  // 列表页 tab：作品集（默认）；预留后续扩展
 
     async function load() {
       try {
@@ -161,7 +166,7 @@ Views.micro = {
 
     onMounted(load);
     return {
-      works, llms, dts, total, totalPages, page, flt, dlg, saving, f,
+      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab,
       load, apply, reset, openNew, create, enter, del,
     };
   },
