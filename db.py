@@ -156,11 +156,15 @@ def _indexes():
     from sqlalchemy import text
     stmts = [
         "CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id)",
+        'CREATE INDEX IF NOT EXISTS idx_chapters_project_index ON chapters(project_id, "index")',
         "CREATE INDEX IF NOT EXISTS idx_chapters_season ON chapters(season_id)",
+        'CREATE INDEX IF NOT EXISTS idx_chapters_season_index ON chapters(season_id, "index")',
         "CREATE INDEX IF NOT EXISTS idx_seasons_project ON seasons(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)",
         "CREATE INDEX IF NOT EXISTS idx_projects_kind ON projects(kind)",
         "CREATE INDEX IF NOT EXISTS idx_projects_created ON projects(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_micro_sessions_micro ON micro_sessions(micro_id)",
+        'CREATE INDEX IF NOT EXISTS idx_micro_messages_session ON micro_messages(session_id, "index")',
     ]
     with engine.connect() as conn:
         for s in stmts:

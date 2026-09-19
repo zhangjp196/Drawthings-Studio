@@ -7,6 +7,7 @@
 base_url / api_key / model 来自用户所选的 LLMConfig。
 """
 import base64
+import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -30,7 +31,17 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from models import LLMConfig
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "::1")
-_OPENAI_HOSTS = ("api.openai.com", "openai.azure.com")
+
+# 模型缓存：key = 配置 id → (签名, 模型)。复用同一模型实例即复用底层 httpx 连接池。
+_model_cache: dict[str, tuple[str, OpenAIChatModel]] = {}
+_model_cache_lock = threading.Lock()
+_MODEL_CACHE_MAX = 16
+
+
+def _model_signature(cfg: LLMConfig) -> str:
+    """模型配置签名：任一字段变化即视为需要重建。"""
+    return "|".join(str(getattr(cfg, k, None) or "") for k in
+                    ("base_url", "api_key", "model", "thinking", "thinking_param"))
 
 
 def _is_openai_host(host: str) -> bool:
@@ -81,14 +92,31 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
     深度思考（thinking）：
     - default：不传该参数，交给模型/服务端默认行为；
     - yes/no：按 thinking_param 选择发送方式（reasoning_effort 或 enable_thinking，见 _thinking_settings）。
+
+    性能：同一配置（含 base_url/api_key/model/思考参数）复用同一模型实例，
+    从而复用底层 httpx 连接池（keep-alive），避免每次调用重新建连/握手；
+    配置任一字段变化（签名不同）即重建。
     """
+    cid = str(getattr(cfg, "id", "") or "")
+    sig = _model_signature(cfg)
+    if cid:
+        with _model_cache_lock:
+            hit = _model_cache.get(cid)
+            if hit and hit[0] == sig:
+                return hit[1]
     host = (urlparse(cfg.base_url or "").hostname or "").lower()
     provider = OpenAIProvider(
         base_url=cfg.base_url,
         api_key=cfg.api_key or "sk-local",
         http_client=httpx2.AsyncClient(timeout=600.0, trust_env=host not in _LOOPBACK_HOSTS),
     )
-    return OpenAIChatModel(cfg.model, provider=provider, settings=_thinking_settings(cfg))
+    model = OpenAIChatModel(cfg.model, provider=provider, settings=_thinking_settings(cfg))
+    if cid:
+        with _model_cache_lock:
+            if len(_model_cache) >= _MODEL_CACHE_MAX:
+                _model_cache.clear()  # 配置数量很少；兜底防无限增长
+            _model_cache[cid] = (sig, model)
+    return model
 
 
 def image_data_uri(path: str) -> str:

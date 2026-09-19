@@ -17,9 +17,9 @@ import json
 import logging
 import time
 import uuid
+from functools import partial
 from pathlib import Path
 
-import anyio
 from fastapi import FastAPI, Request, HTTPException, Depends, File, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -35,7 +35,7 @@ from i18n import L, lang_of
 from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessage
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
-from services.pipeline import Pipeline, _now, chars_from_raw
+from services.pipeline import Pipeline, _now, chars_from_raw, run_sync
 from services.drawthings import DrawThingsClient
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,6 +43,7 @@ MEDIA_DIR = Path(data_dir) / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_IMAGE_UPLOAD = 20 * 1024 * 1024  # 单张上传图片上限 20MB（防超大文件占满内存）
+MAX_REQUEST_BODY = 64 * 1024 * 1024  # 请求体上限 64MB（容纳多张 base64 附图；超限直接拒绝）
 
 app = FastAPI(title="Drawthings Studio")
 app.add_middleware(GZipMiddleware, minimum_size=500)  # HTML/CSS/JS 压缩，减少传输体积
@@ -88,6 +89,18 @@ async def _static_cache(request: Request, call_next):
     elif path.startswith("/static/spa/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.middleware("http")
+async def _limit_request_body(request: Request, call_next):
+    """请求体上限保护：Content-Length 超限直接 413，避免解析超大 JSON 撑爆内存。"""
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > MAX_REQUEST_BODY:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": L(_lang(request), "请求体过大（上限 64MB）",
+                                 "Request body too large (64MB max)")})
+    return await call_next(request)
 
 init_db()  # 建表（幂等）
 
@@ -796,7 +809,8 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     media = "image"
     if dt_cfg:
         try:
-            media = DrawThingsClient(dt_cfg, data_dir).detect_media_type()
+            # 探测是同步 HTTP 调用：放线程池，避免阻塞事件循环
+            media = await run_sync(DrawThingsClient(dt_cfg, data_dir).detect_media_type)
         except Exception:
             media = "image"
 
@@ -911,11 +925,9 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             params = {"width": int(width), "height": int(height)}
                         try:
                             if media == "image":
-                                path = await anyio.to_thread.run_sync(
-                                    lambda: dt.generate_image(prompt, params=params))
+                                path = await run_sync(partial(dt.generate_image, prompt, params=params))
                             else:
-                                path = await anyio.to_thread.run_sync(
-                                    lambda: dt.generate_video(prompt, params=params))
+                                path = await run_sync(partial(dt.generate_video, prompt, params=params))
                         except Exception as e:
                             await out.put(("tool_error", {"message": str(e), "prompt": prompt}))
                             return f"生成失败：{e}。请向用户说明原因并建议如何调整。"
@@ -951,7 +963,11 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
     task = asyncio.create_task(_run(queue))
     try:
         while True:
-            event, data = await queue.get()
+            try:
+                event, data = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"  # 心跳：出图/出视频耗时长，保持 SSE 连接不被空闲断开
+                continue
             if event == "__eof__":
                 break
             yield _sse(event, data)
@@ -1320,7 +1336,11 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
     task = asyncio.create_task(_run())
     try:
         while True:
-            event, data = await queue.get()
+            try:
+                event, data = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"  # 心跳：逐章生成耗时长，保持 SSE 连接不被空闲断开
+                continue
             if event == "__eof__":
                 break
             yield _sse(event, data)

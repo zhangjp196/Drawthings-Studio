@@ -16,6 +16,7 @@ import shutil
 import uuid
 import zipfile
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 import anyio
@@ -45,6 +46,13 @@ from .drawthings import DrawThingsClient, extract_last_frame
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+async def run_sync(func, *args):
+    """把同步阻塞调用放到线程池执行（生图/生视频、ffmpeg、读图编码、HTTP 探测）。
+
+    pipeline 与 main 中所有阻塞型调用统一走这里，避免占用事件循环导致并发请求卡顿。"""
+    return await anyio.to_thread.run_sync(func, *args)
 
 
 # ---------------- 角色设定（多个角色：id / 名字 / 形象性格 / 参考图） ----------------
@@ -880,7 +888,8 @@ class Pipeline:
             if prev_media:
                 ext = Path(prev_media).suffix.lower()
                 if ext in (".mp4", ".mov", ".webm", ".gif"):
-                    ref_img = extract_last_frame(prev_media, media_dir)
+                    # 抽末帧走 ffmpeg 子进程：放线程池，避免阻塞事件循环
+                    ref_img = await run_sync(extract_last_frame, prev_media, media_dir)
                 else:
                     ref_img = prev_media
         else:
@@ -892,7 +901,7 @@ class Pipeline:
                     pm = (prev_last.media_path or "").strip()
                     ext = Path(pm).suffix.lower()
                     if ext in (".mp4", ".mov", ".webm", ".gif"):
-                        ref_img = extract_last_frame(pm, media_dir)
+                        ref_img = await run_sync(extract_last_frame, pm, media_dir)
                     else:
                         ref_img = pm
             elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
@@ -912,7 +921,9 @@ class Pipeline:
         )
         prompt_content: str | list = user
         if ref_img:
-            prompt_content = [ImageUrl(url=image_data_uri(ref_img)), user]
+            # 读图 + base64 放线程池（大图编码耗时可观）
+            uri = await run_sync(image_data_uri, ref_img)
+            prompt_content = [ImageUrl(url=uri), user]
         data = (await agent.run(prompt_content)).output
         ch.description = data.description
         ch.prompt = data.prompt
@@ -960,11 +971,11 @@ class Pipeline:
                 if w and h:
                     params = {"width": w, "height": h}
                 if project.kind == "comic":
-                    ch.media_path = await anyio.to_thread.run_sync(
-                        lambda _p=ch.prompt, _r=ref, _pr=params: dt.generate_image(_p, ref_path=_r, params=_pr))
+                    ch.media_path = await run_sync(
+                        partial(dt.generate_image, ch.prompt, ref_path=ref, params=params))
                 else:
-                    ch.media_path = await anyio.to_thread.run_sync(
-                        lambda _p=ch.prompt, _r=ref, _pr=params: dt.generate_video(_p, ref_video_path=_r, params=_pr))
+                    ch.media_path = await run_sync(
+                        partial(dt.generate_video, ch.prompt, ref_video_path=ref, params=params))
                 ch.status = "done"
                 ch.error = ""
             except Exception as e:
@@ -1094,7 +1105,8 @@ class Pipeline:
         if not prompt:
             raise RuntimeError(L(lang, "未能获得封面提示词，请填写后重试",
                                  "Could not obtain a cover prompt — please fill one in and retry"))
-        path = dt.generate_image(prompt)
+        # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
+        path = await run_sync(partial(dt.generate_image, prompt))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
@@ -1148,16 +1160,19 @@ class Pipeline:
         for ch in self._load_chapters(db, project):
             mp = (ch.media_path or "").strip()
             if mp and Path(mp).is_file() and Path(mp).suffix.lower() in (".png", ".jpg", ".jpeg"):
-                imgs.append(Image.open(mp).convert("RGB"))
+                with Image.open(mp) as im:      # 及时关闭文件句柄；convert 产生独立图像
+                    imgs.append(im.convert("RGB"))
         if not imgs:
             raise ValueError("没有可导出的章节图片")
         export_dir = Path(self.data_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
         fname = f"{self._safe_name(project)}_{project.id}.pdf"
         ppath = export_dir / fname
-        imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)
-        for im in imgs:
-            im.close()
+        try:
+            imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)
+        finally:
+            for im in imgs:
+                im.close()
         return str(ppath), fname
 
 
