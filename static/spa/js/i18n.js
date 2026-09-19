@@ -314,6 +314,16 @@ window.I18N = (function () {
       'cfg.visionOpt': '图片输入',
       'cfg.visionYes': '支持图片输入（多模态，剧本阶段可参考上一帧/首图）',
       'cfg.visionNo': '纯文本（不支持图片输入）',
+      'cfg.thinking': '深度思考',
+      'cfg.thinkingDefault': '默认（跟随模型）',
+      'cfg.thinkingYes': '开启思考',
+      'cfg.thinkingNo': '关闭思考',
+      'cfg.thinkingHint': '仅对支持推理的模型生效（OpenAI 系映射为 reasoning_effort：开启=medium、关闭=none；始终推理的模型会忽略「关闭」）。',
+      'cfg.thinkingParam': '思考参数',
+      'cfg.thinkingParamAuto': '自动（OpenAI 官方用 reasoning_effort，其它用 enable_thinking）',
+      'cfg.thinkingParamReasoning': 'reasoning_effort（OpenAI 标准）',
+      'cfg.thinkingParamEnable': 'enable_thinking（vLLM / Ollama / 通义等）',
+      'cfg.thinkingParamHint': '按你的服务端支持情况选择；选错可能导致端点报错。自动可覆盖常见情形。',
       'cfg.dtModelHint': '跟随 app 里当前选中的模型（API 不支持指定模型）。',
       'cfg.maxSideOpt': '最大分辨率（仅最长边，可选）',
       'cfg.maxSideNoneOpt': '不限（跟随 app）',
@@ -413,6 +423,9 @@ window.I18N = (function () {
       'common.unnamed': '（未命名）',
       'common.copy': '复制',
       'common.copied': '已复制',
+      'common.timeout': '请求超时，请检查网络或服务端后重试',
+      'common.netError': '网络请求失败：{0}',
+      'common.httpError': '请求失败（{0}）',
     },
     en: {
       'app.title': 'Drawthings Studio — From one sentence to a full comic / drama',
@@ -725,6 +738,16 @@ window.I18N = (function () {
       'cfg.visionOpt': 'Image input',
       'cfg.visionYes': 'Image input (multimodal — can reference last frame / first image when scripting)',
       'cfg.visionNo': 'Text only (no image input)',
+      'cfg.thinking': 'Deep thinking',
+      'cfg.thinkingDefault': 'Default (follow model)',
+      'cfg.thinkingYes': 'Enable thinking',
+      'cfg.thinkingNo': 'Disable thinking',
+      'cfg.thinkingHint': 'Only affects reasoning-capable models (OpenAI maps to reasoning_effort: on=medium, off=none; always-reasoning models ignore "off").',
+      'cfg.thinkingParam': 'Thinking parameter',
+      'cfg.thinkingParamAuto': 'Auto (reasoning_effort for OpenAI, otherwise enable_thinking)',
+      'cfg.thinkingParamReasoning': 'reasoning_effort (OpenAI standard)',
+      'cfg.thinkingParamEnable': 'enable_thinking (vLLM / Ollama / Qwen, etc.)',
+      'cfg.thinkingParamHint': 'Pick what your server supports; a wrong choice may cause endpoint errors. Auto covers common cases.',
       'cfg.dtModelHint': 'Follows the model currently selected in the app (the API cannot pick a model).',
       'cfg.maxSideOpt': 'Max resolution (longest side, optional)',
       'cfg.maxSideNoneOpt': 'Unlimited (follow app)',
@@ -824,6 +847,9 @@ window.I18N = (function () {
       'common.unnamed': '(Untitled)',
       'common.copy': 'Copy',
       'common.copied': 'Copied',
+      'common.timeout': 'Request timed out — check the network/server and retry',
+      'common.netError': 'Network request failed: {0}',
+      'common.httpError': 'Request failed ({0})',
     },
   };
 
@@ -833,10 +859,15 @@ window.I18N = (function () {
     if (!dict[cur]) cur = 'zh';
   } catch (e) {}
 
+  // 语言用 Vue ref 承载：t() 读取它 → 模板在调用 t() 时建立依赖，
+  // 切换语言即触发所有用到文案的组件原地重渲染（无需重建整个应用实例）。
+  const langRef = Vue.ref(cur);
+
   const listeners = [];
 
   function t(key, ...args) {
-    let s = dict[cur][key];
+    const lang = langRef.value;
+    let s = dict[lang][key];
     if (s === undefined) s = dict.zh[key];
     if (s === undefined) s = key;
     args.forEach((a, i) => {
@@ -846,22 +877,23 @@ window.I18N = (function () {
   }
 
   function apply() {
-    document.documentElement.setAttribute('lang', cur === 'en' ? 'en' : 'zh-CN');
+    document.documentElement.setAttribute('lang', langRef.value === 'en' ? 'en' : 'zh-CN');
     document.title = t('app.title');
   }
 
   function set(l) {
-    if (!dict[l] || l === cur) return;
+    if (!dict[l] || l === langRef.value) return;
     cur = l;
+    langRef.value = l;
     try { localStorage.setItem('lang', l); } catch (e) {}
     apply();
-    listeners.forEach(f => f(cur));
+    listeners.forEach(f => f(l));
   }
 
   apply();
   return {
-    current: () => cur,
-    isEn: () => cur === 'en',
+    current: () => langRef.value,
+    isEn: () => langRef.value === 'en',
     t,
     set,
     onChange: (f) => listeners.push(f),

@@ -16,7 +16,7 @@ Views.micro = {
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
           <el-input v-model="flt.q" :placeholder="I18N.t('mc.fQPh')" clearable style="width: 220px"
-                    @keyup.enter="apply" @clear="apply" />
+                    @input="onSearch" @keyup.enter="apply" @clear="apply" />
           <el-select v-model="flt.kind" :placeholder="I18N.t('mc.type')" clearable style="width: 140px" @change="apply">
             <el-option :label="I18N.t('mc.typeAll')" value="" />
             <el-option :label="I18N.t('mc.typeGen')" value="gen" />
@@ -113,6 +113,7 @@ Views.micro = {
       }
     }
     function apply() { page.value = 1; load(); }
+    const onSearch = debounce(apply, 350);
     function reset() {
       Object.assign(flt, { q: '', kind: '', sort: 'desc', size: 10 });
       page.value = 1;
@@ -167,7 +168,7 @@ Views.micro = {
     onMounted(load);
     return {
       works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab,
-      load, apply, reset, openNew, create, enter, del,
+      load, apply, onSearch, reset, openNew, create, enter, del,
     };
   },
 };

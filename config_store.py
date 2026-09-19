@@ -27,7 +27,8 @@ class ConfigStore:
 
     # ---------------- LLM 配置 ----------------
     def create_llm(self, name, base_url, api_key, model,
-                   supports_vision="yes") -> LLMConfig:
+                   supports_vision="yes", thinking="default",
+                   thinking_param="auto") -> LLMConfig:
         cfg = LLMConfig(
             id=uuid.uuid4().hex[:12],
             name=name,
@@ -35,6 +36,8 @@ class ConfigStore:
             api_key=api_key or "",
             model=model,
             supports_vision=(supports_vision or "yes").lower(),
+            thinking=(thinking or "default").lower(),
+            thinking_param=(thinking_param or "auto").lower(),
             created_at=_now(),
             updated_at=_now(),
         )
@@ -44,7 +47,8 @@ class ConfigStore:
         return cfg
 
     def update_llm(self, config_id, name=None, base_url=None, api_key=None,
-                   model=None, supports_vision=None) -> LLMConfig | None:
+                   model=None, supports_vision=None, thinking=None,
+                   thinking_param=None) -> LLMConfig | None:
         """编辑 LLM 配置：传 None 的字段保持不变（api_key 空串由调用方转 None=保留原值）。"""
         cfg = self.db.get(LLMConfig, config_id)
         if not cfg:
@@ -59,6 +63,10 @@ class ConfigStore:
             cfg.model = model
         if supports_vision is not None:
             cfg.supports_vision = supports_vision
+        if thinking is not None:
+            cfg.thinking = thinking
+        if thinking_param is not None:
+            cfg.thinking_param = thinking_param
         cfg.updated_at = _now()
         self.db.commit()
         self.db.refresh(cfg)

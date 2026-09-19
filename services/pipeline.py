@@ -739,12 +739,13 @@ class Pipeline:
         season.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
         season.count_min = int(count_min or 0)
         season.count_max = int(count_max or 0)
+        model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         n = await self._plan_chapter_count(db, project, season, lang,
-                                           season.count_mode, season.count_min, season.count_max)
+                                           season.count_mode, season.count_min, season.count_max, model=model)
         prior: list[tuple[str, str]] = []
         plan: list[tuple[str, str]] = []
         for i in range(1, n + 1):
-            t, s = await self._plan_one_chapter(db, project, season, lang, i, n, prior)
+            t, s = await self._plan_one_chapter(db, project, season, lang, i, n, prior, model=model)
             prior.append((t, s))
             plan.append((t, s))
         self._rebuild_chapters(db, project, season, plan)
@@ -753,14 +754,14 @@ class Pipeline:
         return project
 
     async def _plan_chapter_count(self, db, project: Project, season: Season, lang: str,
-                                   count_mode: str, count_min: int, count_max: int) -> int:
+                                   count_mode: str, count_min: int, count_max: int, model=None) -> int:
         """先定总章数：auto→模型给一个合适数(3-12)；range→在 [count_min, count_max] 内选一个数。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         gprompt = (project.global_prompt or "").strip()
         arc = self._season_arc(project, season)
         system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
-        agent = make_agent(build_model(llm_cfg), system, output_type=ChapterCount)
+        agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterCount)
         if (count_mode or "auto") == "range" and int(count_min or 0) > 0:
             hi = int(count_max) if int(count_max or 0) >= int(count_min) else int(count_min)
             cnt = f"请从 {int(count_min)} 到 {hi} 之间选一个合适的章数"
@@ -774,7 +775,7 @@ class Pipeline:
         return max(1, int(data.count or 0))
 
     async def _plan_one_chapter(self, db, project: Project, season: Season, lang: str, i: int, n: int,
-                                 prior: list[tuple[str, str]]) -> tuple[str, str]:
+                                 prior: list[tuple[str, str]], model=None) -> tuple[str, str]:
         """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
@@ -783,7 +784,7 @@ class Pipeline:
         arc = self._season_arc(project, season)
         system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
                   "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。")
-        agent = make_agent(build_model(llm_cfg), system, output_type=ChapterOut)
+        agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterOut)
         prior_text = "\n".join(f"第{k}章：{t}（{s}）" for k, (t, s) in enumerate(prior, 1)) \
             or "（本章为第一章，尚无前置章节）"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
@@ -805,8 +806,9 @@ class Pipeline:
         season.count_min = int(count_min or 0)
         season.count_max = int(count_max or 0)
         self._rebuild_chapters(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
+        model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         n = await self._plan_chapter_count(db, project, season, lang,
-                                           season.count_mode, season.count_min, season.count_max)
+                                           season.count_mode, season.count_min, season.count_max, model=model)
         base = 0
         if season.number > 1:
             prev = (db.query(Season)
@@ -818,7 +820,7 @@ class Pipeline:
         for i in range(1, n + 1):
             if progress_cb:
                 await progress_cb(i, n, f"第{i}章")
-            title, summary = await self._plan_one_chapter(db, project, season, lang, i, n, prior)
+            title, summary = await self._plan_one_chapter(db, project, season, lang, i, n, prior, model=model)
             prior.append((title, summary))
             ch = Chapter(project_id=project.id, season_id=season.id,
                          index=base + i - 1, title=title, summary=summary)
@@ -860,14 +862,15 @@ class Pipeline:
                 f"同时按本章构图决定出图分辨率 width/height（均为 64 的倍数，最长边不超过 {limit} 像素；参考：{ratios}）。")
 
     async def _gen_one_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
-                               chapters: list[Chapter], lang: str = "zh") -> Chapter:
+                               chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:
         """为第 i 章（季内序号）单独写剧本/提示词/分辨率（供「按章生成」与「批量生成」复用）。
-        chapters 为该季的章节列表；i 为季内 0 起序号。"""
+        chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。"""
         llm_cfg, supports_vision, limit, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
         first_img = (project.first_image or "").strip()
-        agent = make_agent(build_model(llm_cfg), self._script_system(project, limit), output_type=ScriptOut)
+        agent = make_agent(model or build_model(llm_cfg), self._script_system(project, limit),
+                           output_type=ScriptOut)
         prev = chapters[i - 1] if i > 0 else None
         context = ""
         ref_img = None
@@ -927,6 +930,7 @@ class Pipeline:
         季内第 1 章参考：非第一季→上一季末章；第一季→封面（若开启）或为空。
         其余章沿用上一章媒体。"""
         dt = self._clients(db, project, lang)
+        model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         chapters = self._season_chapters(db, project, season)
         if indices is None:
             targets = list(enumerate(chapters))
@@ -936,7 +940,7 @@ class Pipeline:
         for pos, (i, ch) in enumerate(targets, start=1):
             if progress_cb:
                 await progress_cb(pos, len(targets), ch.title)
-            await self._gen_one_script(db, project, season, i, ch, chapters, lang)
+            await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
             # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章或封面）
             if i == 0:
                 if season.number > 1:

@@ -30,6 +30,8 @@ class LLMConfig(Base):
     api_key = Column(Text, default="")                    # 本地端点任意非空即可
     model = Column(String(200), nullable=False)          # 模型名
     supports_vision = Column(String(5), default="yes")   # yes|no：OpenAI 多模态是否支持图片输入
+    thinking = Column(String(10), default="default")      # default|yes|no：深度思考（推理）开关
+    thinking_param = Column(String(20), default="auto")    # auto|reasoning_effort|enable_thinking：发送方式
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 

@@ -14,13 +14,15 @@
 import asyncio
 import base64
 import json
+import logging
 import time
 import uuid
 from pathlib import Path
 
 import anyio
 from fastapi import FastAPI, Request, HTTPException, Depends, File, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic_ai import Agent, RunContext
@@ -40,24 +42,49 @@ BASE_DIR = Path(__file__).resolve().parent
 MEDIA_DIR = Path(data_dir) / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
+MAX_IMAGE_UPLOAD = 20 * 1024 * 1024  # 单张上传图片上限 20MB（防超大文件占满内存）
+
 app = FastAPI(title="Drawthings Studio")
 app.add_middleware(GZipMiddleware, minimum_size=500)  # HTML/CSS/JS 压缩，减少传输体积
+
+logger = logging.getLogger("drawthings")
 
 
 def _lang(request: Request) -> str:
     """当前请求的语言（Accept-Language → zh|en），用于本地化用户可见文案。"""
     return lang_of(request.headers.get("accept-language", ""))
 
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    """参数校验失败：统一返回本地化的 JSON，避免前端拿到结构化 detail 数组无法展示。"""
+    return JSONResponse(status_code=422,
+                        content={"detail": L(_lang(request), "请求参数不合法",
+                                             "Invalid request parameters")})
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error(request: Request, exc: Exception):
+    """兜底：任何未捕获异常都返回 JSON（而非 HTML 纯文本），并记录堆栈便于排查。"""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500,
+                        content={"detail": L(_lang(request), "服务器内部错误，请查看服务端日志",
+                                             "Internal server error — check the server logs")})
+
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
 @app.middleware("http")
 async def _static_cache(request: Request, call_next):
-    """静态资源缓存头：vendor 依赖内容不变（长缓存）；spa 源码常改（no-cache 每次校验）。"""
+    """静态资源缓存头：
+    - vendor 依赖文件名固定、内容不变 → 一年强缓存 + immutable（不再发校验请求）
+    - spa 源码常改 → no-cache（仍发条件请求，命中 304）
+    - /media 媒体 URL 已带 ?v=mtime 版本号（覆盖同名文件即换 URL）→ 一年强缓存
+    """
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/static/vendor/"):
-        response.headers["Cache-Control"] = "max-age=3600"
+    if path.startswith("/static/vendor/") or path.startswith("/media/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     elif path.startswith("/static/spa/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
@@ -99,7 +126,10 @@ def _chapter_view(ch) -> dict:
 def _llm_view(c) -> dict:
     return {
         "id": c.id, "name": c.name, "base_url": c.base_url, "model": c.model,
-        "supports_vision": c.supports_vision or "yes", "created_at": c.created_at,
+        "supports_vision": c.supports_vision or "yes",
+        "thinking": getattr(c, "thinking", None) or "default",
+        "thinking_param": getattr(c, "thinking_param", None) or "auto",
+        "created_at": c.created_at,
     }
 
 
@@ -219,6 +249,14 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
     if supports_vision not in ("yes", "no"):
         raise HTTPException(status_code=400,
                             detail=L(lang, "图片输入选项无效", "Invalid image-input option"))
+    thinking = str(body.get("thinking") or "default").lower()
+    if thinking not in ("default", "yes", "no"):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "深度思考选项无效", "Invalid thinking option"))
+    thinking_param = str(body.get("thinking_param") or "auto").lower()
+    if thinking_param not in ("auto", "reasoning_effort", "enable_thinking"):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "思考参数选项无效", "Invalid thinking parameter option"))
     cs = ConfigStore(db)
     limit = CFG_LIMITS.get(config_type)
     if limit is not None:
@@ -238,7 +276,8 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=400,
                                     detail=L(lang, "LLM 配置需要模型名", "LLM config requires a model name"))
             cs.create_llm(name, base_url, str(body.get("api_key") or ""), model,
-                          supports_vision=supports_vision)
+                          supports_vision=supports_vision, thinking=thinking,
+                          thinking_param=thinking_param)
         elif config_type == "drawthings":
             cs.create_drawthing(name, base_url, **_dt_gen_fields(body, lang))
         else:
@@ -273,10 +312,19 @@ async def config_update(request: Request, config_type: str, config_id: str, db: 
             if supports_vision not in ("yes", "no"):
                 raise HTTPException(status_code=400,
                                     detail=L(lang, "图片输入选项无效", "Invalid image-input option"))
+            thinking = str(body.get("thinking") or "default").lower()
+            if thinking not in ("default", "yes", "no"):
+                raise HTTPException(status_code=400,
+                                    detail=L(lang, "深度思考选项无效", "Invalid thinking option"))
+            thinking_param = str(body.get("thinking_param") or "auto").lower()
+            if thinking_param not in ("auto", "reasoning_effort", "enable_thinking"):
+                raise HTTPException(status_code=400,
+                                    detail=L(lang, "思考参数选项无效", "Invalid thinking parameter option"))
             raw_key = body.get("api_key")
             updated = cs.update_llm(config_id, name=name, base_url=base_url,
                                     api_key=None if raw_key in (None, "") else str(raw_key),
-                                    model=model, supports_vision=supports_vision)
+                                    model=model, supports_vision=supports_vision,
+                                    thinking=thinking, thinking_param=thinking_param)
         elif config_type == "drawthings":
             updated = cs.update_drawthing(config_id, name=name, base_url=base_url,
                                           **_dt_gen_fields(body, lang))
@@ -1416,9 +1464,12 @@ def project_first_image_upload(request: Request, project_id: str, file: UploadFi
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    data = file.file.read()
+    data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
+    if len(data) > MAX_IMAGE_UPLOAD:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "文件过大（上限 20MB）", "File too large (20MB max)"))
     ext = Path(file.filename or "").suffix.lower()
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
         raise HTTPException(status_code=400,
@@ -1468,9 +1519,12 @@ def project_char_image_upload(request: Request, project_id: str, char_id: str,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    data = file.file.read()
+    data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
+    if len(data) > MAX_IMAGE_UPLOAD:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "文件过大（上限 20MB）", "File too large (20MB max)"))
     ext = Path(file.filename or "").suffix.lower()
     if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
         raise HTTPException(status_code=400,

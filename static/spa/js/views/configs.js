@@ -82,7 +82,7 @@ Views.configs = {
             <div class="cfg-card" v-for="row in llmItems" :key="row.id">
               <div class="wc-top"><span class="cfg-name">{{ row.name }}</span></div>
               <div class="cfg-meta muted">
-                {{ I18N.t('cfg.model', row.model) }} · {{ row.supports_vision === 'yes' ? I18N.t('cfg.vision') : I18N.t('cfg.textOnly') }}
+                {{ I18N.t('cfg.model', row.model) }} · {{ row.supports_vision === 'yes' ? I18N.t('cfg.vision') : I18N.t('cfg.textOnly') }}<template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
               </div>
               <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
               <div class="wc-meta muted">{{ I18N.t('cfg.created', fmt(row.created_at)) }}</div>
@@ -158,6 +158,22 @@ Views.configs = {
                 <el-option value="no" :label="I18N.t('cfg.visionNo')" />
               </el-select>
             </el-form-item>
+            <el-form-item :label="I18N.t('cfg.thinking')">
+              <el-select v-model="f.thinking" style="width: 100%">
+                <el-option value="default" :label="I18N.t('cfg.thinkingDefault')" />
+                <el-option value="yes" :label="I18N.t('cfg.thinkingYes')" />
+                <el-option value="no" :label="I18N.t('cfg.thinkingNo')" />
+              </el-select>
+              <div class="hint">{{ I18N.t('cfg.thinkingHint') }}</div>
+            </el-form-item>
+            <el-form-item v-if="f.thinking !== 'default'" :label="I18N.t('cfg.thinkingParam')">
+              <el-select v-model="f.thinking_param" style="width: 100%">
+                <el-option value="auto" :label="I18N.t('cfg.thinkingParamAuto')" />
+                <el-option value="reasoning_effort" :label="I18N.t('cfg.thinkingParamReasoning')" />
+                <el-option value="enable_thinking" :label="I18N.t('cfg.thinkingParamEnable')" />
+              </el-select>
+              <div class="hint">{{ I18N.t('cfg.thinkingParamHint') }}</div>
+            </el-form-item>
           </template>
           <template v-else>
             <el-form-item :label="I18N.t('cfg.model')">
@@ -201,7 +217,7 @@ Views.configs = {
     const loadingModels = ref(false);
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
-      supports_vision: 'yes',
+      supports_vision: 'yes', thinking: 'default', thinking_param: 'auto',
       max_side: 0, max_frames: 0,
     });
 
@@ -222,12 +238,15 @@ Views.configs = {
     // 基础配置（语言/主题为本地偏好，不走后端；默认配置/默认参数存后端）
     const lang = ref(I18N.current());
     const theme = ref(Theme.current());
+    // 顶栏也能切换语言/主题：订阅变更，保持本页单选组同步（不重建组件）
+    I18N.onChange(v => { lang.value = v; });
+    Theme.onChange(v => { theme.value = v; });
     const s = reactive({
       default_llm_config_id: '', default_dt_config_id: '',
     });
     const savingBasic = ref(false);
 
-    function setLang(l) { I18N.set(l); }   // 切换语言会重建应用实例（见 app.js）
+    function setLang(l) { I18N.set(l); }
     function setTheme(t) { Theme.set(t); }
 
     async function loadBasic() {
@@ -270,7 +289,7 @@ Views.configs = {
       editId.value = '';
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
-        max_side: 0, max_frames: 0,
+        thinking: 'default', thinking_param: 'auto', max_side: 0, max_frames: 0,
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -288,6 +307,8 @@ Views.configs = {
         Object.assign(f, {
           config_type: 'llm', name: row.name, base_url: row.base_url,
           api_key: '', model: row.model, supports_vision: row.supports_vision,
+          thinking: row.thinking || 'default',
+          thinking_param: row.thinking_param || 'auto',
         });
         modelOpts.value = row.model ? [row.model] : [];
       }

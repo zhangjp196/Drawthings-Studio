@@ -24,3 +24,13 @@ window.watch = Vue.watch;
 window.onMounted = Vue.onMounted;
 window.onBeforeUnmount = Vue.onBeforeUnmount;
 window.nextTick = Vue.nextTick;
+
+// 输入防抖：用于搜索框等高频输入，避免每次按键都打后端
+window.debounce = (fn, wait = 300) => {
+  let timer = null;
+  return function () {
+    const ctx = this, args = arguments;
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(ctx, args), wait);
+  };
+};

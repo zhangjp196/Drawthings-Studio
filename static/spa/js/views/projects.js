@@ -15,7 +15,7 @@ Views.projects = {
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
           <el-input v-model="f.q" :placeholder="I18N.t('proj.searchPh')" clearable style="width: 220px"
-                    @keyup.enter="apply" @clear="apply" />
+                    @input="onSearch" @keyup.enter="apply" @clear="apply" />
           <el-select v-model="f.kind" :placeholder="I18N.t('proj.type')" clearable style="width: 120px" @change="apply">
             <el-option :label="I18N.t('proj.all')" value="" />
             <el-option :label="I18N.t('proj.comic')" value="comic" />
@@ -60,7 +60,7 @@ Views.projects = {
         <el-table-column :label="I18N.t('proj.colFirst')" width="100">
           <template #default="{ row }">
             <el-image v-if="row.first_image_url" :src="row.first_image_url" :preview-src-list="[row.first_image_url]"
-                      fit="cover" class="thumb" :preview-teleported="true" />
+                      fit="cover" class="thumb" lazy :preview-teleported="true" />
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
@@ -128,6 +128,7 @@ Views.projects = {
       }
     }
     function apply() { f.page = 1; load(); }
+    const onSearch = debounce(apply, 350);
     function reset() {
       Object.assign(f, { page: 1, size: 10, q: '', kind: '', status: '', sort: 'desc' });
       load();
@@ -172,7 +173,7 @@ Views.projects = {
     return {
       f, rows, total, totalPages, statusLabels, statusTag,
       newDlg, renameDlg, renameTitle, busy,
-      load, apply, reset, open, askRename, doRename, del, created,
+      load, apply, onSearch, reset, open, askRename, doRename, del, created,
     };
   },
 };

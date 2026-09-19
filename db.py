@@ -65,6 +65,8 @@ def _migrate():
     new_cols = {
         "llm_configs": {
             "supports_vision": "VARCHAR(5) DEFAULT 'yes'",
+            "thinking": "VARCHAR(10) DEFAULT 'default'",
+            "thinking_param": "VARCHAR(20) DEFAULT 'auto'",
         },
         "drawthing_configs": {
             "max_side": "INTEGER DEFAULT 0",

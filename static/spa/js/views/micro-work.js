@@ -57,13 +57,13 @@ Views.microWork = {
                 <div v-if="m.role === 'user'">
                   <span class="msg-text">{{ m.content || I18N.t('mw.image') }}</span>
                   <div class="msg-imgs" v-if="m.images.length">
-                    <img v-for="(u, i) in m.images" :key="i" :src="u" :alt="I18N.t('mw.attachAlt')" @click="openLb(m.images, i)">
+                    <img v-for="(u, i) in m.images" :key="i" :src="u" :alt="I18N.t('mw.attachAlt')" loading="lazy" decoding="async" @click="openLb(m.images, i)">
                   </div>
                 </div>
                 <div v-else>
                   <div class="msg-media" v-if="m.media_url">
                     <video v-if="isMediaVideo(m.media_url)" :src="m.media_url" controls preload="metadata"></video>
-                    <img v-else :src="m.media_url" :alt="I18N.t('mw.resultAlt')" @click="openLb([m.media_url], 0)">
+                    <img v-else :src="m.media_url" :alt="I18N.t('mw.resultAlt')" loading="lazy" decoding="async" @click="openLb([m.media_url], 0)">
                     <div class="media-cap" v-if="m.prompt">{{ m.prompt }}</div>
                   </div>
                   <div class="md" v-html="renderMd(m.content)"></div>
@@ -124,7 +124,7 @@ Views.microWork = {
           <div v-for="w in works" :key="w.id" class="work-piece" :class="{ sel: isWSel(w.id) }">
             <div class="wp-media">
               <video v-if="isMediaVideo(w.media_url)" :src="w.media_url" controls preload="metadata"></video>
-              <img v-else :src="w.media_url" :alt="I18N.t('mw.resultAlt')" @click="openLb([w.media_url], 0)">
+              <img v-else :src="w.media_url" :alt="I18N.t('mw.resultAlt')" loading="lazy" decoding="async" @click="openLb([w.media_url], 0)">
               <el-checkbox class="wp-check" :model-value="isWSel(w.id)" @click.stop @change="toggleWSel(w.id)"></el-checkbox>
             </div>
             <div class="wp-cap" v-if="w.prompt || w.content">{{ w.prompt || w.content }}</div>
@@ -270,6 +270,7 @@ Views.microWork = {
     const drag = ref(false);
     const fileInput = ref(null);
     const chatBox = ref(null);
+    let sseCtrl = null;  // 当前对话流：组件卸载时中断，服务端随之清理后台生成任务
     const stream = reactive({ text: '', chips: [], media: [] });
     const streamHtml = computed(() => stream.text
       ? renderMd(stream.text) + '<span class="cursor"></span>'
@@ -474,6 +475,8 @@ Views.microWork = {
       scrollBottom();
 
       let failed = false;
+      const ctrl = new AbortController();
+      sseCtrl = ctrl;
       try {
         await API.sse(`/api/micro/${props.id}/${props.sid}/chat`, { message, images: shot }, (ev, d) => {
           if (ev === 'token') {
@@ -492,7 +495,7 @@ Views.microWork = {
             failed = true;
             stream.chips.push({ text: '⚠ ' + (d.message || I18N.t('mw.err')), err: true });
           }
-        });
+        }, ctrl.signal);
         if (failed) {
           status.value = I18N.t('mw.errRetry');
         } else {
@@ -500,12 +503,15 @@ Views.microWork = {
           await load();
         }
       } catch (e) {
-        stream.chips.push({ text: '⚠ ' + e.message, err: true });
-        status.value = I18N.t('mw.errRetry');
+        if (!ctrl.signal.aborted) {
+          stream.chips.push({ text: '⚠ ' + e.message, err: true });
+          status.value = I18N.t('mw.errRetry');
+        }
       } finally {
         stopTimer();
         busy.value = false;
         streaming.value = false;
+        if (sseCtrl === ctrl) sseCtrl = null;
       }
     }
 
@@ -533,6 +539,7 @@ Views.microWork = {
     onMounted(load);
     onBeforeUnmount(() => {
       stopTimer();
+      if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; }
       const el = chatBox.value;
       if (el) el.removeEventListener('click', onChatClick);
     });

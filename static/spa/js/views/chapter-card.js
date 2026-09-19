@@ -91,7 +91,7 @@ Views.chapterCard = {
     async function doGen() {
       busy.value = 'gen';
       try {
-        await API.post(`/api/projects/${props.projectId}/gen/${props.seasonIndex}`, { season_id: props.seasonId });
+        await API.post(`/api/projects/${props.projectId}/gen/${props.seasonIndex}`, { season_id: props.seasonId }, 0);
         emit('reloaded', props.seasonIndex);
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);

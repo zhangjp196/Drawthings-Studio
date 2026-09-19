@@ -17,7 +17,7 @@ Views.firstImage = {
       <div class="first-row">
         <div class="first-preview">
           <img v-if="project.first_image_url" :src="project.first_image_url" :alt="I18N.t('p.first')"
-               @click="$emit('preview', project.first_image_url)">
+               loading="lazy" decoding="async" @click="$emit('preview', project.first_image_url)">
           <el-empty v-else :description="I18N.t('p.noFirst')" :image-size="54" />
         </div>
         <div class="first-forms">

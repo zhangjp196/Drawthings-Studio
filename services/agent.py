@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import httpx
 import httpx2
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext, ModelSettings
 from pydantic_ai.models import Model
 from pydantic_ai.messages import (
     ImageUrl,
@@ -30,6 +30,38 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from models import LLMConfig
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "::1")
+_OPENAI_HOSTS = ("api.openai.com", "openai.azure.com")
+
+
+def _is_openai_host(host: str) -> bool:
+    """是否为 OpenAI 官方 / Azure 端点（决定 auto 模式下用哪种思考参数）。"""
+    host = (host or "").lower()
+    return host == "api.openai.com" or host.endswith(".openai.com") \
+        or host.endswith(".openai.azure.com")
+
+
+def _thinking_settings(cfg: LLMConfig) -> ModelSettings | None:
+    """按「深度思考」配置构造模型设置。default/未设置 → None（不传）。
+
+    发送方式（thinking_param）：
+    - auto：OpenAI 官方/Azure → reasoning_effort；其它（本地 vLLM/Ollama/云端兼容）→ enable_thinking；
+    - reasoning_effort：OpenAI 标准参数（经 pydantic-ai 统一 thinking 映射为 reasoning_effort）；
+    - enable_thinking：作为 extra_body 发送 enable_thinking 与 chat_template_kwargs.enable_thinking
+      （覆盖 Ollama / DashScope 的顶层开关与 vLLM 的 chat_template_kwargs）。
+    """
+    level = (getattr(cfg, "thinking", "default") or "default").lower()
+    if level not in ("yes", "no"):
+        return None
+    on = level == "yes"
+    method = (getattr(cfg, "thinking_param", "auto") or "auto").lower()
+    if method not in ("reasoning_effort", "enable_thinking"):
+        host = (urlparse(cfg.base_url or "").hostname or "").lower()
+        method = "reasoning_effort" if _is_openai_host(host) else "enable_thinking"
+    if method == "reasoning_effort":
+        return ModelSettings(thinking=on)
+    return ModelSettings(extra_body={"enable_thinking": on,
+                                     "chat_template_kwargs": {"enable_thinking": on}})
+
 
 
 def make_httpx_client(base_url: str, timeout: float = 120.0) -> httpx.Client:
@@ -45,6 +77,10 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
 
     本地回环端点直连、不走系统代理（系统代理常把 127.* 转发到远端导致 502）；
     云端端点保留系统代理设置。
+
+    深度思考（thinking）：
+    - default：不传该参数，交给模型/服务端默认行为；
+    - yes/no：按 thinking_param 选择发送方式（reasoning_effort 或 enable_thinking，见 _thinking_settings）。
     """
     host = (urlparse(cfg.base_url or "").hostname or "").lower()
     provider = OpenAIProvider(
@@ -52,7 +88,7 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
         api_key=cfg.api_key or "sk-local",
         http_client=httpx2.AsyncClient(timeout=600.0, trust_env=host not in _LOOPBACK_HOSTS),
     )
-    return OpenAIChatModel(cfg.model, provider=provider)
+    return OpenAIChatModel(cfg.model, provider=provider, settings=_thinking_settings(cfg))
 
 
 def image_data_uri(path: str) -> str:

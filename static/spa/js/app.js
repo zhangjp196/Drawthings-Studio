@@ -1,8 +1,10 @@
 // 应用入口：根组件（顶栏 + 路由出口）+ Element Plus / 图标 / 路由挂载
-// 品牌：Drawthings Studio；语言 / 主题在「配置 → 基础配置」里切换（Element Plus locale 随语言重建生效）。
+// 品牌：Drawthings Studio；语言 / 主题在「配置 → 基础配置」或顶栏切换。
+// 语言/主题均由响应式状态驱动原地刷新（ElConfigProvider 提供 EP locale），无需重建应用。
 (function () {
   const root = {
     template: `
+      <el-config-provider :locale="elLocale">
       <header class="topbar">
         <div class="topbar-inner">
           <router-link to="/" class="brand">
@@ -26,14 +28,21 @@
           <component :is="Component" />
         </router-view>
       </main>
+      </el-config-provider>
     `,
     setup() {
       const theme = ref(Theme.current());
       Theme.onChange(v => { theme.value = v; });
+      // 语言用响应式 ref 承载：切换时仅更新 ElConfigProvider 的 locale，
+      // 组件文案由 I18N.t() 自身的响应式依赖原地刷新（不再重建整个应用实例）。
+      const lang = ref(I18N.current());
+      I18N.onChange(v => { lang.value = v; });
       return {
         I18N,
         Theme,
         theme,
+        elLocale: computed(() => (lang.value === 'en'
+          ? window.ElementPlusLocaleEn : window.ElementPlusLocaleZhCn)),
         langs: [
           { v: 'zh', flag: '🇨🇳', label: '中文' },
           { v: 'en', flag: '🇺🇸', label: 'English' },
@@ -55,11 +64,12 @@
 
   let app = null;
   function mount() {
-    const locale = I18N.isEn() ? window.ElementPlusLocaleEn : window.ElementPlusLocaleZhCn;
     app = Vue.createApp(root);
     app.config.globalProperties.I18N = I18N;  // 各视图模板统一可访问 I18N / router（无需在每个 setup 里重复返回）
     app.config.globalProperties.router = router;
-    app.use(ElementPlus, { locale });
+    app.use(ElementPlus, {
+      locale: I18N.isEn() ? window.ElementPlusLocaleEn : window.ElementPlusLocaleZhCn,
+    });
     for (const [name, comp] of Object.entries(ElementPlusIconsVue)) {
       app.component(name, comp);
     }
@@ -68,9 +78,4 @@
     app.mount('#app');
   }
   mount();
-  // 语言切换：重建应用实例以应用 Element Plus 语言包（组件文案随之刷新，数据经 onMounted 重拉）
-  I18N.onChange(() => {
-    if (app) app.unmount();
-    mount();
-  });
 })();

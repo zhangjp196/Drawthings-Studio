@@ -125,7 +125,7 @@ Views.project = {
                       <el-form-item :label="I18N.t('p.charRef')">
                         <div class="char-ref">
                           <img v-if="c.image_url" :src="c.image_url" class="char-ref-img" :alt="c.name || ''"
-                               @click="openLb([c.image_url], 0)">
+                               loading="lazy" decoding="async" @click="openLb([c.image_url], 0)">
                           <el-upload :auto-upload="false" :show-file-list="false" accept="image/*"
                                      :on-change="(f) => uploadCharImage(i, f)">
                             <el-button size="small">{{ c.image_url ? I18N.t('p.charRefChange') : I18N.t('p.uploadBtn') }}</el-button>
@@ -388,6 +388,7 @@ Views.project = {
     const genDescBusy = ref(null);  // 正在 AI 生成描述的字符 id（null = 空闲）
     const coverPrompt = ref('');   // 封面生成提示词（first-image 子组件持有输入，顶部「生成封面」按钮使用）
     const progress = reactive({ text: '' });
+    let sseCtrl = null;            // 当前流式任务（规划/生成）：离开页面或重开时中断，服务端随之清理
 
     // 企划子页签：总体模式 story（故事大纲）/ chars（角色）/ cover（封面）；季模式 arc（本季大纲）/ chars（季角色）/ plan（章节规划）
     const oSub = ref('story');
@@ -518,7 +519,7 @@ Views.project = {
       actBusy.value = true;
       progress.text = '';
       try {
-        await API.post(`/api/projects/${props.id}/action`, Object.assign({ step }, payload || {}));
+        await API.post(`/api/projects/${props.id}/action`, Object.assign({ step }, payload || {}), 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         await load();
       } catch (e) {
@@ -672,7 +673,7 @@ Views.project = {
       }
       genDescBusy.value = c.id;
       try {
-        const r = await API.post(`/api/projects/${props.id}/characters/${c.id}/gen-desc`, {});
+        const r = await API.post(`/api/projects/${props.id}/characters/${c.id}/gen-desc`, {}, 0);
         if (r && r.description) c.description = r.description;
         ElementPlus.ElMessage.success(I18N.t('p.msgCharDescGenerated'));
       } catch (e) {
@@ -684,7 +685,7 @@ Views.project = {
     async function genFirst() {
       busyFirst.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/first-image/generate`, { prompt: coverPrompt.value });
+        await API.post(`/api/projects/${props.id}/first-image/generate`, { prompt: coverPrompt.value }, 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgFirstGenerated'));
         coverPrompt.value = '';
         await load();
@@ -708,6 +709,7 @@ Views.project = {
       actBusy.value = true; progress.text = '';
       data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
       cur.value = 0;
+      const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/projects/${props.id}/action-stream`, {
           step: 'chapters',
@@ -719,11 +721,13 @@ Views.project = {
           if (ev === 'progress') progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
           else if (ev === 'chapter') applyChapterPlan(d);
           else if (ev === 'error') throw new Error(d.message);
-        });
+        }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         await load();
-      } catch (e) { ElementPlus.ElMessage.error(e.message); await load(); }
-      finally { actBusy.value = false; progress.text = ''; }
+      } catch (e) {
+        if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
+      }
+      finally { actBusy.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
 
     // 分页保存：每个子页只提交自己的字段（后端 /outline 部分更新，未提交的字段不动）
@@ -850,17 +854,20 @@ Views.project = {
       if (!seasonId.value) return;
       busyGenAll.value = true; progress.text = '';
       const indices = selected.value.length ? selected.value : null;
+      const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/projects/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
           if (ev === 'progress') progress.text = I18N.t('p.genProgress', d.current, d.total, d.title);
           else if (ev === 'chapter') applyChapterLive(d);
           else if (ev === 'error') throw new Error(d.message);
-        });
+        }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         selected.value = [];
         await load();
-      } catch (e) { ElementPlus.ElMessage.error(e.message); await load(); }
-      finally { busyGenAll.value = false; progress.text = ''; }
+      } catch (e) {
+        if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
+      }
+      finally { busyGenAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
 
     async function complete() {
@@ -955,6 +962,8 @@ Views.project = {
     }
 
     onMounted(load);
+    watch(() => props.id, () => { tabInit.value = false; load(); });  // 同一路由切换不同项目时重载
+    onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
       data, scope, status, doneCount, canComplete, tab, oSub, isOverall, cur, curCh, selected, allSelected,
       page, totalPages, pageStart, pageChapters,
