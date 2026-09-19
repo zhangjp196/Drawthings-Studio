@@ -1,11 +1,13 @@
-// 封面卡片（项目详情页子组件）：预览 + 上传 + 提示词生成 +「作为第 1 章参考」开关
+// 封面卡片（项目详情页子组件）：预览 + 上传 + 提示词 +「作为第 1 章参考」开关
+// 提示词由父组件（project.js）持有，「生成封面」按钮在企划页顶部操作栏
 window.Views = window.Views || {};
 Views.firstImage = {
   props: {
     project: { type: Object, required: true },   // data.project
     projectId: { type: String, required: true },
+    prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
   },
-  emits: ['preview', 'reloaded'],
+  emits: ['preview', 'reloaded', 'update:prompt'],
   template: `
     <el-card class="first-card" shadow="never">
       <template #header>
@@ -27,23 +29,17 @@ Views.firstImage = {
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>
-            <el-input v-model="fprompt" type="textarea" :rows="2" :placeholder="I18N.t('p.genPromptPh')" />
+            <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('p.genPromptPh')"
+                      @update:modelValue="(v) => $emit('update:prompt', v)" />
           </div>
           <div class="frow">
             <el-checkbox v-model="coverRef" @change="onCoverRefChange">{{ I18N.t('p.coverAsFirstRef') }}</el-checkbox>
-          </div>
-          <div class="actions">
-            <el-popconfirm :title="I18N.t('p.firstImageConfirm')" @confirm="genFirst">
-              <template #reference><el-button size="small" type="primary" :loading="genBusy">{{ I18N.t('p.genFirst') }}</el-button></template>
-            </el-popconfirm>
           </div>
         </div>
       </div>
     </el-card>
   `,
   setup(props, { emit }) {
-    const fprompt = ref('');
-    const genBusy = ref(false);
     const coverRef = ref(!!props.project.cover_as_first_ref);
 
     async function onCoverRefChange(v) {
@@ -68,21 +64,6 @@ Views.firstImage = {
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
 
-    async function genFirst() {
-      genBusy.value = true;
-      try {
-        await API.post(`/api/projects/${props.projectId}/first-image/generate`, { prompt: fprompt.value });
-        ElementPlus.ElMessage.success(I18N.t('p.msgFirstGenerated'));
-        fprompt.value = '';
-        emit('reloaded');
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-        emit('reloaded');
-      } finally {
-        genBusy.value = false;
-      }
-    }
-
-    return { fprompt, genBusy, coverRef, onCoverRefChange, onFile, genFirst };
+    return { coverRef, onCoverRefChange, onFile };
   },
 };

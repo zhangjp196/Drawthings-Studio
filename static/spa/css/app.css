@@ -342,6 +342,9 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .proj-tabs { margin-top: 6px; }
  .plan-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .plan-row .el-textarea { flex: 1; min-width: 0; }
+.char-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; }
+.char-ref { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.char-ref-img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
 
 /* ---------- 大纲：内部纵向子页签（左侧竖排导航 + 右侧内容）----------
    自定义实现，不依赖 Element Plus el-tabs 的 placement（EP 3.0 不输出 is-left 修饰类）。 */
@@ -363,6 +366,8 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
   color: var(--el-color-primary); font-weight: 600;
 }
 .subtabs-body { flex: 1 1 auto; min-width: 0; }
+/* 企划子页动作按钮（放各子页最上面） */
+.outline-bar { margin: 0 0 12px; }
 
 /* ---------- 章节：主从布局（左竖排章节列表 + 右详情）---------- */
 .md-layout { display: flex; gap: 14px; align-items: flex-start; }
@@ -642,6 +647,34 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 }
 .mc-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91, 91, 214, .12); }
 .mc-status { font-size: 12px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+
+/* ---------- 季（篇章）选择器 ---------- */
+.season-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+}
+.season-item {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--el-fill-color-light, #f5f7fa);
+  border: 1px solid var(--el-border-color-lighter, #ebeef5);
+  transition: all .2s;
+  color: var(--el-text-color-regular, #606266);
+}
+.season-item:hover { background: var(--el-color-primary-light-9, #ecf5ff); }
+.season-item.active {
+  background: var(--el-color-primary, #409eff);
+  color: #fff;
+  border-color: var(--el-color-primary, #409eff);
+}
+.season-add { color: var(--el-color-primary, #409eff); border-style: dashed; }
+.season-del { color: var(--el-color-danger, #f56c6c); border-style: dashed; }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 860px) {

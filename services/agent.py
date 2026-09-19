@@ -91,13 +91,31 @@ def to_message_history(items: list[dict]) -> list[ModelMessage]:
 
 
 # ---------------- 流水线结构化输出 ----------------
-class OutlineOut(BaseModel):
-    """大纲：整体风格 / 主题 / 基调 / 故事大纲 / 角色设定（供后续各章保持一致）。"""
-    style: str = ""
-    theme: str = ""
-    tone: str = ""
+class ArcOut(BaseModel):
+    """企划步骤 1：整体故事大纲。"""
     arc: str = ""
-    characters: str = ""
+
+
+class SeasonArcOut(BaseModel):
+    """季大纲：本季名（篇章名，如「赛亚人篇」）+ 本季故事大纲。"""
+    title: str = ""
+    arc: str = ""
+
+
+class CharacterOut(BaseModel):
+    """单个角色设定（名字 + 形象/性格描述）。"""
+    name: str = ""
+    description: str = ""
+
+
+class CharsOut(BaseModel):
+    """企划步骤 2：角色设定（多个角色，供后续各章保持一致）。"""
+    characters: list[CharacterOut] = []
+
+
+class CharDescOut(BaseModel):
+    """单个角色的形象/性格描述（可结合参考图生成）。"""
+    description: str = ""
 
 
 class ChapterOut(BaseModel):

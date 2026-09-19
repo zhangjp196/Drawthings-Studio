@@ -30,10 +30,10 @@ from sqlalchemy.orm import Session
 from config import data_dir
 from db import get_db, init_db
 from i18n import L, lang_of
-from models import Project, Chapter, MicroWork, MicroSession, MicroMessage
+from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessage
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
-from services.pipeline import Pipeline, _now
+from services.pipeline import Pipeline, _now, chars_from_raw
 from services.drawthings import DrawThingsClient
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -70,12 +70,20 @@ pipeline = Pipeline(data_dir)
 def _media_url(media_path: str) -> str:
     if not media_path:
         return ""
-    return f"/media/{Path(media_path).name}"
+    name = Path(media_path).name
+    # 附带文件修改时间作为缓存破坏参数：文件被重新生成（覆盖同名文件）后 URL 变化，
+    # 强制浏览器重新拉取，避免命中旧缓存（如封面重新生成不刷新）。
+    try:
+        mtime = (MEDIA_DIR / name).stat().st_mtime_ns
+        return f"/media/{name}?v={mtime}"
+    except OSError:
+        return f"/media/{name}"
 
 
 def _chapter_view(ch) -> dict:
     return {
         "index": ch.index,
+        "season_id": ch.season_id or "",
         "title": ch.title,
         "summary": ch.summary or "",
         "description": ch.description,
@@ -679,7 +687,7 @@ def micro_session_delete(request: Request, work_id: str, session_id: str,
 def _cleanup_message_media(msgs) -> None:
     """删除消息关联的媒体文件：助手生成媒体（media_url）+ 用户附图（images JSON 列表）。"""
     def _unlink(url: str) -> None:
-        f = MEDIA_DIR / url.rsplit("/", 1)[-1]
+        f = MEDIA_DIR / url.rsplit("/", 1)[-1].split("?")[0]
         if f.is_file() and f.resolve().is_relative_to(MEDIA_DIR.resolve()):
             f.unlink()
     for m in msgs:
@@ -754,7 +762,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
                                 detail=L(lang, "当前 LLM 配置不支持图片",
                                          "The selected LLM config does not support images"))
         image_urls = _save_user_images(raw_images)
-        image_paths = [str(MEDIA_DIR / u.rsplit("/", 1)[-1]) for u in image_urls]
+        image_paths = [str(MEDIA_DIR / u.rsplit("/", 1)[-1].split("?")[0]) for u in image_urls]
     if not message and not image_urls:
         raise HTTPException(status_code=400,
                             detail=L(lang, "消息不能为空", "Message cannot be empty"))
@@ -783,7 +791,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
         if r.images:
             try:
                 for u in json.loads(r.images):
-                    p = MEDIA_DIR / str(u).rsplit("/", 1)[-1]
+                    p = MEDIA_DIR / str(u).rsplit("/", 1)[-1].split("?")[0]
                     if p.exists():
                         imgs.append(str(p))
             except (ValueError, TypeError):
@@ -1005,6 +1013,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    pipeline.ensure_first_season(db, project)  # 保证存在第一季（旧项目懒迁移：自动建第一季并入孤儿章节）
     unknown = L(lang, "未知配置", "Unknown config")
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(project.llm_config_id)
@@ -1017,7 +1026,9 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "id": project.id, "kind": project.kind, "title": project.title or "",
             "origin": project.origin, "status": project.status,
             "scope": project.scope or {}, "arc": project.arc or "",
-            "characters": project.characters or "",
+            "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
+                             "image_url": _media_url(c["image"])}
+                            for c in chars_from_raw(project.characters)],
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
             "count_mode": project.count_mode or "auto",
@@ -1030,6 +1041,19 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "llm_name": llm_cfg.name if llm_cfg else unknown,
             "dt_name": dt_cfg.name if dt_cfg else unknown,
         },
+        "seasons": [
+            {
+                "id": s.id, "number": s.number, "title": s.title or "",
+                "arc": s.arc or "",
+                "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
+                                 "image_url": _media_url(c["image"])}
+                                for c in chars_from_raw(s.characters)],
+                "count_mode": s.count_mode or "auto",
+                "count_min": s.count_min or 0, "count_max": s.count_max or 0,
+            }
+            for s in (db.query(Season).filter(Season.project_id == project.id)
+                      .order_by(Season.number).all())
+        ],
         "chapters": [_chapter_view(c) for c in chapters],
     }
     data.update(_config_lists(db, project))
@@ -1058,29 +1082,111 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     return {"ok": True}
 
 
+# ---------------- 季（篇章）CRUD ----------------
+@app.post("/api/projects/{project_id}/seasons")
+async def project_season_create(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """新增一季（body: {title}）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline.add_season(db, project, title=str(body.get("title") or ""))
+    return {"id": season.id, "number": season.number, "title": season.title or ""}
+
+
+@app.patch("/api/projects/{project_id}/seasons/{season_id}")
+async def project_season_update(request: Request, project_id: str, season_id: str,
+                                 db: Session = Depends(get_db)):
+    """保存季（篇章）级编辑：季名 / 季大纲 / 季角色 / 章节数量设定 / 每章(标题+摘要)。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline._get_season(db, project, season_id)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+    raw = body.get("chapters")
+    chapters = None
+    if isinstance(raw, list):
+        chapters = [{"title": str(c.get("title") or ""), "summary": str(c.get("summary") or "")}
+                    for c in raw if isinstance(c, dict)]
+    raw_chars = body.get("characters")
+    characters = None
+    if isinstance(raw_chars, list):
+        characters = [{"id": str(c.get("id") or ""), "name": str(c.get("name") or ""),
+                        "description": str(c.get("description") or "")}
+                       for c in raw_chars if isinstance(c, dict)]
+    try:
+        pipeline.save_season(
+            db, project, season,
+            title=body.get("title"), arc=body.get("arc"),
+            characters=characters,
+            count_mode=body.get("count_mode"), count_min=body.get("count_min"),
+            count_max=body.get("count_max"), chapters=chapters)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, f"保存季失败：{e}", f"Save season failed: {e}"))
+    return {"ok": True}
+
+
+@app.delete("/api/projects/{project_id}/seasons/{season_id}")
+def project_season_delete(request: Request, project_id: str, season_id: str,
+                           db: Session = Depends(get_db)):
+    """删除一季（连同其章节/媒体/季角色参考图），剩余季重排。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    try:
+        pipeline.delete_season(db, project, season_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True}
+
+
 @app.post("/api/projects/{project_id}/action")
 async def project_action(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """推进流水线：outline（总览/大纲）/ chapters（拆章）/ generate（生成未完成章节）。"""
+    """推进流水线：arc（故事大纲）/ season_arc（本季大纲）/ season_chars（季角色）/ chars（角色设定）/ chapters（拆章）/ generate（生成未完成章节）。
+    season_arc / season_chars / chapters / generate 需 body 传 season_id。"""
     lang = _lang(request)
     body = await _json_body(request)
     step = str(body.get("step") or "")
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = None
+    if step in ("chapters", "generate", "season_arc", "season_chars"):
+        sid = str(body.get("season_id") or "")
+        season = pipeline._get_season(db, project, sid) if sid else None
+        if season is None:
+            raise HTTPException(status_code=400,
+                                detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
     try:
-        if step == "outline":
-            project = await pipeline.step_outline(
+        if step == "arc":
+            project = await pipeline.step_arc(
                 db, project, lang,
                 res_width=int(body.get("res_width") or 0),
-                res_height=int(body.get("res_height") or 0))
+                res_height=int(body.get("res_height") or 0),
+                extra_prompt=str(body.get("extra_prompt") or ""))
+        elif step == "season_arc":
+            project = await pipeline.step_season_arc(db, project, season, lang,
+                                                     extra_prompt=str(body.get("extra_prompt") or ""))
+        elif step == "season_chars":
+            project = await pipeline.step_season_chars(db, project, season, lang,
+                                                       extra_prompt=str(body.get("extra_prompt") or ""))
+        elif step == "chars":
+            project = await pipeline.step_chars(db, project, lang,
+                                                extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "chapters":
             project = await pipeline.step_chapters(
-                db, project, lang,
+                db, project, season, lang,
                 count_mode=str(body.get("count_mode") or "auto"),
                 count_min=int(body.get("count_min") or 0),
                 count_max=int(body.get("count_max") or 0))
         elif step == "generate":
-            project = await pipeline.step_generate(db, project, lang=lang)
+            project = await pipeline.step_generate(db, project, season, lang=lang)
         else:
             raise HTTPException(status_code=400,
                                 detail=L(lang, f"未知步骤: {step}", f"Unknown step: {step}"))
@@ -1094,8 +1200,8 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
 
 @app.post("/api/projects/{project_id}/action-stream")
 async def project_action_stream(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """逐章推进的 SSE 进度流：body 传 { step:'generate', indices:[...] }（省略/空=全部）
-    或 { step:'chapters', count_mode, count_min, count_max }（逐章规划）。
+    """逐章推进的 SSE 进度流：body 传 { step:'generate', season_id, indices:[...] }（省略/空=全部）
+    或 { step:'chapters', season_id, count_mode, count_min, count_max }（逐章规划）。
     事件：progress(i/total+标题) / chapter(单章完成) / done(附新状态) / error(失败)。"""
     lang = _lang(request)
     body = await _json_body(request)
@@ -1107,13 +1213,19 @@ async def project_action_stream(request: Request, project_id: str, db: Session =
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    sid = str(body.get("season_id") or "")
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
     return StreamingResponse(
-        _project_action_stream(db, project, lang, step, body),
+        _project_action_stream(db, project, season, lang, step, body),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _project_action_stream(db: Session, project: Project, lang: str, step: str, body: dict):
+async def _project_action_stream(db: Session, project: Project, season: Season,
+                                  lang: str, step: str, body: dict):
     """后台执行逐章推进（生成画面 / 章节规划）并逐事件下发：进度/单章回调入队 → SSE 帧；结束发 done，异常发 error。"""
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -1138,7 +1250,7 @@ async def _project_action_stream(db: Session, project: Project, lang: str, step:
         try:
             if step == "chapters":
                 await pipeline.step_chapters_stream(
-                    db, project, lang=lang,
+                    db, project, season, lang=lang,
                     count_mode=str(body.get("count_mode") or "auto"),
                     count_min=int(body.get("count_min") or 0),
                     count_max=int(body.get("count_max") or 0),
@@ -1146,7 +1258,7 @@ async def _project_action_stream(db: Session, project: Project, lang: str, step:
             else:
                 raw = body.get("indices")
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
-                await pipeline.step_generate(db, project, indices=indices, lang=lang,
+                await pipeline.step_generate(db, project, season, indices=indices, lang=lang,
                                              progress_cb=progress_cb, chapter_done_cb=chapter_cb)
             fresh = db.get(Project, project.id)
             await queue.put(("done", {"status": fresh.status if fresh else ""}))
@@ -1171,18 +1283,22 @@ async def _project_action_stream(db: Session, project: Project, lang: str, step:
 
 @app.post("/api/projects/{project_id}/gen/{index}")
 async def project_gen_single(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
-    """生成指定章节：两步连贯——① (重新)生成出图提示词（参考上一章已生成的图）② 生图/生视频。"""
+    """生成指定章节（季内）：body 需 season_id。两步连贯——① (重新)生成出图提示词 ② 生图/生视频。"""
     lang = _lang(request)
+    body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    chapters = (db.query(Chapter)
-                .filter(Chapter.project_id == project.id)
-                .order_by(Chapter.index).all())
+    sid = str(body.get("season_id") or "")
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline._season_chapters(db, project, season)
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
     try:
-        project = await pipeline.step_generate(db, project, indices=[index], lang=lang)
+        project = await pipeline.step_generate(db, project, season, indices=[index], lang=lang)
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"【生成第{index+1}章】失败：{e}",
@@ -1193,15 +1309,18 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
 @app.post("/api/projects/{project_id}/edit/{index}")
 async def project_edit(request: Request, project_id: str, index: int,
                        db: Session = Depends(get_db)):
-    """保存指定章节的出图提示词 / 分辨率（宽/高，修改后需重生成应用）。"""
+    """保存指定章节（季内）的出图提示词 / 分辨率。body 需 season_id。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    chapters = (db.query(Chapter)
-                .filter(Chapter.project_id == project.id)
-                .order_by(Chapter.index).all())
+    sid = str(body.get("season_id") or "")
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline._season_chapters(db, project, season)
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
     try:
@@ -1209,51 +1328,71 @@ async def project_edit(request: Request, project_id: str, index: int,
         h = int(body.get("height") or 0)
     except (TypeError, ValueError):
         w = h = 0
-    pipeline.save_chapter_fields(db, project, index, str(body.get("prompt") or ""), w, h)
+    pipeline.save_chapter_fields(db, project, season, index, str(body.get("prompt") or ""), w, h)
     return {"ok": True}
 
 
-# ---------------- 章节：增删排序 / 手动完成 ----------------
+# ---------------- 章节：增删排序（季内） / 手动完成 ----------------
 @app.post("/api/projects/{project_id}/chapters")
-def project_chapter_add(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """在末尾新增一章（可随后「生成剧本」或手改场景）。"""
+async def project_chapter_add(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """在季末尾新增一章。body 需 season_id。"""
     lang = _lang(request)
+    body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    pipeline.add_chapter(db, project)
+    sid = str(body.get("season_id") or "")
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    pipeline.add_chapter(db, project, season)
     return {"ok": True}
 
 
 @app.delete("/api/projects/{project_id}/chapters/{index}")
-def project_chapter_delete(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
-    """删除第 index 章（连同清理媒体文件），其余章节重新编号。"""
+async def project_chapter_delete(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
+    """删除季内第 index 章（连同清理媒体文件）。body/query 需 season_id。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    chapters = (db.query(Chapter).filter(Chapter.project_id == project.id)
-                .order_by(Chapter.index).all())
+    sid = str(request.query_params.get("season_id") or "")
+    if not sid:
+        try:
+            body = await _json_body(request)
+            sid = str(body.get("season_id") or "")
+        except Exception:
+            pass
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline._season_chapters(db, project, season)
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    pipeline.delete_chapter(db, project, index)
+    pipeline.delete_chapter(db, project, season, index)
     return {"ok": True}
 
 
 @app.post("/api/projects/{project_id}/chapters/{index}/move")
 async def project_chapter_move(request: Request, project_id: str, index: int,
                                 db: Session = Depends(get_db)):
-    """上移 / 下移第 index 章（body: {"direction": "up"|"down"}）。"""
+    """上移 / 下移季内第 index 章（body: {season_id, direction}）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    chapters = (db.query(Chapter).filter(Chapter.project_id == project.id)
-                .order_by(Chapter.index).all())
+    sid = str(body.get("season_id") or "")
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline._season_chapters(db, project, season)
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    pipeline.move_chapter(db, project, index, str(body.get("direction") or ""))
+    pipeline.move_chapter(db, project, season, index, str(body.get("direction") or ""))
     return {"ok": True}
 
 
@@ -1321,6 +1460,68 @@ async def project_cover_ref(request: Request, project_id: str, db: Session = Dep
     return {"ok": True, "enabled": bool(body.get("enabled"))}
 
 
+@app.post("/api/projects/{project_id}/characters/{char_id}/image")
+def project_char_image_upload(request: Request, project_id: str, char_id: str,
+                              file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """上传角色参考图（角色设定页：供各章保持角色形象一致）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请上传图片文件（png/jpg/webp/gif）",
+                                     "Please upload an image file (png/jpg/webp/gif)"))
+    dest = MEDIA_DIR / f"char_{project.id}_{char_id}{ext}"
+    dest.write_bytes(data)
+    try:
+        pipeline.set_char_image(db, project, char_id, str(dest))
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"【上传角色参考图】失败：{e}",
+                                     f"[Upload character image] failed: {e}"))
+    return {"ok": True, "url": _media_url(str(dest))}
+
+
+@app.delete("/api/projects/{project_id}/characters/{char_id}/image")
+def project_char_image_delete(request: Request, project_id: str, char_id: str,
+                              db: Session = Depends(get_db)):
+    """清除角色参考图（连同删除文件）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    try:
+        pipeline.set_char_image(db, project, char_id, "")
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"【清除角色参考图】失败：{e}",
+                                     f"[Remove character image] failed: {e}"))
+    return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/characters/{char_id}/gen-desc")
+async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
+                                db: Session = Depends(get_db)):
+    """AI 生成单个角色的形象/性格描述（该角色有参考图且 LLM 支持视觉时以图为准）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    try:
+        desc = await pipeline.gen_char_description(db, project, char_id, lang)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"【生成角色描述】失败：{e}",
+                                     f"[Generate character description] failed: {e}"))
+    return {"ok": True, "description": desc}
+
+
 @app.post("/api/projects/{project_id}/outline")
 async def project_outline_save(request: Request, project_id: str, db: Session = Depends(get_db)):
     """保存大纲页手动编辑：大纲 / 角色设定 / 风格 / 默认分辨率 / 每章(标题+摘要)。"""
@@ -1334,6 +1535,13 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
     if isinstance(raw, list):
         chapters = [{"title": str(c.get("title") or ""), "summary": str(c.get("summary") or "")}
                     for c in raw if isinstance(c, dict)]
+    raw_chars = body.get("characters")
+    characters = None
+    if isinstance(raw_chars, list):
+        # 参考图不随保存传（按 id 由后端保留）；这里只同步 名字 / 描述
+        characters = [{"id": str(c.get("id") or ""), "name": str(c.get("name") or ""),
+                        "description": str(c.get("description") or "")}
+                       for c in raw_chars if isinstance(c, dict)]
     try:
         pipeline.save_outline(
             db, project,

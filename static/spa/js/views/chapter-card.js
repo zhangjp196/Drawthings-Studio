@@ -5,6 +5,8 @@ Views.chapterCard = {
     chapter: { type: Object, required: true },
     kind: { type: String, required: true },      // comic | drama
     projectId: { type: String, required: true },
+    seasonId: { type: String, default: '' },
+    seasonIndex: { type: Number, default: 0 },
     expanded: { type: Boolean, default: false },
     noToggle: { type: Boolean, default: false },    // 主从布局：常显详情、不可折叠
     isFirst: { type: Boolean, default: false },
@@ -89,8 +91,8 @@ Views.chapterCard = {
     async function doGen() {
       busy.value = 'gen';
       try {
-        await API.post(`/api/projects/${props.projectId}/gen/${props.chapter.index}`);
-        emit('reloaded', props.chapter.index);
+        await API.post(`/api/projects/${props.projectId}/gen/${props.seasonIndex}`, { season_id: props.seasonId });
+        emit('reloaded', props.seasonIndex);
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
         emit('reloaded');
@@ -99,8 +101,8 @@ Views.chapterCard = {
     async function doSave() {
       busy.value = 'save';
       try {
-        await API.post(`/api/projects/${props.projectId}/edit/${props.chapter.index}`,
-                       { prompt: prompt.value, width: w.value, height: h.value });
+        await API.post(`/api/projects/${props.projectId}/edit/${props.seasonIndex}`,
+                       { season_id: props.seasonId, prompt: prompt.value, width: w.value, height: h.value });
         ElementPlus.ElMessage.success(I18N.t('p.promptSaved'));
         props.chapter.prompt = prompt.value;
         props.chapter.width = w.value;
@@ -111,13 +113,13 @@ Views.chapterCard = {
     }
     async function doMove(dir) {
       try {
-        await API.post(`/api/projects/${props.projectId}/chapters/${props.chapter.index}/move`, { direction: dir });
+        await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/move`, { season_id: props.seasonId, direction: dir });
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
     async function doDelete() {
       try {
-        await API.del(`/api/projects/${props.projectId}/chapters/${props.chapter.index}`);
+        await API.del(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}?season_id=${props.seasonId}`);
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }

@@ -4,6 +4,9 @@
 """
 from pathlib import Path
 
+import uuid
+from datetime import datetime, timezone
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -12,6 +15,15 @@ from config import data_dir
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(data_dir) / "app.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def uuid_hex12() -> str:
+    """12 位十六进制 id（与项目/季/配置等一致）。"""
+    return uuid.uuid4().hex[:12]
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
@@ -62,6 +74,7 @@ def _migrate():
             "width": "INTEGER DEFAULT 0",
             "height": "INTEGER DEFAULT 0",
             "summary": "TEXT DEFAULT ''",
+            "season_id": "VARCHAR(12)",
         },
         "projects": {
             "title": "VARCHAR(200) DEFAULT ''",
@@ -141,6 +154,8 @@ def _indexes():
     from sqlalchemy import text
     stmts = [
         "CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chapters_season ON chapters(season_id)",
+        "CREATE INDEX IF NOT EXISTS idx_seasons_project ON seasons(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)",
         "CREATE INDEX IF NOT EXISTS idx_projects_kind ON projects(kind)",
         "CREATE INDEX IF NOT EXISTS idx_projects_created ON projects(created_at)",
@@ -151,9 +166,34 @@ def _indexes():
         conn.commit()
 
 
+def _migrate_seasons():
+    """多季迁移：旧项目（有章节但无季）自动建「第 1 季」并把其全部章节归入。幂等。"""
+    from models import Project, Season
+    db = SessionLocal()
+    try:
+        for p in db.query(Project).all():
+            seasons = db.query(Season).filter(Season.project_id == p.id).all()
+            if not seasons:
+                # 仅在确有章节时才建第 1 季（空项目不必预建）
+                from models import Chapter
+                has_ch = db.query(Chapter).filter(Chapter.project_id == p.id).count() > 0
+                if not has_ch:
+                    continue
+                s1 = Season(id=uuid_hex12(), project_id=p.id, number=1, title="",
+                            created_at=_now_iso(), updated_at=_now_iso())
+                db.add(s1)
+                db.flush()
+                for ch in db.query(Chapter).filter(Chapter.project_id == p.id).all():
+                    ch.season_id = s1.id
+        db.commit()
+    finally:
+        db.close()
+
+
 def init_db():
     """建表 + 迁移 + 索引。需先 import models 以注册所有表到 metadata。"""
     import models  # noqa: F401  确保模型注册
     Base.metadata.create_all(engine)
     _migrate()
+    _migrate_seasons()
     _indexes()

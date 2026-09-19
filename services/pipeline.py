@@ -1,19 +1,17 @@
-"""流水线编排：一句话 -> 设定篇幅 -> 整体路线(总纲) -> 章节设定 -> 剧本编写 -> 单任务进行。
+"""流水线编排：一句话 -> 全局(风格/总纲/核心角色/封面) -> 各季(季大纲/季角色/章节规划) -> 剧本编写 -> 逐章生成。
 
 数据全部走 SQLite（models.py），媒体文件存 data/media。
 每个项目携带所选 LLMConfig / DrawThingConfig 的 id，运行时现场构建客户端，
 因此不同项目可用不同的端点/模型/模式。
 
-连续性设计：
-- 总纲（arc）：先定整体故事路线（开端→发展→高潮→结局），章节按总纲拆分；
-  用户可编辑总纲后重新生成章节（整体路线控制）
-- 首图（first_image）：用户上传或提示词生成，作为第 1 章参考
-  （漫画 = img2img 参考图；短剧 = 视频首帧），并在全片剧本中作视觉基准
-- 剧本编写：把上一章的“文字描述”作为上下文，保证剧情/风格连贯；
-  LLM 配置 supports_vision=no 时不附带任何参考图
-- 生成：第 1 章用首图（若设置），其余章用上一张图（漫画）/ 上一视频末帧（短剧）
-- 单任务/单个调整：可对任意一章单独重生成或修改提示词
+多季（篇章）设计（统一世界观 + 各季独立故事，类似七龙珠）：
+- 项目层：scope（风格）/ arc（总纲）/ characters（核心角色）/ global_prompt / 封面，全局共享；
+- 季层：每季有自己的 arc（季大纲）/ characters（本季新增角色）/ 章节数量设定 / 章节；
+- 章节 index 为扁平全局序号（按季连续），季内展示序号由分组位置计算；
+- 剧本/生成上下文 = 全局风格 + 核心角色 + 季大纲 + 季角色 + 全局要点；
+- 连续性：首章（第 1 季第 1 章）用封面（若开启），其余章用上一章媒体（跨季承接上季末章）。
 """
+import json
 import shutil
 import uuid
 import zipfile
@@ -26,14 +24,17 @@ from sqlalchemy import or_
 from pydantic_ai.messages import ImageUrl
 
 from i18n import L
-from models import Project, Chapter, LLMConfig, DrawThingConfig
+from models import Project, Chapter, Season, LLMConfig, DrawThingConfig
 
 from config_store import ConfigStore
 from .agent import (
+    ArcOut,
+    CharsOut,
+    CharDescOut,
     ChapterCount,
     ChapterOut,
     ChaptersOut,
-    OutlineOut,
+    SeasonArcOut,
     ScriptOut,
     build_model,
     image_data_uri,
@@ -44,6 +45,51 @@ from .drawthings import DrawThingsClient, extract_last_frame
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------- 角色设定（多个角色：id / 名字 / 形象性格 / 参考图） ----------------
+def chars_from_raw(raw: str) -> list[dict]:
+    """解析 project.characters（JSON 列表）为 [{id, name, description, image}]。
+
+    兼容旧版纯文本角色设定：整体视为一个未命名角色的描述。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, list):
+        out = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            out.append({
+                "id": str(item.get("id") or "") or uuid.uuid4().hex[:12],
+                "name": str(item.get("name") or "").strip(),
+                "description": str(item.get("description") or "").strip(),
+                "image": str(item.get("image") or "").strip(),
+            })
+        return out
+    return [{"id": uuid.uuid4().hex[:12], "name": "", "description": raw, "image": ""}]
+
+
+def chars_to_raw(chars: list[dict]) -> str:
+    """角色列表 -> JSON 字符串（存 project.characters）。"""
+    return json.dumps(chars or [], ensure_ascii=False)
+
+
+def chars_to_text(chars: list[dict]) -> str:
+    """角色列表 -> 文本（注入 LLM 提示词用）：每个角色一行「名字：设定」。"""
+    lines = []
+    for c in chars or []:
+        name = (c.get("name") or "").strip()
+        desc = (c.get("description") or "").strip()
+        if name and desc:
+            lines.append(f"{name}：{desc}")
+        elif name or desc:
+            lines.append(name or desc)
+    return "\n".join(lines)
 
 
 class Pipeline:
@@ -90,6 +136,7 @@ class Pipeline:
         db.add(project)
         db.commit()
         db.refresh(project)
+        self.ensure_first_season(db, project)  # 新项目默认带第一季
         return project
 
     def get(self, db, project_id: str) -> Project:
@@ -106,10 +153,16 @@ class Pipeline:
             pass
 
     def delete_project(self, db, project: Project):
-        """删除项目：先删媒体文件（章节媒体 + 首图），再删章节与项目记录。"""
+        """删除项目：先删媒体文件（章节媒体 + 封面 + 核心角色/季角色参考图），再删季、章节与项目记录。"""
         for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
             self._rm_media(ch.media_path)
             db.delete(ch)
+        for s in db.query(Season).filter(Season.project_id == project.id).all():
+            for c in chars_from_raw(s.characters):
+                self._rm_media(c.get("image"))
+            db.delete(s)
+        for c in chars_from_raw(project.characters):
+            self._rm_media(c.get("image"))
         self._rm_media(project.first_image)
         db.delete(project)
         db.commit()
@@ -143,38 +196,333 @@ class Pipeline:
         db.commit()
         db.refresh(project)
 
-    # ---------------- 大纲（整体风格/角色/大纲 + 章节规划：标题 + 主题摘要） ----------------
-    async def step_outline(self, db, project: Project, lang: str = "zh",
-                           res_width: int = 0, res_height: int = 0) -> Project:
-        """「确定大纲」：一次性规划 风格/主题/基调 + 整体故事大纲 + 角色设定，并设置默认分辨率。
-        不生成章节（章节由「章节规划」单独生成，不会随大纲保存自动生成）。status: planning → arced。"""
+    # ---------------- 季（篇章）管理 ----------------
+    def _load_seasons(self, db, project: Project) -> list[Season]:
+        """项目下的季，按季号升序。"""
+        return (db.query(Season)
+                .filter(Season.project_id == project.id)
+                .order_by(Season.number).all())
+
+    def _get_season(self, db, project: Project, season_id: str) -> Season | None:
+        s = db.get(Season, season_id)
+        if s and s.project_id == project.id:
+            return s
+        return None
+
+    def _season_chapters(self, db, project: Project, season: Season) -> list[Chapter]:
+        """某一季的章节（按扁平序号有序，即季内顺序）。"""
+        return (db.query(Chapter)
+                .filter(Chapter.project_id == project.id, Chapter.season_id == season.id)
+                .order_by(Chapter.index).all())
+
+    def _combined_chars(self, project: Project, season: Season) -> list[dict]:
+        """合并项目核心角色 + 季新增角色（季角色覆盖同 id 项目角色）。"""
+        merged = {c["id"]: dict(c) for c in chars_from_raw(project.characters)}
+        for c in chars_from_raw(season.characters):
+            merged[c["id"]] = dict(c)
+        return list(merged.values())
+
+    def _season_arc(self, project: Project, season: Season) -> str:
+        """季大纲（为空则回退项目总纲）。"""
+        return (season.arc or "").strip() or (project.arc or "").strip()
+
+    def _prev_season_last_chapter(self, db, project: Project, season: Season) -> Chapter | None:
+        """上一季最后一章（用于新季第 1 章的参考图链）。"""
+        if season.number <= 1:
+            return None
+        prev = (db.query(Season)
+                .filter(Season.project_id == project.id, Season.number == season.number - 1)
+                .first())
+        if not prev:
+            return None
+        chs = self._season_chapters(db, project, prev)
+        return chs[-1] if chs else None
+
+    def ensure_first_season(self, db, project: Project) -> Season:
+        """保证项目至少存在第一季（幂等）：无任何季时自动建第一季，
+        并把孤儿章节（season_id 为空的旧数据）并入第一季后重排扁平序号。"""
+        seasons = self._load_seasons(db, project)
+        if seasons:
+            return seasons[0]
+        season = Season(id=uuid.uuid4().hex[:12], project_id=project.id, number=1,
+                        title="", created_at=_now(), updated_at=_now())
+        db.add(season)
+        db.flush()
+        orphans = (db.query(Chapter)
+                   .filter(Chapter.project_id == project.id, Chapter.season_id.is_(None))
+                   .order_by(Chapter.index).all())
+        for ch in orphans:
+            ch.season_id = season.id
+        if orphans:
+            self._reindex_flat(db, project)
+        db.commit()
+        db.refresh(season)
+        return season
+
+    def add_season(self, db, project: Project, title: str = "") -> Season:
+        """新增一季（季号 = 现有最大季号 + 1；空项目从 1 起）。"""
+        seasons = self._load_seasons(db, project)
+        number = (seasons[-1].number if seasons else 0) + 1
+        season = Season(id=uuid.uuid4().hex[:12], project_id=project.id, number=number,
+                        title=(title or "").strip(), created_at=_now(), updated_at=_now())
+        db.add(season)
+        db.commit()
+        db.refresh(season)
+        self._save(db, project)
+        return season
+
+    def rename_season(self, db, project: Project, season_id: str, title: str) -> Season:
+        """修改季名。"""
+        season = self._get_season(db, project, season_id)
+        if season is None:
+            raise ValueError("季不存在 (Season not found)")
+        season.title = (title or "").strip()[:200]
+        season.updated_at = _now()
+        db.commit()
+        db.refresh(season)
+        self._save(db, project)
+        return season
+
+    def delete_season(self, db, project: Project, season_id: str) -> Project:
+        """删除一季：连同其章节（清理媒体）与季角色参考图；剩余季重排季号 + 章节扁平重编号。"""
+        season = self._get_season(db, project, season_id)
+        if season is None:
+            raise ValueError("季不存在 (Season not found)")
+        for ch in self._season_chapters(db, project, season):
+            self._rm_media(ch.media_path)
+            db.delete(ch)
+        for c in chars_from_raw(season.characters):
+            self._rm_media(c.get("image"))
+        db.delete(season)
+        db.commit()
+        # 剩余季重排季号（保持相对顺序连续 1..S）
+        for i, s in enumerate(self._load_seasons(db, project), start=1):
+            s.number = i
+        self._reindex_flat(db, project)
+        db.commit()
+        self._save(db, project)
+        return project
+
+    def _reindex_flat(self, db, project: Project) -> None:
+        """按 (季号, 季内顺序) 重排全部章节的扁平序号 0..N-1。
+
+        季内顺序 = 当前扁平顺序按季分组（保持相对次序）。"""
+        flat = self._load_chapters(db, project)
+        season_no = {s.id: s.number for s in self._load_seasons(db, project)}
+        groups: dict[str, list[Chapter]] = {}
+        order: list[str] = []
+        for ch in flat:
+            sid = ch.season_id or ""
+            if sid not in groups:
+                groups[sid] = []
+                order.append(sid)
+            groups[sid].append(ch)
+        # 排序前记录每季的原始位置作为同季号时的次序 tiebreaker
+        # （不能直接 order.index(sid)：list.sort 在计算 key 时会清空原列表，导致 index 抛 ValueError）
+        orig_pos = {sid: i for i, sid in enumerate(order)}
+        order.sort(key=lambda sid: (season_no.get(sid, 0), orig_pos[sid]))
+        new_idx = 0
+        for sid in order:
+            for ch in groups[sid]:
+                ch.index = new_idx
+                new_idx += 1
+        db.commit()
+
+    # ---------------- 企划（每步独立生成：故事大纲 / 角色设定）+ 章节规划 ----------------
+    async def step_arc(self, db, project: Project, lang: str = "zh",
+                       res_width: int = 0, res_height: int = 0, extra_prompt: str = "") -> Project:
+        """「生成大纲」：单独写整体故事大纲（基于一句话创意 + 风格/主题/基调），并设置默认分辨率。
+        不触碰风格 / 角色 / 章节。status: → arced。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        style = ((project.scope or {}).get("style") or "").strip()
-        system = ("你是资深漫画/短剧策划兼编剧。根据一句话创意，为整部作品设计：\n"
-                  "1) 风格（用户已指定则沿用，否则推荐一个）、主题、基调；\n"
-                  "2) 整体故事大纲：分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、如何承接到下一段，"
-                  "末尾附 1-3 条贯穿全篇的主线设定；\n"
-                  "3) 角色设定：列出主要角色（名字 / 外形形象 / 性格 / 核心动机），供后续各章保持角色一致。")
-        agent = make_agent(build_model(llm_cfg), system, output_type=OutlineOut)
-        user = project.origin + (f"\n风格（用户指定，请沿用）：{style}" if style else "")
+        scope = project.scope or {}
+        style = (scope.get("style") or "").strip()
+        theme = (scope.get("theme") or "").strip()
+        tone = (scope.get("tone") or "").strip()
+        system = ("你是资深漫画/短剧策划兼编剧。根据一句话创意与风格设定，写整体故事大纲：\n"
+                  "分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、如何承接到下一段，"
+                  "末尾附 1-3 条贯穿全篇的主线设定。")
+        agent = make_agent(build_model(llm_cfg), system, output_type=ArcOut)
+        user = project.origin
+        if style:
+            user += f"\n风格：{style}"
+        if theme:
+            user += f"\n主题：{theme}"
+        if tone:
+            user += f"\n基调：{tone}"
+        if (extra_prompt or "").strip():
+            user += f"\n额外要求：{(extra_prompt or '').strip()}"
         async with agent:
             data = (await agent.run(user)).output
         arc = (data.arc or "").strip()
         if not arc:
             raise RuntimeError(L(lang, "模型未返回大纲内容，请重试",
                                  "The model returned no outline content — please retry"))
-        project.scope = {
-            "style": style or (data.style or "").strip(),
-            "theme": (data.theme or "").strip(),
-            "tone": (data.tone or "").strip(),
-        }
         project.arc = arc
-        project.characters = (data.characters or "").strip()
         project.res_width = int(res_width or 0)
         project.res_height = int(res_height or 0)
         project.status = "arced"
         self._save(db, project)
         return project
+
+    async def step_season_arc(self, db, project: Project, season: Season, lang: str = "zh",
+                              extra_prompt: str = "") -> Project:
+        """「生成本季大纲」：基于整体故事大纲（全篇主线）+ 本季季号/季名，为当前季单独写故事大纲。
+        不触碰整体大纲 / 风格 / 角色 / 章节。status: → arced。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        scope = project.scope or {}
+        style = (scope.get("style") or "").strip()
+        theme = (scope.get("theme") or "").strip()
+        overall_arc = (project.arc or "").strip()
+        season_no = season.number
+        season_title = (season.title or "").strip()
+        system = ("你是资深漫画/短剧策划兼编剧。根据整体故事大纲（全篇主线）与本季季号/季名，"
+                  "写本季的剧情大纲：说明本季承接主线的哪一段、本季的开端、发展、高潮、结局，"
+                  "以及与前后季的衔接。字数与整体大纲相当，分 开端、发展、高潮、结局 四段，每段 1-2 句。"
+                  "若本季尚无合适名字，请在末尾附一个简洁的季名（篇章名）。")
+        agent = make_agent(build_model(llm_cfg), system, output_type=SeasonArcOut)
+        user = f"季号：第 {season_no} 季"
+        if season_title:
+            user += f"\n季名：{season_title}"
+        if overall_arc:
+            user += f"\n整体故事大纲（全篇主线）：\n{overall_arc}"
+        if style:
+            user += f"\n风格：{style}"
+        if theme:
+            user += f"\n主题：{theme}"
+        if (extra_prompt or "").strip():
+            user += f"\n额外要求：{(extra_prompt or '').strip()}"
+        async with agent:
+            data = (await agent.run(user)).output
+        arc = (data.arc or "").strip()
+        if not arc:
+            raise RuntimeError(L(lang, "模型未返回本季大纲内容，请重试",
+                                 "The model returned no season outline content — please retry"))
+        season.arc = arc
+        # 若本季尚无名字且模型给出，则采用模型建议的季名
+        if not season_title and (data.title or "").strip():
+            season.title = (data.title or "").strip()
+        project.status = "arced"
+        self._save(db, project)
+        return project
+
+    async def step_season_chars(self, db, project: Project, season: Season, lang: str = "zh",
+                                extra_prompt: str = "") -> Project:
+        """「生成季角色」：基于本季大纲（为空则整体大纲）+ 风格 + 已有核心角色，生成本季新增角色。
+        不触碰整体大纲 / 风格 / 核心角色 / 章节。本季无新角色时可为空。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        scope = project.scope or {}
+        style = (scope.get("style") or "").strip()
+        season_arc = self._season_arc(project, season)
+        if not season_arc:
+            raise RuntimeError(L(lang, "请先生成或填写本季大纲（或整体大纲）再生成季角色",
+                                 "Please create the season (or overall) outline before generating season characters"))
+        overall_chars = chars_from_raw(project.characters)
+        overall_names = "、".join((c.get("name") or "").strip() for c in overall_chars
+                                 if (c.get("name") or "").strip())
+        system = ("你是资深漫画/短剧策划。根据本季剧情大纲、风格与已有核心角色，列出本篇章新增的角色"
+                  "（即不在核心角色之列、本篇章才会出现的角色）：每个角色给出 名字 + 形象/性格（每人 2-4 句），"
+                  "供本篇章各章保持角色一致。不要重复已有核心角色；若本篇章没有新角色，返回空列表即可。")
+        agent = make_agent(build_model(llm_cfg), system, output_type=CharsOut)
+        user = f"本季大纲：\n{season_arc}"
+        if style:
+            user += f"\n风格：{style}"
+        if overall_names:
+            user += f"\n已有核心角色（不要重复）：{overall_names}"
+        if (extra_prompt or "").strip():
+            user += f"\n额外要求：{(extra_prompt or '').strip()}"
+        async with agent:
+            data = (await agent.run(user)).output
+        chars = [{
+            "id": uuid.uuid4().hex[:12],
+            "name": (c.name or "").strip(),
+            "description": (c.description or "").strip(),
+            "image": "",
+        } for c in (data.characters or [])
+            if ((c.name or "").strip() or (c.description or "").strip())]
+        # 重新生成整体替换季角色：清理旧季角色的参考图文件（若有）
+        for old in chars_from_raw(season.characters):
+            self._rm_media(old.get("image"))
+        season.characters = chars_to_raw(chars)
+        self._save(db, project)
+        return project
+
+    async def step_chars(self, db, project: Project, lang: str = "zh",
+                         extra_prompt: str = "") -> Project:
+        """「生成角色」：单独列出主要角色设定（基于一句话创意 + 风格 + 故事大纲），
+        输出为多个角色（名字 + 形象/性格）。不触碰风格 / 大纲 / 章节。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        scope = project.scope or {}
+        style = (scope.get("style") or "").strip()
+        arc = (project.arc or "").strip()
+        system = ("你是资深漫画/短剧策划。根据一句话创意、风格与整体故事大纲，列出主要角色设定："
+                  "每个角色给出 名字 + 形象/性格/核心动机（每人 2-4 句），供后续各章保持角色一致。")
+        agent = make_agent(build_model(llm_cfg), system, output_type=CharsOut)
+        user = project.origin
+        if style:
+            user += f"\n风格：{style}"
+        if arc:
+            user += f"\n整体故事大纲：{arc}"
+        if (extra_prompt or "").strip():
+            user += f"\n额外要求：{(extra_prompt or '').strip()}"
+        async with agent:
+            data = (await agent.run(user)).output
+        chars = [{
+            "id": uuid.uuid4().hex[:12],
+            "name": (c.name or "").strip(),
+            "description": (c.description or "").strip(),
+            "image": "",
+        } for c in (data.characters or [])
+            if ((c.name or "").strip() or (c.description or "").strip())]
+        if not chars:
+            raise RuntimeError(L(lang, "模型未返回角色设定，请重试",
+                                 "The model returned no character settings — please retry"))
+        # 重新生成整体替换角色：清理旧角色的参考图文件
+        for old in chars_from_raw(project.characters):
+            self._rm_media(old.get("image"))
+        project.characters = chars_to_raw(chars)
+        self._save(db, project)
+        return project
+
+    async def gen_char_description(self, db, project: Project, char_id: str, lang: str = "zh") -> str:
+        """AI 生成单个角色的形象/性格描述（2-4 句）。
+        该角色有参考图且 LLM 支持视觉时，以图片为形象基准（文设贴合图）；
+        并结合作品一句话创意 / 风格 / 故事大纲保持一致。返回写回后的描述。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        chars = chars_from_raw(project.characters)
+        char = next((c for c in chars if c["id"] == char_id), None)
+        if char is None:
+            raise ValueError("角色不存在 (Character not found)")
+        scope = project.scope or {}
+        style = (scope.get("style") or "").strip()
+        arc = (project.arc or "").strip()
+        name = (char.get("name") or "").strip()
+        system = ("你是资深漫画/短剧策划。为一个角色写 形象/性格/核心动机（2-4 句），供后续各章保持角色一致。"
+                  "若附带了角色参考图，请以图片为依据描述外形（服饰 / 相貌 / 气质等），让文字设定与图片一致。")
+        agent = make_agent(build_model(llm_cfg), system, output_type=CharDescOut)
+        user_text = f"一句话创意：{project.origin}"
+        if style:
+            user_text += f"\n风格：{style}"
+        if name:
+            user_text += f"\n角色名字：{name}"
+        if arc:
+            user_text += f"\n整体故事大纲：{arc}"
+        user_text += "\n请写出这个角色的形象 / 性格 / 核心动机。"
+        # 参考图：角色有图且 LLM 支持视觉才附带（多模态入图）
+        img = (char.get("image") or "").strip()
+        supports_vision = (getattr(llm_cfg, "supports_vision", None) or "yes").lower() == "yes"
+        prompt: str | list = user_text
+        if img and Path(img).is_file() and supports_vision:
+            prompt = [ImageUrl(url=image_data_uri(img)), user_text]
+        async with agent:
+            data = (await agent.run(prompt)).output
+        desc = (data.description or "").strip()
+        if not desc:
+            raise RuntimeError(L(lang, "模型未返回角色描述，请重试",
+                                 "The model returned no character description — please retry"))
+        char["description"] = desc
+        project.characters = chars_to_raw(chars)
+        self._save(db, project)
+        return desc
 
     async def _plan_chapters(self, db, project: Project, lang: str,
                              count_mode: str = "auto", count_min: int = 0, count_max: int = 0) -> list[tuple[str, str]]:
@@ -182,7 +530,7 @@ class Pipeline:
         章节数量：auto = 模型自行决定；range = 在 [count_min, count_max] 内选择合适数量。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
-        chars = (project.characters or "").strip()
+        chars = chars_to_text(chars_from_raw(project.characters))
         gprompt = (project.global_prompt or "").strip()
         system = ("你是分章策划。依据整体故事大纲、风格、角色设定，把故事拆成章节，"
                   "每章给出：标题（简短）+ 一句话主题摘要（讲清本章发生什么、如何承接前后）。")
@@ -200,23 +548,33 @@ class Pipeline:
             data = (await agent.run(user)).output
         return [(c.title or f"第{i + 1}章", (c.scene or "").strip()) for i, c in enumerate(data.chapters)]
 
-    def _rebuild_chapters(self, db, project: Project, plan: list[tuple[str, str]]) -> None:
-        """按 [(标题, 主题摘要)] 重建章节：清空旧章节（清理其媒体）后按序建新的（剧本/媒体留待章节页生成）。"""
-        for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
+    def _rebuild_chapters(self, db, project: Project, season: Season,
+                          plan: list[tuple[str, str]]) -> None:
+        """按 [(标题, 主题摘要)] 重建**该季**章节：清空旧章节（清理其媒体）后按序建新的。"""
+        for ch in self._season_chapters(db, project, season):
             self._rm_media(ch.media_path)
             db.delete(ch)
         db.commit()
+        base = 0
+        if season.number > 1:
+            prev = (db.query(Season)
+                    .filter(Season.project_id == project.id, Season.number < season.number)
+                    .order_by(Season.number.desc()).first())
+            if prev:
+                base = len(self._season_chapters(db, project, prev))
         for i, (title, summary) in enumerate(plan):
-            db.add(Chapter(project_id=project.id, index=i, title=title, summary=summary))
+            db.add(Chapter(project_id=project.id, season_id=season.id,
+                           index=base + i, title=title, summary=summary))
         db.commit()
+        self._reindex_flat(db, project)
 
     def save_outline(self, db, project: Project, *, arc: str | None = None,
-                     characters: str | None = None, style: str | None = None,
-                     global_prompt: str | None = None,
-                     res_width: int | None = 0, res_height: int | None = 0,
-                     count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0,
-                     chapters: list[dict] | None = None) -> Project:
-        """保存大纲页手动编辑：大纲 / 角色设定 / 全局提示词 / 风格 / 默认分辨率 / 章节数量设定 / 每章(标题+摘要)。
+                      characters: list[dict] | None = None, style: str | None = None,
+                      global_prompt: str | None = None,
+                      res_width: int | None = 0, res_height: int | None = 0,
+                      count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0,
+                      chapters: list[dict] | None = None) -> Project:
+        """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定 / 每章(标题+摘要)。
         仅更新传入（非 None）的字段；章节按序号对账：改已有、末尾补新、删多余（清理其媒体），
         不触碰已生成的剧本/媒体（保存不触发生成）。"""
         scope = dict(project.scope or {})
@@ -226,7 +584,28 @@ class Pipeline:
         if arc is not None:
             project.arc = (arc or "").strip()
         if characters is not None:
-            project.characters = (characters or "").strip()
+            existing = {c["id"]: c for c in chars_from_raw(project.characters)}
+            new_chars = []
+            for item in characters:
+                if not isinstance(item, dict):
+                    continue
+                cid = str(item.get("id") or "").strip() or uuid.uuid4().hex[:12]
+                old = existing.get(cid) or {}
+                img = (old.get("image") or "").strip()
+                if img and not Path(img).is_file():
+                    img = ""  # 参考图文件已不在：丢弃引用
+                new_chars.append({
+                    "id": cid,
+                    "name": str(item.get("name") or "").strip(),
+                    "description": str(item.get("description") or "").strip(),
+                    "image": img,
+                })
+            # 删除的角色：清理其参考图文件
+            kept = {c["id"] for c in new_chars}
+            for cid, c in existing.items():
+                if cid not in kept and c.get("image"):
+                    self._rm_media(c["image"])
+            project.characters = chars_to_raw(new_chars)
         if global_prompt is not None:
             project.global_prompt = (global_prompt or "").strip()
         if res_width is not None:
@@ -259,6 +638,65 @@ class Pipeline:
         self._save(db, project)
         return project
 
+    def save_season(self, db, project: Project, season: Season, *,
+                    title: str | None = None, arc: str | None = None,
+                    characters: list[dict] | None = None,
+                    count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0,
+                    chapters: list[dict] | None = None) -> Season:
+        """保存季（篇章）级编辑：季名 / 季大纲 / 季角色（名字+描述，按 id 保留参考图）/ 章节数量设定 / 每章(标题+摘要)。
+        仅更新传入（非 None）的字段；章节按季内序号对账。"""
+        if title is not None:
+            season.title = (title or "").strip()[:200]
+        if arc is not None:
+            season.arc = (arc or "").strip()
+        if characters is not None:
+            existing = {c["id"]: c for c in chars_from_raw(season.characters)}
+            new_chars = []
+            for item in characters:
+                if not isinstance(item, dict):
+                    continue
+                cid = str(item.get("id") or "").strip() or uuid.uuid4().hex[:12]
+                old = existing.get(cid) or {}
+                img = (old.get("image") or "").strip()
+                if img and not Path(img).is_file():
+                    img = ""
+                new_chars.append({"id": cid, "name": str(item.get("name") or "").strip(),
+                                  "description": str(item.get("description") or "").strip(), "image": img})
+            kept = {c["id"] for c in new_chars}
+            for cid, c in existing.items():
+                if cid not in kept and c.get("image"):
+                    self._rm_media(c["image"])
+            season.characters = chars_to_raw(new_chars)
+        if count_mode is not None:
+            season.count_mode = "range" if count_mode == "range" else "auto"
+        if count_min is not None:
+            season.count_min = int(count_min or 0)
+        if count_max is not None:
+            season.count_max = int(count_max or 0)
+        if chapters is not None:
+            existing = self._season_chapters(db, project, season)
+            for i, item in enumerate(chapters):
+                t = (item.get("title") or "").strip()
+                s = (item.get("summary") or "").strip()
+                if i < len(existing):
+                    if t:
+                        existing[i].title = t
+                    existing[i].summary = s
+                else:
+                    base = existing[-1].index + 1 if existing else 0
+                    db.add(Chapter(project_id=project.id, season_id=season.id,
+                                   index=base + (i - len(existing)),
+                                   title=t or f"第{i + 1}章", summary=s))
+            for ch in existing[len(chapters):]:
+                self._rm_media(ch.media_path)
+                db.delete(ch)
+            self._reindex_flat(db, project)
+        season.updated_at = _now()
+        db.commit()
+        db.refresh(season)
+        self._save(db, project)
+        return season
+
     def reset_settings(self, db, project: Project, *, title: str, origin: str, style: str,
                         clear_downstream: bool, lang: str = "zh") -> Project:
         """重新设定：修改标题 / 一句话创意（主题）/ 风格。
@@ -277,6 +715,8 @@ class Pipeline:
         project.scope = scope
         if clear_downstream:
             project.arc = ""
+            for c in chars_from_raw(project.characters):
+                self._rm_media(c.get("image"))
             project.characters = ""
             project.global_prompt = ""
             project.cover_as_first_ref = False
@@ -292,25 +732,33 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    async def step_chapters(self, db, project: Project, lang: str = "zh",
-                            count_mode: str = "auto", count_min: int = 0, count_max: int = 0) -> Project:
-        """「章节规划」：依据当前大纲/风格/角色 + 章节数量设定（auto / range）规划章节（标题 + 主题摘要）。
-        会清空已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
-        project.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
-        project.count_min = int(count_min or 0)
-        project.count_max = int(count_max or 0)
-        plan = await self._plan_chapters(db, project, lang, project.count_mode, project.count_min, project.count_max)
-        self._rebuild_chapters(db, project, plan)
+    async def step_chapters(self, db, project: Project, season: Season, lang: str = "zh",
+                             count_mode: str = "auto", count_min: int = 0, count_max: int = 0) -> Project:
+        """「章节规划」：依据季大纲/风格/角色 + 章节数量设定（auto / range）规划章节（标题 + 主题摘要）。
+        会清空该季已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
+        season.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
+        season.count_min = int(count_min or 0)
+        season.count_max = int(count_max or 0)
+        n = await self._plan_chapter_count(db, project, season, lang,
+                                           season.count_mode, season.count_min, season.count_max)
+        prior: list[tuple[str, str]] = []
+        plan: list[tuple[str, str]] = []
+        for i in range(1, n + 1):
+            t, s = await self._plan_one_chapter(db, project, season, lang, i, n, prior)
+            prior.append((t, s))
+            plan.append((t, s))
+        self._rebuild_chapters(db, project, season, plan)
         project.status = "chaptered"
         self._save(db, project)
         return project
 
-    async def _plan_chapter_count(self, db, project: Project, lang: str,
-                                  count_mode: str, count_min: int, count_max: int) -> int:
+    async def _plan_chapter_count(self, db, project: Project, season: Season, lang: str,
+                                   count_mode: str, count_min: int, count_max: int) -> int:
         """先定总章数：auto→模型给一个合适数(3-12)；range→在 [count_min, count_max] 内选一个数。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         gprompt = (project.global_prompt or "").strip()
+        arc = self._season_arc(project, season)
         system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
         agent = make_agent(build_model(llm_cfg), system, output_type=ChapterCount)
         if (count_mode or "auto") == "range" and int(count_min or 0) > 0:
@@ -320,18 +768,19 @@ class Pipeline:
             cnt = "请选择合适的章数（一般 3-12）"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
-                + f"{cnt}\n\n整体故事大纲：\n{(project.arc or '').strip()}")
+                + f"{cnt}\n\n整体故事大纲：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
         return max(1, int(data.count or 0))
 
-    async def _plan_one_chapter(self, db, project: Project, lang: str, i: int, n: int,
-                                prior: list[tuple[str, str]]) -> tuple[str, str]:
+    async def _plan_one_chapter(self, db, project: Project, season: Season, lang: str, i: int, n: int,
+                                 prior: list[tuple[str, str]]) -> tuple[str, str]:
         """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
-        chars = (project.characters or "").strip()
+        chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
+        arc = self._season_arc(project, season)
         system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
                   "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。")
         agent = make_agent(build_model(llm_cfg), system, output_type=ChapterOut)
@@ -341,30 +790,38 @@ class Pipeline:
                 + (f"角色设定：{chars}\n" if chars else "")
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
                 + f"共 {n} 章，现在规划第 {i} 章。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
-                  f"整体故事大纲：\n{(project.arc or '').strip()}")
+                  f"整体故事大纲：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
         return ((data.title or f"第{i}章").strip(), (data.scene or "").strip())
 
-    async def step_chapters_stream(self, db, project: Project, lang: str = "zh",
-                                   count_mode: str = "auto", count_min: int = 0, count_max: int = 0,
-                                   progress_cb=None, chapter_done_cb=None) -> Project:
+    async def step_chapters_stream(self, db, project: Project, season: Season, lang: str = "zh",
+                                    count_mode: str = "auto", count_min: int = 0, count_max: int = 0,
+                                    progress_cb=None, chapter_done_cb=None) -> Project:
         """「章节规划」逐章版：先定总章数 N，再逐章规划第 1..N 章（每章一次调用、参考前面章节承接剧情）。
-        会清空已有章节/媒体（按大纲重新拆章）后逐个补入；status → chaptered。
+        会清空该季已有章节/媒体（按大纲重新拆章）后逐个补入；status → chaptered。
         progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后（SSE 实时回传标题/摘要，页面逐个刷新）。"""
-        project.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
-        project.count_min = int(count_min or 0)
-        project.count_max = int(count_max or 0)
-        self._rebuild_chapters(db, project, [])  # 清空旧章节/媒体，随后逐个补入
-        n = await self._plan_chapter_count(db, project, lang,
-                                           project.count_mode, project.count_min, project.count_max)
+        season.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
+        season.count_min = int(count_min or 0)
+        season.count_max = int(count_max or 0)
+        self._rebuild_chapters(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
+        n = await self._plan_chapter_count(db, project, season, lang,
+                                           season.count_mode, season.count_min, season.count_max)
+        base = 0
+        if season.number > 1:
+            prev = (db.query(Season)
+                    .filter(Season.project_id == project.id, Season.number < season.number)
+                    .order_by(Season.number.desc()).first())
+            if prev:
+                base = len(self._season_chapters(db, project, prev))
         prior: list[tuple[str, str]] = []
         for i in range(1, n + 1):
             if progress_cb:
                 await progress_cb(i, n, f"第{i}章")
-            title, summary = await self._plan_one_chapter(db, project, lang, i, n, prior)
+            title, summary = await self._plan_one_chapter(db, project, season, lang, i, n, prior)
             prior.append((title, summary))
-            ch = Chapter(project_id=project.id, index=i - 1, title=title, summary=summary)
+            ch = Chapter(project_id=project.id, season_id=season.id,
+                         index=base + i - 1, title=title, summary=summary)
             db.add(ch)
             db.commit()
             db.refresh(ch)
@@ -402,9 +859,10 @@ class Pipeline:
                 f"{shot}\n"
                 f"同时按本章构图决定出图分辨率 width/height（均为 64 的倍数，最长边不超过 {limit} 像素；参考：{ratios}）。")
 
-    async def _gen_one_script(self, db, project: Project, i: int, ch: Chapter,
-                              chapters: list[Chapter], lang: str = "zh") -> Chapter:
-        """为第 i 章单独写剧本/提示词/分辨率（供「按章生成」与「批量生成」复用）。"""
+    async def _gen_one_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
+                               chapters: list[Chapter], lang: str = "zh") -> Chapter:
+        """为第 i 章（季内序号）单独写剧本/提示词/分辨率（供「按章生成」与「批量生成」复用）。
+        chapters 为该季的章节列表；i 为季内 0 起序号。"""
         llm_cfg, supports_vision, limit, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
@@ -416,20 +874,31 @@ class Pipeline:
         if prev:
             context = f"上一章《{prev.title}》：{prev.description}"
             prev_media = (prev.media_path or "").strip()
-            if prev_media:  # 上一章已生成则作参考；视频先抽末帧，避免把 mp4 当图片喂给 LLM
+            if prev_media:
                 ext = Path(prev_media).suffix.lower()
                 if ext in (".mp4", ".mov", ".webm", ".gif"):
                     ref_img = extract_last_frame(prev_media, media_dir)
                 else:
                     ref_img = prev_media
-        if i == 0 and first_img and Path(first_img).is_file() and project.cover_as_first_ref:
-            # 第 1 章：以封面作视觉基准（仅当开启「封面作为第 1 章参考」），随剧本一并给 LLM 对齐
-            context += "\n附封面（第 1 章视觉基准）：它是全系列的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
-            if supports_vision:
-                ref_img = first_img
+        else:
+            # 季内第 1 章：非第一季则参考上一季末章；第一季则参考封面（若开启）
+            if season.number > 1:
+                prev_last = self._prev_season_last_chapter(db, project, season)
+                if prev_last and prev_last.media_path:
+                    context = f"上一季末章《{prev_last.title}》：{prev_last.description}"
+                    pm = (prev_last.media_path or "").strip()
+                    ext = Path(pm).suffix.lower()
+                    if ext in (".mp4", ".mov", ".webm", ".gif"):
+                        ref_img = extract_last_frame(pm, media_dir)
+                    else:
+                        ref_img = pm
+            elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
+                context += "\n附封面（第 1 章视觉基准）：它是全系列的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
+                if supports_vision:
+                    ref_img = first_img
         if not supports_vision:
-            ref_img = None  # 纯文本模型：不附带任何参考图
-        chars = (project.characters or "").strip()
+            ref_img = None
+        chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
         base = (ch.summary or ch.description or "").strip() or "（按大纲与上一章自然续写）"
         user = (
@@ -449,40 +918,42 @@ class Pipeline:
         return ch
 
     # ---------------- 阶段 5：逐章生成画面（出图提示词 + 生图，两步连贯） ----------------
-    async def step_generate(self, db, project: Project, indices: list[int] | None = None,
+    async def step_generate(self, db, project: Project, season: Season,
+                             indices: list[int] | None = None,
                              lang: str = "zh", progress_cb=None,
                              chapter_done_cb=None) -> Project:
-        """逐章生成画面：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率（参考上一章已生成的图）② 生图/生视频。
-        indices: 章节序号列表；None=全部章节。按序号顺序逐个进行，后章参考前章已生成的图，页面可逐章实时刷新。
-
-        第 2 步生图的连续性参考：第 1 章用封面（若开启）或为空——漫画作 img2img 参考、短剧作视频首帧；
-        其余章沿用上一章媒体（漫画=上一张图，短剧=上一视频）。
-        阻塞的 LLM / DrawThings 调用放到线程/异步执行（不阻塞事件循环）；
-        progress_cb: 可选异步回调 (current, total, chapter_title)，每章开始前调用（SSE 进度）；
-        chapter_done_cb: 可选异步回调 (chapter)，每章两步完成后调用（SSE 实时回传该章提示词/媒体/状态，供页面逐个刷新）。"""
+        """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
+        indices: 季内章节序号列表（0 起）；None=该季全部章节。
+        季内第 1 章参考：非第一季→上一季末章；第一季→封面（若开启）或为空。
+        其余章沿用上一章媒体。"""
         dt = self._clients(db, project, lang)
-        chapters = self._load_chapters(db, project)
+        chapters = self._season_chapters(db, project, season)
         if indices is None:
-            targets = list(chapters)
+            targets = list(enumerate(chapters))
         else:
-            targets = [chapters[i] for i in indices if 0 <= i < len(chapters)]
+            targets = [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
         first_img = (project.first_image or "").strip()
-        for n, ch in enumerate(targets, start=1):
+        for pos, (i, ch) in enumerate(targets, start=1):
             if progress_cb:
-                await progress_cb(n, len(targets), ch.title)
-            # 第 1 步：(重新)生成出图提示词 / 描述 / 分辨率——参考上一章已生成的图（连贯，后章基于前章落定）
-            await self._gen_one_script(db, project, ch.index, ch, chapters, lang)
-            # 第 2 步：生图 / 生视频（img2img 参考上一章图；第 1 章参考封面或为空）
-            if ch.index == 0 and first_img and Path(first_img).is_file() and project.cover_as_first_ref:
-                ref = first_img
+                await progress_cb(pos, len(targets), ch.title)
+            await self._gen_one_script(db, project, season, i, ch, chapters, lang)
+            # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章或封面）
+            if i == 0:
+                if season.number > 1:
+                    prev_last = self._prev_season_last_chapter(db, project, season)
+                    ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
+                elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
+                    ref = first_img
+                else:
+                    ref = ""
             else:
-                prev = chapters[ch.index - 1] if ch.index > 0 else None
+                prev = chapters[i - 1]
                 ref = prev.media_path if (prev and prev.media_path) else ""
             try:
                 w = int(ch.width or 0) or int(project.res_width or 0)
                 h = int(ch.height or 0) or int(project.res_height or 0)
                 params = {}
-                if w and h:  # 章节分辨率；缺省回退项目默认分辨率（客户端再按 max_side 限幅）
+                if w and h:
                     params = {"width": w, "height": h}
                 if project.kind == "comic":
                     ch.media_path = await anyio.to_thread.run_sync(
@@ -492,7 +963,7 @@ class Pipeline:
                         lambda _p=ch.prompt, _r=ref, _pr=params: dt.generate_video(_p, ref_video_path=_r, params=_pr))
                 ch.status = "done"
                 ch.error = ""
-            except Exception as e:  # 单章失败不影响其他章
+            except Exception as e:
                 ch.status = "error"
                 ch.error = str(e)
             if chapter_done_cb:
@@ -509,10 +980,10 @@ class Pipeline:
         return project
 
     # ---------------- 章节字段保存（提示词 + 分辨率） ----------------
-    def save_chapter_fields(self, db, project: Project, index: int, prompt: str,
-                             width: int = 0, height: int = 0) -> Project:
-        """手动编辑第 index 章的出图提示词 / 分辨率（宽/高）。"""
-        ch = self._load_chapters(db, project)[index]
+    def save_chapter_fields(self, db, project: Project, season: Season, index: int, prompt: str,
+                              width: int = 0, height: int = 0) -> Project:
+        """手动编辑季内第 index 章的出图提示词 / 分辨率（宽/高）。"""
+        ch = self._season_chapters(db, project, season)[index]
         ch.prompt = (prompt or "").strip()
         try:
             w = int(width or 0)
@@ -525,42 +996,44 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    # ---------------- 章节增 / 删 / 排序 ----------------
+    # ---------------- 章节增 / 删 / 排序（季内） ----------------
     def _reindex(self, db, chapters: list[Chapter]) -> None:
         for i, ch in enumerate(chapters):
             ch.index = i
 
-    def add_chapter(self, db, project: Project) -> Chapter:
-        """在末尾新增一章（标题/主题摘要留空，可随后「生成剧本」或手改）。"""
-        chapters = self._load_chapters(db, project)
-        ch = Chapter(project_id=project.id, index=len(chapters), title="新章节", summary="")
+    def add_chapter(self, db, project: Project, season: Season) -> Chapter:
+        """在该季末尾新增一章（标题/主题摘要留空）。"""
+        chapters = self._season_chapters(db, project, season)
+        base = chapters[-1].index + 1 if chapters else 0
+        ch = Chapter(project_id=project.id, season_id=season.id,
+                     index=base, title="新章节", summary="")
         db.add(ch)
         db.commit()
-        self._reindex(db, self._load_chapters(db, project))
+        self._reindex_flat(db, project)
         db.commit()
         self._save(db, project)
         return ch
 
-    def delete_chapter(self, db, project: Project, index: int) -> Project:
-        """删除第 index 章（连同清理其媒体文件），其余章节重新编号。"""
-        chapters = self._load_chapters(db, project)
+    def delete_chapter(self, db, project: Project, season: Season, index: int) -> Project:
+        """删除季内第 index 章（连同清理其媒体文件），其余章节重新编号。"""
+        chapters = self._season_chapters(db, project, season)
         ch = chapters[index]
         self._rm_media(ch.media_path)
         db.delete(ch)
         db.commit()
-        self._reindex(db, self._load_chapters(db, project))
+        self._reindex_flat(db, project)
         db.commit()
         self._save(db, project)
         return project
 
-    def move_chapter(self, db, project: Project, index: int, direction: str) -> Project:
-        """上移 / 下移第 index 章（direction: up/down），交换后重新编号。"""
-        chapters = self._load_chapters(db, project)
+    def move_chapter(self, db, project: Project, season: Season, index: int, direction: str) -> Project:
+        """上移 / 下移季内第 index 章（direction: up/down），交换后重新编号。"""
+        chapters = self._season_chapters(db, project, season)
         j = index - 1 if direction == "up" else index + 1
         if not (0 <= j < len(chapters)) or j == index:
             return project
         chapters[index], chapters[j] = chapters[j], chapters[index]
-        self._reindex(db, chapters)
+        self._reindex_flat(db, project)
         db.commit()
         self._save(db, project)
         return project
@@ -577,6 +1050,20 @@ class Pipeline:
         project.cover_as_first_ref = bool(enabled)
         self._save(db, project)
         return project
+
+    def set_char_image(self, db, project: Project, char_id: str, path: str) -> Project:
+        """设置/清除某角色的参考图（文件已由调用方落盘到 data/media；path 为空 = 清除并删除旧图）。"""
+        chars = chars_from_raw(project.characters)
+        for c in chars:
+            if c["id"] == char_id:
+                old = c.get("image") or ""
+                c["image"] = (path or "").strip()
+                if old and old != c["image"]:
+                    self._rm_media(old)
+                project.characters = chars_to_raw(chars)
+                self._save(db, project)
+                return project
+        raise ValueError("角色不存在（Character not found）")
 
     async def generate_first_image(self, db, project: Project, prompt: str = "",
                                    lang: str = "zh") -> Project:
@@ -595,8 +1082,9 @@ class Pipeline:
             user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
             if (project.arc or "").strip():
                 user += f"\n故事大纲：{project.arc.strip()}"
-            if (project.characters or "").strip():
-                user += f"\n角色设定：{project.characters.strip()}"
+            chars_text = chars_to_text(chars_from_raw(project.characters))
+            if chars_text:
+                user += f"\n角色设定：{chars_text}"
             async with agent:
                 prompt = ((await agent.run(user)).output or "").strip()
         if not prompt:
@@ -623,14 +1111,19 @@ class Pipeline:
         export_dir.mkdir(parents=True, exist_ok=True)
         fname = f"{self._safe_name(project)}_{project.id}.zip"
         zpath = export_dir / fname
+        chars = chars_from_raw(project.characters)
         readme = (
             f"标题：{project.title}\n类型：{project.kind}\n一句话创意：{project.origin}\n"
             f"风格：{scope.get('style', '')}\n主题：{scope.get('theme', '')}\n基调：{scope.get('tone', '')}\n"
             f"默认分辨率：{project.res_width}×{project.res_height}\n\n"
-            f"角色设定：\n{project.characters}\n\n整体故事大纲：\n{project.arc}\n"
+            f"角色设定：\n{chars_to_text(chars)}\n\n整体故事大纲：\n{project.arc}\n"
         )
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("README.txt", readme.encode("utf-8"))
+            for c in chars:
+                img = (c.get("image") or "").strip()
+                if img and Path(img).is_file():
+                    z.write(img, f"media/char_{Path(img).name}")
             for i, ch in enumerate(chapters):
                 chap_txt = (
                     f"标题：{ch.title}\n主题摘要：{ch.summary}\n剧本：{ch.description}\n"

@@ -1,7 +1,10 @@
 """数据模型（SQLAlchemy）。
 
-两张配置表（LLM / DrawThings，用户可在页面增删）、全局基础配置（单行 JSON）、项目、章节、微创作（作品 → 会话 → 消息）。
-媒体文件本身存 data/media 目录，这里只存路径引用。
+两张配置表（LLM / DrawThings，用户可在页面增删）、全局基础配置（单行 JSON）、项目、季（篇章）、章节、
+微创作（作品 → 会话 → 消息）。媒体文件本身存 data/media 目录，这里只存路径引用。
+
+多季（篇章）设计：项目 = 统一世界观（总纲/核心角色/风格/封面），季 = 独立故事段（自己的大纲/新增角色/章节）。
+章节 index 为扁平全局序号（按季连续），季内展示序号由分组位置计算。
 """
 import uuid
 from datetime import datetime, timezone
@@ -73,31 +76,58 @@ class Project(Base):
     drawthings_config_id = Column(String(12), ForeignKey("drawthing_configs.id"), nullable=False)
     status = Column(String(20), default="planning")       # planning|arced|done
     scope = Column(JSON, default=dict)                     # 风格/主题/基调（整体，供后续保持一致）
-    arc = Column(Text, default="")                         # 整体故事大纲（开端→发展→高潮→结局，可编辑）
-    characters = Column(Text, default="")                  # 角色设定（主要角色的名字/形象/性格，供后续各章保持一致）
+    arc = Column(Text, default="")                         # 总纲（整部作品主线；各季 arc 为其分段，可编辑）
+    characters = Column(Text, default="")                  # 核心角色设定（贯穿各季的主要角色，名字/形象/性格）
     global_prompt = Column(Text, default="")               # 全局提示词（要点/约束）：注入到每次章节 LLM 调用
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
     res_height = Column(Integer, default=0)                # 默认分辨率高（0=跟随智能体/出图端）
-    count_mode = Column(String(10), default="auto")        # 章节数量模式：auto（模型决定）| range（区间内取整）
-    count_min = Column(Integer, default=0)                 # range 模式：最少章节数
-    count_max = Column(Integer, default=0)                 # range 模式：最多章节数
+    count_mode = Column(String(10), default="auto")        # 章节数量模式（遗留字段；现按季存于 Season）
+    count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
+    count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
     first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面；可选作为第 1 章参考）
     cover_as_first_ref = Column(Boolean, default=False)    # 是否把封面作为第 1 章参考（漫画 img2img / 短剧首帧），默认关
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     llm_config = relationship("LLMConfig")
     drawthings_config = relationship("DrawThingConfig")
+    seasons = relationship("Season", back_populates="project", order_by="Season.number")
     chapters = relationship("Chapter", back_populates="project", order_by="Chapter.index")
 
 
+class Season(Base):
+    """季（篇章/弧）：统一世界观下的独立故事段（类似七龙珠的赛亚人篇/弗利萨篇）。
+
+    一个项目下可有多个季；每季有自己的 大纲 / 新增角色 / 章节数量设定 / 章节。
+    项目层的 arc（总纲）/ characters（核心角色）/ scope（风格）/ global_prompt 为全局共享。
+    季内章节按 Chapter.index（扁平全局序号）连续排列，季内展示序号由分组位置计算。
+    """
+
+    __tablename__ = "seasons"
+
+    id = Column(String(12), primary_key=True)
+    project_id = Column(String(12), ForeignKey("projects.id"), nullable=False)
+    number = Column(Integer, nullable=False)                # 季序号（1 起）
+    title = Column(String(200), default="")                 # 季名（如「赛亚人篇」，空=第N季）
+    arc = Column(Text, default="")                           # 季大纲（本段故事路线，可编辑）
+    characters = Column(Text, default="")                    # 本季新增角色（JSON，结构同 project.characters）
+    count_mode = Column(String(10), default="auto")          # 本季章节数量：auto | range
+    count_min = Column(Integer, default=0)                   # range：最少章节数
+    count_max = Column(Integer, default=0)                   # range：最多章节数
+    created_at = Column(String(40), default=_now)
+    updated_at = Column(String(40), default=_now)
+    project = relationship("Project", back_populates="seasons")
+    chapters = relationship("Chapter", back_populates="season", order_by="Chapter.index")
+
+
 class Chapter(Base):
-    """章节：属于某个项目。"""
+    """章节：属于某个项目的某一季。index 为扁平全局序号（按季有序，0 起）。"""
 
     __tablename__ = "chapters"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(12), ForeignKey("projects.id"), nullable=False)
-    index = Column(Integer, nullable=False)                # 章序号（0 起）
+    season_id = Column(String(12), ForeignKey("seasons.id"), nullable=True)  # 所属季（旧数据可空=迁移归入第1季）
+    index = Column(Integer, nullable=False)                # 扁平全局章序号（0 起，按季连续）
     title = Column(String(200), default="")
     summary = Column(Text, default="")                     # 大纲里的每章主题摘要（规划用，供后续章节保持一致）
     description = Column(Text, default="")                 # 剧本描述（章节页「生成剧本」产出的详细剧本）
@@ -109,6 +139,7 @@ class Chapter(Base):
     status = Column(String(10), default="pending")         # pending|done|error
     error = Column(Text, default="")
     project = relationship("Project", back_populates="chapters")
+    season = relationship("Season", back_populates="chapters")
 
 
 class MicroWork(Base):
