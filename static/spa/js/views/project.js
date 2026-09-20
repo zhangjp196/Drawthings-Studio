@@ -225,6 +225,12 @@ Views.project = {
                         </template>
                       </div>
                     </el-form-item>
+                    <el-form-item :label="I18N.t('p.outRes')">
+                      <div class="res-row">
+                        <span>{{ oW }}×{{ oH }}</span>
+                        <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.planResHint') }}</span>
+                      </div>
+                    </el-form-item>
                   </el-form>
                   <div class="row-between" style="margin-bottom:8px;">
                     <b class="muted small">{{ I18N.t('p.chPlan') }}（{{ seasonChapters.length }}）</b>
