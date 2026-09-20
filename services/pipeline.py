@@ -1004,10 +1004,6 @@ class Pipeline:
         return project
 
     # ---------------- 章节增 / 删 / 排序（季内） ----------------
-    def _reindex(self, db, chapters: list[Chapter]) -> None:
-        for i, ch in enumerate(chapters):
-            ch.index = i
-
     def add_chapter(self, db, project: Project, season: Season) -> Chapter:
         """在该季末尾新增一章（标题/主题摘要留空）。"""
         chapters = self._season_chapters(db, project, season)
