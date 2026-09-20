@@ -11,6 +11,8 @@ Views.chapterCard = {
     noToggle: { type: Boolean, default: false },    // 主从布局：常显详情、不可折叠
     isFirst: { type: Boolean, default: false },
     isLast: { type: Boolean, default: false },
+    defW: { type: Number, default: 0 },             // 总体默认分辨率（仅显示，不可在此修改）
+    defH: { type: Number, default: 0 },
   },
   emits: ['preview', 'reloaded', 'toggle'],
   template: `
@@ -52,6 +54,7 @@ Views.chapterCard = {
             <el-input-number v-model="w" :min="0" :max="4096" :step="64" size="small" />
             <span>×</span>
             <el-input-number v-model="h" :min="0" :max="4096" :step="64" size="small" />
+            <span class="muted small" style="margin-left:6px;" v-if="defW || defH">{{ I18N.t('p.defResHint', defW, defH) }}</span>
           </div>
           <div class="actions">
             <el-popconfirm :title="I18N.t('p.chGenConfirm')" @confirm="doGen">

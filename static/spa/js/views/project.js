@@ -294,6 +294,7 @@ Views.project = {
             <div class="md-detail">
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :kind="data.project.kind" :project-id="data.project.id"
                               :season-id="seasonId" :season-index="cur"
+                              :def-w="oW" :def-h="oH"
                               :expanded="true" :no-toggle="true"
                               :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
                               @preview="openLb([$event], 0)" @reloaded="onChapterReloaded" />
