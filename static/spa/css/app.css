@@ -342,6 +342,7 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .proj-tabs { margin-top: 6px; }
  .plan-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .plan-row .el-textarea { flex: 1; min-width: 0; }
+.plan-row .plan-idx { flex: none; width: 28px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .char-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; }
 .char-ref { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .char-ref-img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; display: block; }

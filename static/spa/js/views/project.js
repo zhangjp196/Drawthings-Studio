@@ -229,6 +229,7 @@ Views.project = {
                     <el-button size="small" @click="addChapter">{{ I18N.t('p.addChapter') }}</el-button>
                   </div>
                   <div v-for="(c, i) in planPageChapters" :key="'pl' + c.index" class="plan-row">
+                    <span class="plan-idx">{{ planPageStart + i + 1 }}</span>
                     <el-input v-model="c.title" size="small" :placeholder="I18N.t('p.chPlanTitle')" style="width:180px" />
                     <el-input v-model="c.summary" size="small" type="textarea" :rows="2" :placeholder="I18N.t('p.chPlanSummary')" />
                     <el-button size="small" type="danger" plain @click="delChapter(planPageStart + i)">{{ I18N.t('p.chDelete') }}</el-button>
