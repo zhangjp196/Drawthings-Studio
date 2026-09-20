@@ -1598,17 +1598,12 @@ async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
 
 @app.post("/api/projects/{project_id}/outline")
 async def project_outline_save(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """保存大纲页手动编辑：大纲 / 角色设定 / 风格 / 默认分辨率 / 每章(标题+摘要)。"""
+    """保存大纲页手动编辑：大纲 / 角色设定 / 风格 / 默认分辨率（章节按季编辑，见 /seasons）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    raw = body.get("chapters")
-    chapters = None
-    if isinstance(raw, list):
-        chapters = [{"title": str(c.get("title") or ""), "summary": str(c.get("summary") or "")}
-                    for c in raw if isinstance(c, dict)]
     raw_chars = body.get("characters")
     characters = None
     if isinstance(raw_chars, list):
@@ -1623,8 +1618,7 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
             global_prompt=body.get("global_prompt"),
             res_width=body.get("res_width"), res_height=body.get("res_height"),
             count_mode=body.get("count_mode"), count_min=body.get("count_min"),
-            count_max=body.get("count_max"),
-            chapters=chapters)
+            count_max=body.get("count_max"))
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"保存大纲失败：{e}", f"Save outline failed: {e}"))

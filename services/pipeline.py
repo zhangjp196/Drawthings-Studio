@@ -336,6 +336,22 @@ class Pipeline:
                 new_idx += 1
         db.commit()
 
+    def _season_base_index(self, db, project: Project, season: Season) -> int:
+        """向某季插入新章时的起始扁平序号 = 所有前序季（季号 < 本季）的章节总数；无前序季返回 0。
+
+        （旧实现只算紧邻上一季的章数——第 3 季起新章会与更前面的季撞号；
+        收尾仍统一走 _reindex_flat 保证整体 0..N-1 连续。）"""
+        if season.number <= 1:
+            return 0
+        prev_ids = [s.id for s in (db.query(Season)
+                                   .filter(Season.project_id == project.id,
+                                           Season.number < season.number).all())]
+        if not prev_ids:
+            return 0
+        return (db.query(Chapter)
+                .filter(Chapter.project_id == project.id,
+                        Chapter.season_id.in_(prev_ids)).count())
+
     # ---------------- 企划（每步独立生成：故事大纲 / 角色设定）+ 章节规划 ----------------
     async def step_arc(self, db, project: Project, lang: str = "zh",
                        res_width: int = 0, res_height: int = 0, extra_prompt: str = "") -> Project:
@@ -563,13 +579,7 @@ class Pipeline:
             self._rm_media(ch.media_path)
             db.delete(ch)
         db.commit()
-        base = 0
-        if season.number > 1:
-            prev = (db.query(Season)
-                    .filter(Season.project_id == project.id, Season.number < season.number)
-                    .order_by(Season.number.desc()).first())
-            if prev:
-                base = len(self._season_chapters(db, project, prev))
+        base = self._season_base_index(db, project, season)
         for i, (title, summary) in enumerate(plan):
             db.add(Chapter(project_id=project.id, season_id=season.id,
                            index=base + i, title=title, summary=summary))
@@ -580,11 +590,10 @@ class Pipeline:
                       characters: list[dict] | None = None, style: str | None = None,
                       global_prompt: str | None = None,
                       res_width: int | None = 0, res_height: int | None = 0,
-                      count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0,
-                      chapters: list[dict] | None = None) -> Project:
-        """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定 / 每章(标题+摘要)。
-        仅更新传入（非 None）的字段；章节按序号对账：改已有、末尾补新、删多余（清理其媒体），
-        不触碰已生成的剧本/媒体（保存不触发生成）。"""
+                      count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0) -> Project:
+        """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定。
+        仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_season），
+        也不触碰已生成的剧本/媒体（保存不触发生成）。"""
         scope = dict(project.scope or {})
         if style is not None:
             scope["style"] = (style or "").strip()
@@ -626,22 +635,6 @@ class Pipeline:
             project.count_min = int(count_min or 0)
         if count_max is not None:
             project.count_max = int(count_max or 0)
-        if chapters is not None:
-            existing = self._load_chapters(db, project)
-            for i, item in enumerate(chapters):
-                title = (item.get("title") or "").strip()
-                summary = (item.get("summary") or "").strip()
-                if i < len(existing):
-                    if title:
-                        existing[i].title = title
-                    existing[i].summary = summary
-                else:
-                    db.add(Chapter(project_id=project.id, index=i,
-                                   title=title or f"第{i + 1}章", summary=summary))
-            for ch in existing[len(chapters):]:
-                self._rm_media(ch.media_path)
-                db.delete(ch)
-        self._reindex(db, self._load_chapters(db, project))
         db.commit()
         self._save(db, project)
         return project
@@ -691,7 +684,7 @@ class Pipeline:
                         existing[i].title = t
                     existing[i].summary = s
                 else:
-                    base = existing[-1].index + 1 if existing else 0
+                    base = self._season_base_index(db, project, season) + len(existing)
                     db.add(Chapter(project_id=project.id, season_id=season.id,
                                    index=base + (i - len(existing)),
                                    title=t or f"第{i + 1}章", summary=s))
@@ -817,13 +810,9 @@ class Pipeline:
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         n = await self._plan_chapter_count(db, project, season, lang,
                                            season.count_mode, season.count_min, season.count_max, model=model)
-        base = 0
-        if season.number > 1:
-            prev = (db.query(Season)
-                    .filter(Season.project_id == project.id, Season.number < season.number)
-                    .order_by(Season.number.desc()).first())
-            if prev:
-                base = len(self._season_chapters(db, project, prev))
+        # base = 所有前序季（季号 < 本季）的章节总数：本季新章紧接「前序季末尾」继续编号
+        # （旧实现只算紧邻上一季的章数，第 3 季起会与更前面的季撞号）
+        base = self._season_base_index(db, project, season)
         prior: list[tuple[str, str]] = []
         for i in range(1, n + 1):
             if progress_cb:
@@ -837,6 +826,9 @@ class Pipeline:
             db.refresh(ch)
             if chapter_done_cb:
                 await chapter_done_cb(ch)
+        # 收尾统一重排扁平序号：本方法逐章插入且中途提交，后续季（季号 > 本季）的旧序号
+        # 可能已与新章冲突，须像 _rebuild_chapters 一样在末尾重排一次（旧实现漏了这步）。
+        self._reindex_flat(db, project)
         project.status = "chaptered"
         self._save(db, project)
         return project
@@ -1019,7 +1011,7 @@ class Pipeline:
     def add_chapter(self, db, project: Project, season: Season) -> Chapter:
         """在该季末尾新增一章（标题/主题摘要留空）。"""
         chapters = self._season_chapters(db, project, season)
-        base = chapters[-1].index + 1 if chapters else 0
+        base = self._season_base_index(db, project, season) + len(chapters)
         ch = Chapter(project_id=project.id, season_id=season.id,
                      index=base, title="新章节", summary="")
         db.add(ch)
