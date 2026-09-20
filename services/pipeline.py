@@ -934,45 +934,55 @@ class Pipeline:
         else:
             targets = [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
         first_img = (project.first_image or "").strip()
-        for pos, (i, ch) in enumerate(targets, start=1):
-            if progress_cb:
-                await progress_cb(pos, len(targets), ch.title)
-            await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
-            # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章或封面）
-            if i == 0:
-                if season.number > 1:
-                    prev_last = self._prev_season_last_chapter(db, project, season)
-                    ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
-                elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
-                    ref = first_img
+        try:
+            for pos, (i, ch) in enumerate(targets, start=1):
+                if progress_cb:
+                    await progress_cb(pos, len(targets), ch.title)
+                await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
+                # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章或封面）
+                if i == 0:
+                    if season.number > 1:
+                        prev_last = self._prev_season_last_chapter(db, project, season)
+                        ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
+                    elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
+                        ref = first_img
+                    else:
+                        ref = ""
                 else:
-                    ref = ""
-            else:
-                prev = chapters[i - 1]
-                ref = prev.media_path if (prev and prev.media_path) else ""
+                    prev = chapters[i - 1]
+                    ref = prev.media_path if (prev and prev.media_path) else ""
+                try:
+                    # 分辨率统一跟随总体设定（不再按章覆盖）
+                    w = int(project.res_width or 0)
+                    h = int(project.res_height or 0)
+                    params = {}
+                    if w and h:
+                        params = {"width": w, "height": h}
+                    if project.kind == "comic":
+                        ch.media_path = await run_sync(
+                            partial(dt.generate_image, ch.prompt, ref_path=ref, params=params))
+                    else:
+                        ch.media_path = await run_sync(
+                            partial(dt.generate_video, ch.prompt, ref_video_path=ref, params=params))
+                    ch.status = "done"
+                    ch.error = ""
+                    ch.width = w
+                    ch.height = h
+                except Exception as e:
+                    ch.status = "error"
+                    ch.error = str(e)
+                if chapter_done_cb:
+                    await chapter_done_cb(ch)
+                db.commit()  # 逐章提交：停止/中断时已完成章节不丢失
+        finally:
+            # 异常中断（如用户停止）时尽可能提交当前进度（已完成章节 + 本章已有结果）
             try:
-                # 分辨率统一跟随总体设定（不再按章覆盖）
-                w = int(project.res_width or 0)
-                h = int(project.res_height or 0)
-                params = {}
-                if w and h:
-                    params = {"width": w, "height": h}
-                if project.kind == "comic":
-                    ch.media_path = await run_sync(
-                        partial(dt.generate_image, ch.prompt, ref_path=ref, params=params))
-                else:
-                    ch.media_path = await run_sync(
-                        partial(dt.generate_video, ch.prompt, ref_video_path=ref, params=params))
-                ch.status = "done"
-                ch.error = ""
-                ch.width = w
-                ch.height = h
-            except Exception as e:
-                ch.status = "error"
-                ch.error = str(e)
-            if chapter_done_cb:
-                await chapter_done_cb(ch)
-        db.commit()
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
         self._save(db, project)
         return project
 

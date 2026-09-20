@@ -1347,6 +1347,10 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
     finally:
         if not task.done():
             task.cancel()
+            try:
+                await task  # 等任务清理（逐章提交进度）完成再结束请求（数据库会话此时才关闭）
+            except asyncio.CancelledError:
+                pass
 
 
 @app.post("/api/projects/{project_id}/gen/{index}")

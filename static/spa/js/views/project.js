@@ -267,6 +267,9 @@ Views.project = {
               </template>
             </el-popconfirm>
             <span class="muted small" v-if="progress.text">{{ progress.text }}</span>
+            <el-button v-if="busyGenAll" size="small" type="danger" plain @click="stopGen">
+              {{ I18N.t('p.genStop') }}
+            </el-button>
           </div>
           <div class="muted small mb8" v-if="seasonChapters.length">
             {{ I18N.t('p.progress', seasonDoneCount, seasonChapters.length) }}
@@ -870,6 +873,13 @@ Views.project = {
       const sPos = seasonChapters.value.findIndex(c => c.index === d.index);
       if (sPos >= 0) cur.value = sPos;
     }
+    // 停止批量生成：中断 SSE → 后端停止并提交已完成章节；页面同步刷新
+    function stopGen() {
+      if (sseCtrl) {
+        sseCtrl.abort();
+        ElementPlus.ElMessage.info(I18N.t('p.genStopped'));
+      }
+    }
     // 生成画面：勾选章节则只生成它们，未勾选则生成全部（两步连贯、逐章进行、后章参考前章已生成图）
     async function genAll() {
       if (!seasonId.value) return;
@@ -886,7 +896,8 @@ Views.project = {
         selected.value = [];
         await load();
       } catch (e) {
-        if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
+        if (ctrl.signal.aborted) { await load(); }  // 用户停止：后端已提交进度，同步刷新
+        else { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { busyGenAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
@@ -994,7 +1005,7 @@ Views.project = {
       actBusy, busySave, busyGenAll, busyFirst, genDescBusy, coverPrompt, progress,
       arcText, oStyle, chars, oGlobal, oW, oH, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       complete, exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, router,
