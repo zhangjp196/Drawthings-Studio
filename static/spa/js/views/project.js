@@ -270,6 +270,8 @@ Views.project = {
           </div>
           <div class="muted small mb8" v-if="seasonChapters.length">
             {{ I18N.t('p.progress', seasonDoneCount, seasonChapters.length) }}
+            <span style="margin: 0 6px; opacity: .45;">|</span>
+            {{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}
           </div>
           <div class="md-layout">
             <div class="md-left">
