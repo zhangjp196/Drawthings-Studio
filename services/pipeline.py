@@ -875,7 +875,7 @@ class Pipeline:
         context = ""
         ref_img = None
         if prev:
-            context = f"上一章《{prev.title}》：{prev.description}"
+            context = f"上一章：{prev.description}"
             prev_media = (prev.media_path or "").strip()
             if prev_media:
                 ext = Path(prev_media).suffix.lower()
@@ -889,7 +889,7 @@ class Pipeline:
             if season.number > 1:
                 prev_last = self._prev_season_last_chapter(db, project, season)
                 if prev_last and prev_last.media_path:
-                    context = f"上一季末章《{prev_last.title}》：{prev_last.description}"
+                    context = f"上一季末章：{prev_last.description}"
                     pm = (prev_last.media_path or "").strip()
                     ext = Path(pm).suffix.lower()
                     if ext in (".mp4", ".mov", ".webm", ".gif"):
@@ -909,7 +909,7 @@ class Pipeline:
             (f"整体风格：{style}\n" if style else "")
             + (f"角色设定（请保持一致）：{chars}\n" if chars else "")
             + (f"全局要点（务必遵循）：{gprompt}\n" if gprompt else "")
-            + f"本章《{ch.title}》主题摘要：{base}\n\n{context}"
+            + f"本章主题摘要：{base}\n\n{context}"
         )
         prompt_content: str | list = user
         if ref_img:
