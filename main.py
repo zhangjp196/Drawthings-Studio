@@ -1377,7 +1377,7 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
 @app.post("/api/projects/{project_id}/edit/{index}")
 async def project_edit(request: Request, project_id: str, index: int,
                        db: Session = Depends(get_db)):
-    """保存指定章节（季内）的出图提示词 / 分辨率。body 需 season_id。"""
+    """保存指定章节（季内）的出图提示词。body 需 season_id。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
@@ -1391,12 +1391,7 @@ async def project_edit(request: Request, project_id: str, index: int,
     chapters = pipeline._season_chapters(db, project, season)
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    try:
-        w = int(body.get("width") or 0)
-        h = int(body.get("height") or 0)
-    except (TypeError, ValueError):
-        w = h = 0
-    pipeline.save_chapter_fields(db, project, season, index, str(body.get("prompt") or ""), w, h)
+    pipeline.save_chapter_fields(db, project, season, index, str(body.get("prompt") or ""))
     return {"ok": True}
 
 

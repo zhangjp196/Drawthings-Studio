@@ -840,36 +840,32 @@ class Pipeline:
 
     # ---------------- 阶段 4：剧本编写（按章 / 批量） ----------------
     def _script_agent_context(self, db, project: Project, lang: str):
-        """剧本生成所需的上下文：LLM 配置 / 是否支持视觉 / 分辨率上限 / 风格。"""
-        llm_cfg, dt_cfg = self._configs(db, project, lang)
+        """剧本生成所需的上下文：LLM 配置 / 是否支持视觉 / 风格。"""
+        llm_cfg, _ = self._configs(db, project, lang)
         supports_vision = (getattr(llm_cfg, "supports_vision", None) or "yes").lower() == "yes"
-        max_side = int(getattr(dt_cfg, "max_side", 0) or 0)
-        limit = max_side if max_side > 0 else 1024
-        return llm_cfg, supports_vision, limit, (project.scope or {})
+        return llm_cfg, supports_vision, (project.scope or {})
 
-    def _script_system(self, project: Project, limit: int) -> str:
+    def _script_system(self, project: Project) -> str:
         """按作品类型给出剧本/提示词写作的系统提示词。"""
         if project.kind == "comic":
             shot = ("漫画：prompt 描述『一页多格漫画』——一张图内含多个分镜格（竖版漫画页），"
-                    "并让画面带文字（分镜旁白、对白气泡、标题文字）；分辨率优先竖版（3:4 或 2:3）。")
-            ratios = "3:4 竖=576×768、2:3 竖=576×896、4:3 横=768×576"
+                    "并让画面带文字（分镜旁白、对白气泡、标题文字）；构图优先竖版（3:4 或 2:3）。")
         else:
-            shot = "短剧：prompt 描述一段连贯的视频画面；分辨率按场景横/竖构图决定。"
-            ratios = "9:16 竖=576×1024、16:9 横=1024×576、4:3 横=768×576"
+            shot = "短剧：prompt 描述一段连贯的视频画面；横/竖构图可按场景自选。"
         return ("你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
                 "写本章详细剧本描述（description）和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
                 f"{shot}\n"
-                f"同时按本章构图决定出图分辨率 width/height（均为 64 的倍数，最长边不超过 {limit} 像素；参考：{ratios}）。")
+                "分辨率统一由项目总体设定决定，无需决定 width/height（不要在提示词里写具体分辨率）。")
 
     async def _gen_one_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
                                chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:
-        """为第 i 章（季内序号）单独写剧本/提示词/分辨率（供「按章生成」与「批量生成」复用）。
+        """为第 i 章（季内序号）单独写剧本/提示词（供「按章生成」与「批量生成」复用）。
         chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。"""
-        llm_cfg, supports_vision, limit, scope = self._script_agent_context(db, project, lang)
+        llm_cfg, supports_vision, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
         first_img = (project.first_image or "").strip()
-        agent = make_agent(model or build_model(llm_cfg), self._script_system(project, limit),
+        agent = make_agent(model or build_model(llm_cfg), self._script_system(project),
                            output_type=ScriptOut)
         prev = chapters[i - 1] if i > 0 else None
         context = ""
@@ -919,8 +915,6 @@ class Pipeline:
         data = (await agent.run(prompt_content)).output
         ch.description = data.description
         ch.prompt = data.prompt
-        ch.width = int(data.width or 0)
-        ch.height = int(data.height or 0)
         return ch
 
     # ---------------- 阶段 5：逐章生成画面（出图提示词 + 生图，两步连贯） ----------------
@@ -957,8 +951,9 @@ class Pipeline:
                 prev = chapters[i - 1]
                 ref = prev.media_path if (prev and prev.media_path) else ""
             try:
-                w = int(ch.width or 0) or int(project.res_width or 0)
-                h = int(ch.height or 0) or int(project.res_height or 0)
+                # 分辨率统一跟随总体设定（不再按章覆盖）
+                w = int(project.res_width or 0)
+                h = int(project.res_height or 0)
                 params = {}
                 if w and h:
                     params = {"width": w, "height": h}
@@ -970,6 +965,8 @@ class Pipeline:
                         partial(dt.generate_video, ch.prompt, ref_video_path=ref, params=params))
                 ch.status = "done"
                 ch.error = ""
+                ch.width = w
+                ch.height = h
             except Exception as e:
                 ch.status = "error"
                 ch.error = str(e)
@@ -986,19 +983,11 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    # ---------------- 章节字段保存（提示词 + 分辨率） ----------------
-    def save_chapter_fields(self, db, project: Project, season: Season, index: int, prompt: str,
-                              width: int = 0, height: int = 0) -> Project:
-        """手动编辑季内第 index 章的出图提示词 / 分辨率（宽/高）。"""
+    # ---------------- 章节字段保存（提示词） ----------------
+    def save_chapter_fields(self, db, project: Project, season: Season, index: int, prompt: str) -> Project:
+        """手动编辑季内第 index 章的出图提示词（分辨率统一按总体设定，不再按章覆盖）。"""
         ch = self._season_chapters(db, project, season)[index]
         ch.prompt = (prompt or "").strip()
-        try:
-            w = int(width or 0)
-            h = int(height or 0)
-            ch.width = w if 0 < w <= 4096 else 0
-            ch.height = h if 0 < h <= 4096 else 0
-        except (TypeError, ValueError):
-            pass
         db.commit()
         self._save(db, project)
         return project

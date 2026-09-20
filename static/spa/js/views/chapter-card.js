@@ -28,7 +28,6 @@ Views.chapterCard = {
           <span class="sub muted small">{{ chapter.summary || chapter.description || I18N.t('p.chPending') }}</span>
         </div>
         <span class="ch-tags">
-          <el-tag v-if="chapter.width && chapter.height" size="small" effect="plain">{{ chapter.width }}×{{ chapter.height }}</el-tag>
           <el-tag size="small" :type="statusType" effect="light">{{ statusLabel }}</el-tag>
         </span>
         <span v-if="!noToggle" class="ch-chev">{{ expanded ? '⌄' : '›' }}</span>
@@ -51,10 +50,8 @@ Views.chapterCard = {
           <el-input v-model="prompt" type="textarea" :rows="3" />
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chResolution') }}</span>
-            <el-input-number v-model="w" :min="0" :max="4096" :step="64" size="small" />
-            <span>×</span>
-            <el-input-number v-model="h" :min="0" :max="4096" :step="64" size="small" />
-            <span class="muted small" style="margin-left:6px;" v-if="defW || defH">{{ I18N.t('p.defResHint', defW, defH) }}</span>
+            <span>{{ defW }}×{{ defH }}</span>
+            <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.planResHint') }}</span>
           </div>
           <div class="actions">
             <el-popconfirm :title="I18N.t('p.chGenConfirm')" @confirm="doGen">
@@ -84,8 +81,6 @@ Views.chapterCard = {
   setup(props, { emit }) {
     const busy = ref('');
     const prompt = ref(props.chapter.prompt || '');
-    const w = ref(props.chapter.width || 0);
-    const h = ref(props.chapter.height || 0);
     const done = computed(() => props.chapter.status === 'done');
     const statusLabel = computed(() => I18N.t('p.chStatus.' + props.chapter.status) || props.chapter.status);
     const statusType = computed(() =>
@@ -105,11 +100,9 @@ Views.chapterCard = {
       busy.value = 'save';
       try {
         await API.post(`/api/projects/${props.projectId}/edit/${props.seasonIndex}`,
-                       { season_id: props.seasonId, prompt: prompt.value, width: w.value, height: h.value });
+                       { season_id: props.seasonId, prompt: prompt.value });
         ElementPlus.ElMessage.success(I18N.t('p.promptSaved'));
         props.chapter.prompt = prompt.value;
-        props.chapter.width = w.value;
-        props.chapter.height = h.value;
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
@@ -127,7 +120,7 @@ Views.chapterCard = {
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
-    return { busy, prompt, w, h, done, statusLabel, statusType,
+    return { busy, prompt, done, statusLabel, statusType,
              doGen, doSave, doMove, doDelete };
   },
 };
