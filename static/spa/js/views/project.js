@@ -87,9 +87,16 @@ Views.project = {
                     </el-form-item>
                     <el-form-item :label="I18N.t('p.outRes')">
                       <div class="res-row">
-                        <el-input-number v-model="oW" :min="0" :max="4096" :step="64" size="small" />
-                        <span>×</span>
-                        <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
+                        <span class="muted small">{{ I18N.t('p.resRatio') }}</span>
+                        <el-select v-model="oRatio" size="small" style="width:150px" @change="onRatioChange">
+                          <el-option :label="I18N.t('p.resAuto')" value="" />
+                          <el-option v-for="r in resRatios" :key="r.key" :label="I18N.t(r.label)" :value="r.key" />
+                          <el-option v-if="oRatio === 'custom'" :label="I18N.t('p.resCustom')" value="custom" />
+                        </el-select>
+                        <span class="muted small" style="margin-left:8px;">{{ I18N.t('p.resSize') }}</span>
+                        <el-select v-model="oRes" size="small" style="width:150px" @change="onResChange">
+                          <el-option v-for="s in resOptions" :key="s" :label="s" :value="s" />
+                        </el-select>
                         <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
                       </div>
                     </el-form-item>
@@ -455,6 +462,41 @@ Views.project = {
     const oGlobal = ref('');     // 全局提示词（要点/约束，注入每次章节 LLM 调用）
     const oW = ref(0);
     const oH = ref(0);
+    // 分辨率：先选比例、再选固定分辨率（均为 64 的倍数；0×0 = 跟随出图端/智能体）
+    const RES_RATIOS = [
+      { key: '1:1',  label: 'p.ratio11',  sizes: ['512×512', '768×768', '1024×1024'] },
+      { key: '3:4',  label: 'p.ratio34',  sizes: ['576×768', '768×1024', '864×1152', '960×1280'] },
+      { key: '4:3',  label: 'p.ratio43',  sizes: ['768×576', '1024×768', '1152×864', '1280×960'] },
+      { key: '2:3',  label: 'p.ratio23',  sizes: ['512×768', '640×960', '768×1152', '896×1344'] },
+      { key: '3:2',  label: 'p.ratio32',  sizes: ['768×512', '960×640', '1152×768', '1344×896'] },
+      { key: '9:16', label: 'p.ratio916', sizes: ['576×1024', '720×1280', '864×1536', '1080×1920'] },
+      { key: '16:9', label: 'p.ratio169', sizes: ['1024×576', '1280×720', '1536×864', '1920×1080'] },
+    ];
+    const oRatio = ref('');   // '' = 自动（跟随出图端）；'custom' = 旧数据里的自定义值
+    const oRes = ref('0×0');  // 当前选中的分辨率（'W×H'）
+    const resOptions = computed(() => {
+      if (oRatio.value === '') return ['0×0'];
+      const r = RES_RATIOS.find(x => x.key === oRatio.value);
+      const cur = `${oW.value}×${oH.value}`;
+      if (!r) return [cur];  // custom：仅展示当前（旧数据）值
+      const opts = r.sizes.slice();
+      if (oW.value && oH.value && !opts.includes(cur)) opts.push(cur);
+      return opts;
+    });
+    function applyRes() {
+      const m = /^(\d+)×(\d+)$/.exec(oRes.value || '');
+      oW.value = m ? parseInt(m[1], 10) : 0;
+      oH.value = m ? parseInt(m[2], 10) : 0;
+    }
+    function onRatioChange(key) {
+      if (key === '') { oRes.value = '0×0'; applyRes(); return; }
+      const r = RES_RATIOS.find(x => x.key === key);
+      if (!r) return;
+      const cur = `${oW.value}×${oH.value}`;
+      oRes.value = r.sizes.includes(cur) ? cur : r.sizes[0];
+      applyRes();
+    }
+    function onResChange() { applyRes(); }
     const cMode = ref('auto');   // 章节数量：auto（模型决定）/ range（区间）
     const cMin = ref(3);
     const cMax = ref(5);
@@ -497,6 +539,11 @@ Views.project = {
       oGlobal.value = p.global_prompt || '';
       oW.value = p.res_width || 0;
       oH.value = p.res_height || 0;
+      // 由已存 W×H 反推比例与分辨率选项（0×0=自动；不在固定列表的旧值=自定义）
+      const cur = `${oW.value}×${oH.value}`;
+      const r = RES_RATIOS.find(x => x.sizes.includes(cur));
+      oRatio.value = (oW.value || oH.value) ? (r ? r.key : 'custom') : '';
+      oRes.value = (oW.value || oH.value) ? cur : '0×0';
       cMode.value = p.count_mode === 'range' ? 'range' : 'auto';
       cMin.value = p.count_min || 3;
       cMax.value = p.count_max || 5;
@@ -1003,7 +1050,7 @@ Views.project = {
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount,
       selectSeason, addSeason, delSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyFirst, genDescBusy, coverPrompt, progress,
-      arcText, oStyle, chars, oGlobal, oW, oH, cMode, cMin, cMax,
+      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
