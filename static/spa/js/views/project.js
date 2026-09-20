@@ -1,5 +1,5 @@
-// 项目详情：头部/封面 + 三个页签（企划 / 章节 / 完成）
-// 企划：季选择器最左为「总体」（全局：风格/整体故事大纲/全局提示词/分辨率/角色/封面），其后为各季（本季大纲/季角色/章节规划）
+// 项目详情：头部/封面 + 一级菜单（季选择器：总体/各季，作用于下方全部二级页签）+ 二级页签（企划 / 章节 / 完成）
+// 企划：总体=全局子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面），季=本季大纲 / 季角色 / 章节规划
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步）+ 返回企划
 // 完成：预览 + 导出 ZIP/PDF + 标记完成
 window.Views = window.Views || {};
@@ -30,25 +30,27 @@ Views.project = {
         </div>
       </div>
 
+      <!-- 一级菜单：季（篇章）选择器——最左为「总体」（全局），其后为各季；作用于下方全部二级页签 -->
+      <div class="season-bar">
+        <button type="button" class="season-item" :class="{ active: isOverall }" @click="selectSeason('overall')">
+          {{ I18N.t('p.tabOverall') }}
+        </button>
+        <button v-for="s in seasons" :key="s.id" type="button" class="season-item"
+                :class="{ active: seasonId === s.id }" @click="selectSeason(s.id)">
+          {{ s.title || I18N.t('p.season', s.number) }}
+        </button>
+        <el-popconfirm :title="I18N.t('p.seasonAddConfirm')" @confirm="addSeason">
+          <template #reference><button type="button" class="season-item season-add">{{ I18N.t('p.seasonAdd') }}</button></template>
+        </el-popconfirm>
+        <el-popconfirm v-if="seasons.length > 1 && !isOverall" :title="I18N.t('p.seasonDelConfirm')" @confirm="delSeason">
+          <template #reference><button type="button" class="season-item season-del">{{ I18N.t('p.seasonDel') }}</button></template>
+        </el-popconfirm>
+      </div>
+
+      <!-- 二级页签：企划 / 章节 / 完成（随所选季作用域） -->
       <el-tabs v-model="tab" class="proj-tabs">
-        <!-- ============ 企划：总体（全局）+ 各季（本季大纲 / 季角色 / 章节规划）；季选择器最左为「总体」============ -->
+        <!-- ============ 企划：总体=全局子页签（故事大纲 / 角色 / 封面）；季=本季大纲 / 季角色 / 章节规划 ============ -->
         <el-tab-pane :label="I18N.t('p.tabOutline')" name="outline">
-          <!-- 季（篇章）选择器：最左为「总体」（全局，不随季切换），其后为各季 -->
-          <div class="season-bar">
-            <button type="button" class="season-item" :class="{ active: isOverall }" @click="selectSeason('overall')">
-              {{ I18N.t('p.tabOverall') }}
-            </button>
-            <button v-for="s in seasons" :key="s.id" type="button" class="season-item"
-                    :class="{ active: seasonId === s.id }" @click="selectSeason(s.id)">
-              {{ s.title || I18N.t('p.season', s.number) }}
-            </button>
-            <el-popconfirm :title="I18N.t('p.seasonAddConfirm')" @confirm="addSeason">
-              <template #reference><button type="button" class="season-item season-add">{{ I18N.t('p.seasonAdd') }}</button></template>
-            </el-popconfirm>
-            <el-popconfirm v-if="seasons.length > 1 && !isOverall" :title="I18N.t('p.seasonDelConfirm')" @confirm="delSeason">
-              <template #reference><button type="button" class="season-item season-del">{{ I18N.t('p.seasonDel') }}</button></template>
-            </el-popconfirm>
-          </div>
           <div class="subtabs">
             <nav class="subtabs-nav">
               <template v-if="isOverall">
@@ -505,7 +507,10 @@ Views.project = {
         const s = data.value.seasons || [];
         // 保持当前选择（'overall' 或有效季 id）；无效则回落到「总体」
         const valid = seasonId.value === 'overall' || s.find(x => x.id === seasonId.value);
-        if (!valid) seasonId.value = 'overall';
+        if (!valid) {
+          seasonId.value = 'overall';
+          if (tab.value === 'chapters') tab.value = 'outline';  // 所选季被删除后「章节」页无内容
+        }
         if (!isOverall.value) syncSeasonForm();
         syncCur();
         if (!tabInit.value) { syncTab(); tabInit.value = true; }
@@ -565,6 +570,12 @@ Views.project = {
       } else {
         oSub.value = 'arc';     // 季模式首个子页签
         syncSeasonForm();
+      }
+      // 一级切季后「章节」页无内容（总体 / 空季）时回落到「企划」，避免出现禁用但仍激活的页签
+      if (tab.value === 'chapters') {
+        const n = id === 'overall' ? 0
+          : ((data.value?.chapters || []).filter(c => c.season_id === id).length);
+        if (!n) tab.value = 'outline';
       }
     }
     async function addSeason() {

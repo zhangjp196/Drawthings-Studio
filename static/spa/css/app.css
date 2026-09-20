@@ -655,7 +655,7 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   padding: 4px 0;
   border-bottom: 1px solid var(--line);
 }
