@@ -76,7 +76,7 @@ class Project(Base):
     origin = Column(Text, nullable=False)                 # 主题（一句话创意）
     llm_config_id = Column(String(12), ForeignKey("llm_configs.id"), nullable=False)
     drawthings_config_id = Column(String(12), ForeignKey("drawthing_configs.id"), nullable=False)
-    status = Column(String(20), default="planning")       # planning|arced|done
+    status = Column(String(20), default="planning")       # planning|arced|done（done 为遗留值；完成已下沉到季，不再由 UI 设置）
     scope = Column(JSON, default=dict)                     # 风格/主题/基调（整体，供后续保持一致）
     arc = Column(Text, default="")                         # 总纲（整部作品主线；各季 arc 为其分段，可编辑）
     characters = Column(Text, default="")                  # 核心角色设定（贯穿各季的主要角色，名字/形象/性格）

@@ -1,7 +1,7 @@
 // 项目详情：头部/封面 + 一级菜单（季选择器：总体/各季，作用于下方全部二级页签）+ 二级页签（企划 / 章节 / 完成）
 // 企划：总体=全局子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面），季=本季大纲 / 季角色 / 章节规划
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步）+ 返回企划
-// 完成：预览 + 导出 ZIP/PDF + 标记完成
+// 完成：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP/PDF（无整部作品级完成标记）
 window.Views = window.Views || {};
 Views.project = {
   props: ['id'],
@@ -318,22 +318,22 @@ Views.project = {
           </div>
         </el-tab-pane>
 
-        <!-- ============ 完成 ============ -->
-        <el-tab-pane :label="I18N.t('p.tabDone')" name="done" :disabled="!canComplete">
+        <!-- ============ 完成（季作用域：显示当前所选季的完成情况；总体无「本季」，禁用） ============ -->
+        <el-tab-pane :label="I18N.t('p.tabDone')" name="done" :disabled="isOverall">
           <el-card shadow="never">
             <template #header><b>{{ I18N.t('p.tabDone') }}</b></template>
-            <el-alert v-if="data.project.status === 'done'" type="success" :closable="false"
-                      :title="I18N.t('p.allDone')" class="mb8" />
-            <p class="muted small mb8" v-else>{{ I18N.t('p.doneHint') }}</p>
+            <template v-if="seasonChapters.length">
+              <p class="muted small mb8">{{ I18N.t('p.seasonDoneProgress', seasonDoneCount, seasonChapters.length) }}</p>
+              <el-alert v-if="seasonCompleted" type="success" :closable="false"
+                        :title="I18N.t('p.seasonDoneMsg')" class="mb8" />
+            </template>
+            <p class="muted small mb8" v-else>{{ I18N.t('p.seasonNoChapters') }}</p>
             <div class="actions">
-              <el-button type="primary" :disabled="!doneCount" @click="exportZip">{{ I18N.t('p.exportZip') }}</el-button>
+              <el-button type="primary" :disabled="!seasonDoneCount" @click="exportZip">{{ I18N.t('p.exportZip') }}</el-button>
               <el-tooltip v-if="data.project.kind === 'drama'" :content="I18N.t('p.exportPdfDrama')" placement="top">
                 <el-button :disabled="true">{{ I18N.t('p.exportPdf') }}</el-button>
               </el-tooltip>
-              <el-button v-else type="primary" :disabled="!doneCount" @click="exportPdf">{{ I18N.t('p.exportPdf') }}</el-button>
-              <el-popconfirm :title="I18N.t('p.completeConfirm')" @confirm="complete">
-                <template #reference><el-button type="success" :disabled="!doneCount">{{ I18N.t('p.complete') }}</el-button></template>
-              </el-popconfirm>
+              <el-button v-else type="primary" :disabled="!seasonDoneCount" @click="exportPdf">{{ I18N.t('p.exportPdf') }}</el-button>
             </div>
           </el-card>
         </el-tab-pane>
@@ -402,9 +402,6 @@ Views.project = {
   setup(props) {
     const data = ref(null);
     const scope = computed(() => (data.value && data.value.project.scope) || {});
-    const status = computed(() => data.value?.project.status);
-    const doneCount = computed(() => (data.value?.chapters || []).filter(c => c.status === 'done').length);
-    const canComplete = computed(() => doneCount.value > 0 || status.value === 'done');
     const tab = ref('outline');
     const tabInit = ref(false);
 
@@ -518,6 +515,8 @@ Views.project = {
       return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
     });
     const seasonDoneCount = computed(() => seasonChapters.value.filter(c => c.status === 'done').length);
+    // 季完成 = 本季章节全部生成（派生值，不存储）；空季不算完成
+    const seasonCompleted = computed(() => seasonChapters.value.length > 0 && seasonDoneCount.value === seasonChapters.value.length);
 
     // 生成弹框（生成大纲 / 生成本季大纲 / 生成角色 共用）：额外提示词
     const genDlg = ref(false);
@@ -554,9 +553,8 @@ Views.project = {
       cMax.value = p.count_max || 5;
     }
     function syncTab() {
-      // 默认落在「大纲」页（含已规划章节的进行中项目）；仅「已完成」项目直接落到「完成」页
-      if (status.value === 'done') tab.value = 'done';
-      else tab.value = 'outline';
+      // 默认落在「大纲」页（含已规划章节的进行中项目）；完成已是季级，不再按作品状态自动跳「完成」
+      tab.value = 'outline';
     }
     // 章节列表变化后，把选中序号钳制到有效范围
     function syncCur() {
@@ -573,7 +571,7 @@ Views.project = {
         const valid = seasonId.value === 'overall' || s.find(x => x.id === seasonId.value);
         if (!valid) {
           seasonId.value = 'overall';
-          if (tab.value === 'chapters') tab.value = 'outline';  // 所选季被删除后「章节」页无内容
+          if (tab.value === 'chapters' || tab.value === 'done') tab.value = 'outline';  // 所选季被删除后「章节」「完成」无作用域
         }
         if (!isOverall.value) syncSeasonForm();
         syncCur();
@@ -635,11 +633,12 @@ Views.project = {
         oSub.value = 'arc';     // 季模式首个子页签
         syncSeasonForm();
       }
-      // 一级切季后「章节」页无内容（总体 / 空季）时回落到「企划」，避免出现禁用但仍激活的页签
-      if (tab.value === 'chapters') {
+      // 一级切季后当前页签变禁用时回落到「企划」
+      //（「章节」需要所选季有章节；「完成」需要具体季——总体无「本季」）
+      if (tab.value === 'chapters' || tab.value === 'done') {
         const n = id === 'overall' ? 0
           : ((data.value?.chapters || []).filter(c => c.season_id === id).length);
-        if (!n) tab.value = 'outline';
+        if (id === 'overall' || (tab.value === 'chapters' && !n)) tab.value = 'outline';
       }
     }
     async function addSeason() {
@@ -954,15 +953,9 @@ Views.project = {
       finally { busyGenAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
 
-    async function complete() {
-      try {
-        await API.post(`/api/projects/${props.id}/complete`);
-        ElementPlus.ElMessage.success(I18N.t('p.completedMsg'));
-        await load();
-      } catch (e) { ElementPlus.ElMessage.error(e.message); }
-    }
-    function exportZip() { window.location.href = `/api/projects/${props.id}/export/zip`; }
-    function exportPdf() { window.location.href = `/api/projects/${props.id}/export/pdf`; }
+    // 导出作用域为当前所选季（「完成」页签仅在选定季时可用）
+    function exportZip() { window.location.href = `/api/projects/${props.id}/export/zip?season_id=${encodeURIComponent(seasonId.value)}`; }
+    function exportPdf() { window.location.href = `/api/projects/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}`; }
 
     async function addChapter() {
       if (!seasonId.value) return;
@@ -1049,17 +1042,17 @@ Views.project = {
     watch(() => props.id, () => { tabInit.value = false; load(); });  // 同一路由切换不同项目时重载
     onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
-      data, scope, status, doneCount, canComplete, tab, oSub, isOverall, cur, curCh, selected, allSelected,
+      data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected,
       page, totalPages, pageStart, pageChapters,
       planPage, planPageStart, planPageChapters,
-      seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount,
+      seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       selectSeason, addSeason, delSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyFirst, genDescBusy, coverPrompt, progress,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
-      complete, exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
+      exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, router,
     };
   },

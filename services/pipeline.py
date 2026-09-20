@@ -986,13 +986,6 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    # ---------------- 手动完成 ----------------
-    def mark_done(self, db, project: Project) -> Project:
-        """手动标记完成（不再由「全部生成」自动触发）。"""
-        project.status = "done"
-        self._save(db, project)
-        return project
-
     # ---------------- 章节字段保存（提示词） ----------------
     def save_chapter_fields(self, db, project: Project, season: Season, index: int, prompt: str) -> Project:
         """手动编辑季内第 index 章的出图提示词（分辨率统一按总体设定，不再按章覆盖）。"""
@@ -1106,17 +1099,23 @@ class Pipeline:
     def _safe_name(self, project: Project) -> str:
         return ((project.title or project.origin or project.id) or "export")[:40]
 
-    def export_zip(self, db, project: Project) -> tuple[str, str]:
-        """导出 ZIP：大纲/角色/各章剧本文本 + 全部媒体（图/视频）+ 首图。返回 (zip 绝对路径, 文件名)。"""
-        chapters = self._load_chapters(db, project)
+    def export_zip(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:
+        """导出 ZIP：大纲/角色/各章剧本文本 + 媒体（图/视频）+ 首图。
+        season 非空时仅导出该季章节（文件名带 S<季号> 后缀）。返回 (zip 绝对路径, 文件名)。"""
+        chapters = self._season_chapters(db, project, season) if season is not None else self._load_chapters(db, project)
         scope = project.scope or {}
         export_dir = Path(self.data_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"{self._safe_name(project)}_{project.id}.zip"
+        base = f"{self._safe_name(project)}_{project.id}"
+        if season is not None:
+            base = f"{base}_S{season.number}"
+        fname = f"{base}.zip"
         zpath = export_dir / fname
         chars = chars_from_raw(project.characters)
+        scope_line = (f"导出范围：第{season.number}季" + (f"（{season.title}）" if season.title else "") + "\n") if season is not None else ""
         readme = (
             f"标题：{project.title}\n类型：{project.kind}\n一句话创意：{project.origin}\n"
+            + scope_line +
             f"风格：{scope.get('style', '')}\n主题：{scope.get('theme', '')}\n基调：{scope.get('tone', '')}\n"
             f"默认分辨率：{project.res_width}×{project.res_height}\n\n"
             f"角色设定：\n{chars_to_text(chars)}\n\n整体故事大纲：\n{project.arc}\n"
@@ -1139,12 +1138,14 @@ class Pipeline:
                 z.write(project.first_image, f"media/00_first_{Path(project.first_image).name}")
         return str(zpath), fname
 
-    def export_pdf(self, db, project: Project) -> tuple[str, str]:
-        """导出 PDF（仅漫画）：把各章图片按顺序拼成多页 PDF。短剧（视频）不支持。返回 (pdf 路径, 文件名)。"""
+    def export_pdf(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:
+        """导出 PDF（仅漫画）：把各章图片按顺序拼成多页 PDF。短剧（视频）不支持。
+        season 非空时仅导出该季章节（文件名带 S<季号> 后缀）。返回 (pdf 路径, 文件名)。"""
         if project.kind != "comic":
             raise ValueError("短剧为视频，暂不支持导出 PDF（可导出 ZIP）")
+        chapters = self._season_chapters(db, project, season) if season is not None else self._load_chapters(db, project)
         imgs = []
-        for ch in self._load_chapters(db, project):
+        for ch in chapters:
             mp = (ch.media_path or "").strip()
             if mp and Path(mp).is_file() and Path(mp).suffix.lower() in (".png", ".jpg", ".jpeg"):
                 with Image.open(mp) as im:      # 及时关闭文件句柄；convert 产生独立图像
@@ -1153,7 +1154,10 @@ class Pipeline:
             raise ValueError("没有可导出的章节图片")
         export_dir = Path(self.data_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"{self._safe_name(project)}_{project.id}.pdf"
+        base = f"{self._safe_name(project)}_{project.id}"
+        if season is not None:
+            base = f"{base}_S{season.number}"
+        fname = f"{base}.pdf"
         ppath = export_dir / fname
         try:
             imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)

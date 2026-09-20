@@ -1463,17 +1463,6 @@ async def project_chapter_move(request: Request, project_id: str, index: int,
     return {"ok": True}
 
 
-@app.post("/api/projects/{project_id}/complete")
-def project_complete(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """手动标记完成（不再由「全部生成」自动触发）。"""
-    lang = _lang(request)
-    project = pipeline.get(db, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    pipeline.mark_done(db, project)
-    return {"ok": True}
-
-
 # ---------------- 封面 / 大纲 ----------------
 @app.post("/api/projects/{project_id}/first-image")
 def project_first_image_upload(request: Request, project_id: str, file: UploadFile = File(...),
@@ -1626,14 +1615,20 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
 
 # ---------------- 导出（ZIP / PDF） ----------------
 @app.get("/api/projects/{project_id}/export/zip")
-def project_export_zip(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """导出 ZIP：全部媒体（图/视频）+ 首图 + 大纲/角色/各章剧本文本。"""
+def project_export_zip(request: Request, project_id: str, season_id: str | None = None,
+                        db: Session = Depends(get_db)):
+    """导出 ZIP：媒体（图/视频）+ 首图 + 大纲/角色/各章剧本文本；season_id 非空时仅导出该季章节。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = None
+    if season_id:
+        season = pipeline._get_season(db, project, season_id)
+        if season is None:
+            raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
     try:
-        path, fname = pipeline.export_zip(db, project)
+        path, fname = pipeline.export_zip(db, project, season)
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"导出 ZIP 失败：{e}", f"Export ZIP failed: {e}"))
@@ -1641,14 +1636,20 @@ def project_export_zip(request: Request, project_id: str, db: Session = Depends(
 
 
 @app.get("/api/projects/{project_id}/export/pdf")
-def project_export_pdf(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """导出 PDF（漫画：各章图片按序拼成多页；短剧/无图 → 400）。"""
+def project_export_pdf(request: Request, project_id: str, season_id: str | None = None,
+                        db: Session = Depends(get_db)):
+    """导出 PDF（漫画：各章图片按序拼成多页；短剧/无图 → 400）；season_id 非空时仅导出该季章节。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = None
+    if season_id:
+        season = pipeline._get_season(db, project, season_id)
+        if season is None:
+            raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
     try:
-        path, fname = pipeline.export_pdf(db, project)
+        path, fname = pipeline.export_pdf(db, project, season)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
     except Exception as e:
