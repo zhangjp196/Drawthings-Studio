@@ -91,12 +91,17 @@ Views.project = {
                         <el-select v-model="oRatio" size="small" style="width:150px" @change="onRatioChange">
                           <el-option :label="I18N.t('p.resAuto')" value="" />
                           <el-option v-for="r in resRatios" :key="r.key" :label="I18N.t(r.label)" :value="r.key" />
-                          <el-option v-if="oRatio === 'custom'" :label="I18N.t('p.resCustom')" value="custom" />
+                          <el-option :label="I18N.t('p.resCustom')" value="custom" />
                         </el-select>
                         <span class="muted small" style="margin-left:8px;">{{ I18N.t('p.resSize') }}</span>
-                        <el-select v-model="oRes" size="small" style="width:150px" @change="onResChange">
+                        <el-select v-if="oRatio !== 'custom'" v-model="oRes" size="small" style="width:150px" @change="onResChange">
                           <el-option v-for="s in resOptions" :key="s" :label="s" :value="s" />
                         </el-select>
+                        <template v-else>
+                          <el-input-number v-model="oW" :min="0" :max="4096" :step="64" size="small" />
+                          <span>×</span>
+                          <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
+                        </template>
                         <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
                       </div>
                     </el-form-item>
