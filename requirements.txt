@@ -1,8 +1,9 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
-openai>=1.30
-pydantic-ai>=2.0
+openai>=3.0
+pydantic-ai>=2.42
 httpx>=0.27
+httpx2>=2.0
 python-dotenv>=1.0
 pillow>=10.0
 jinja2>=3.1

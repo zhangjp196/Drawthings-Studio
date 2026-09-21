@@ -8,11 +8,11 @@ base_url / api_key / model 来自用户所选的 LLMConfig。
 """
 import base64
 import threading
-import warnings
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+import httpx2
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext, ModelSettings
 from pydantic_ai.models import Model
@@ -30,22 +30,9 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from models import LLMConfig
 
-# 精确压制「httpx.AsyncClient → httpx2.AsyncClient」这条 pydantic-ai 迁移提示。
-# 原因：当前安装的 openai 2.x 依赖 httpx<1，客户端类型校验只认 httpx.AsyncClient，
-# 传入 httpx2.AsyncClient 会直接 TypeError，无法按提示迁移；
-# 待 openai 升到 3.x（本身基于 httpx2）后再切换（见 build_model 注释）。
-# 只过滤消息里含 httpx 的这一条，其他弃用告警照常提示。
-try:
-    from pydantic_ai._warnings import PydanticAIDeprecationWarning as _PydanticAIRDeprecation
-except Exception:  # pragma: no cover - 老/新版本可能没有该内部模块
-    _PydanticAIRDeprecation = None
-
-if isinstance(_PydanticAIRDeprecation, type):
-    warnings.filterwarnings("ignore", category=_PydanticAIRDeprecation, message=r".*httpx.*")
-
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "::1")
 
-# 模型缓存：key = 配置 id → (签名, 模型)。复用同一模型实例即复用底层 httpx 连接池。
+# 模型缓存：key = 配置 id → (签名, 模型)。复用同一模型实例即复用底层 httpx2 连接池。
 _model_cache: dict[str, tuple[str, OpenAIChatModel]] = {}
 _model_cache_lock = threading.Lock()
 _MODEL_CACHE_MAX = 16
@@ -107,7 +94,7 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
     - yes/no：按 thinking_param 选择发送方式（reasoning_effort 或 enable_thinking，见 _thinking_settings）。
 
     性能：同一配置（含 base_url/api_key/model/思考参数）复用同一模型实例，
-    从而复用底层 httpx 连接池（keep-alive），避免每次调用重新建连/握手；
+    从而复用底层 httpx2 连接池（keep-alive），避免每次调用重新建连/握手；
     配置任一字段变化（签名不同）即重建。
     """
     cid = str(getattr(cfg, "id", "") or "")
@@ -121,7 +108,9 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
     provider = OpenAIProvider(
         base_url=cfg.base_url,
         api_key=cfg.api_key or "sk-local",
-        http_client=httpx.AsyncClient(timeout=600.0, trust_env=host not in _LOOPBACK_HOSTS),
+        # openai 3.x 基于 httpx2，pydantic-ai 也把 httpx 客户端视为 legacy；
+        # 这里传 httpx2.AsyncClient 以使用官方推荐客户端（不再有迁移告警）。
+        http_client=httpx2.AsyncClient(timeout=600.0, trust_env=host not in _LOOPBACK_HOSTS),
     )
     model = OpenAIChatModel(cfg.model, provider=provider, settings=_thinking_settings(cfg))
     if cid:
