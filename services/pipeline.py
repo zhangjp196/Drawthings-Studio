@@ -1278,30 +1278,31 @@ class Pipeline:
                                    lang: str = "zh", include_title: bool = True) -> Project:
         """用 DrawThings 生成封面（文生图）。
 
-        prompt 为空时（自动模式）让 LLM 结合一句话创意 + 风格 + 故事大纲 + 角色设定
-        自动写封面提示词；include_title 为真时在成品图上用 PIL 叠加作品名称（标题保持原文）。
+        prompt 为「额外提示词」：基础提示词始终由 LLM 结合一句话创意 + 风格 + 故事大纲 +
+        角色设定自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
+        include_title 为真时在成品图上用 PIL 叠加作品名称（标题保持原文）。
         产物存为 data/media/first_<项目id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
-        prompt = (prompt or "").strip()
-        auto = not prompt
+        extra = (prompt or "").strip()
+        scope = project.scope or {}
+        system = ("你是封面美术提示词作者。请结合一句话创意、风格、故事大纲与角色设定，"
+                  "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+                  "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（作品名由程序叠加）。")
+        agent = make_agent(build_model(llm_cfg), system)
+        user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
+        if (project.arc or "").strip():
+            user += f"\n故事大纲：{project.arc.strip()}"
+        chars_text = chars_to_text(chars_from_raw(project.characters))
+        if chars_text:
+            user += f"\n角色设定：{chars_text}"
+        async with agent:
+            base = ((await agent.run(user)).output or "").strip()
+        # 额外提示词原样追加在末尾（基础提示词在前，补充词只作追加）
+        prompt = f"{base}, {extra}" if base and extra else (base or extra)
         if not prompt:
-            scope = project.scope or {}
-            system = ("你是封面美术提示词作者。请结合一句话创意、风格、故事大纲与角色设定，"
-                      "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
-                      "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（作品名由程序叠加）。")
-            agent = make_agent(build_model(llm_cfg), system)
-            user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
-            if (project.arc or "").strip():
-                user += f"\n故事大纲：{project.arc.strip()}"
-            chars_text = chars_to_text(chars_from_raw(project.characters))
-            if chars_text:
-                user += f"\n角色设定：{chars_text}"
-            async with agent:
-                prompt = ((await agent.run(user)).output or "").strip()
-        if not prompt:
-            raise RuntimeError(L(lang, "未能获得封面提示词，请填写后重试",
-                                 "Could not obtain a cover prompt — please fill one in and retry"))
+            raise RuntimeError(L(lang, "未能获得封面提示词（LLM 无输出），请稍后重试",
+                                 "Could not obtain a cover prompt (empty LLM output) — please retry"))
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
         path = await run_sync(partial(dt.generate_image, prompt))
         media_dir = Path(self.data_dir) / "media"
@@ -1340,35 +1341,35 @@ class Pipeline:
                                           include_title: bool = True) -> Season:
         """用 DrawThings 生成季封面（文生图）。
 
-        prompt 为空时（自动模式）让 LLM 结合全局一句话创意 + 风格 + 核心角色与
-        季标题/季大纲/季新增角色 自动写季封面提示词；include_title 为真时在成品图上
-        用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。
+        prompt 为「额外提示词」：基础提示词始终由 LLM 结合全局一句话创意 + 风格 + 核心角色与
+        季标题/季大纲/季新增角色自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
+        include_title 为真时在成品图上用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。
         产物存为 data/media/seasonfirst_<季id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
-        prompt = (prompt or "").strip()
-        auto = not prompt
+        extra = (prompt or "").strip()
+        scope = project.scope or {}
+        system = ("你是封面美术提示词作者。请结合一句话创意、风格、角色设定与本季标题/大纲/新增角色，"
+                  "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+                  "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（季名由程序叠加）。")
+        agent = make_agent(build_model(llm_cfg), system)
+        user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
+        chars_text = chars_to_text(chars_from_raw(project.characters))
+        if chars_text:
+            user += f"\n核心角色：{chars_text}"
+        user += f"\n本季：{self._season_label(season, lang)}"
+        if (season.arc or "").strip():
+            user += f"\n季大纲：{season.arc.strip()}"
+        s_chars_text = chars_to_text(chars_from_raw(season.characters))
+        if s_chars_text:
+            user += f"\n本季新增角色：{s_chars_text}"
+        async with agent:
+            base = ((await agent.run(user)).output or "").strip()
+        # 额外提示词原样追加在末尾（基础提示词在前，补充词只作追加）
+        prompt = f"{base}, {extra}" if base and extra else (base or extra)
         if not prompt:
-            scope = project.scope or {}
-            system = ("你是封面美术提示词作者。请结合一句话创意、风格、角色设定与本季标题/大纲/新增角色，"
-                      "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
-                      "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（季名由程序叠加）。")
-            agent = make_agent(build_model(llm_cfg), system)
-            user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
-            chars_text = chars_to_text(chars_from_raw(project.characters))
-            if chars_text:
-                user += f"\n核心角色：{chars_text}"
-            user += f"\n本季：{self._season_label(season, lang)}"
-            if (season.arc or "").strip():
-                user += f"\n季大纲：{season.arc.strip()}"
-            s_chars_text = chars_to_text(chars_from_raw(season.characters))
-            if s_chars_text:
-                user += f"\n本季新增角色：{s_chars_text}"
-            async with agent:
-                prompt = ((await agent.run(user)).output or "").strip()
-        if not prompt:
-            raise RuntimeError(L(lang, "未能获得季封面提示词，请填写后重试",
-                                  "Could not obtain a season cover prompt — please fill one in and retry"))
+            raise RuntimeError(L(lang, "未能获得季封面提示词（LLM 无输出），请稍后重试",
+                                  "Could not obtain a season cover prompt (empty LLM output) — please retry"))
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
         path = await run_sync(partial(dt.generate_image, prompt))
         media_dir = Path(self.data_dir) / "media"
