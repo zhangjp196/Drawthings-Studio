@@ -87,7 +87,6 @@ def _migrate():
             "arc": "TEXT DEFAULT ''",
             "first_image": "VARCHAR(500) DEFAULT ''",
             "first_image_base": "VARCHAR(500) DEFAULT ''",
-            "cover_as_first_ref": "INTEGER DEFAULT 0",
             "characters": "TEXT DEFAULT ''",
             "global_prompt": "TEXT DEFAULT ''",
             "res_width": "INTEGER DEFAULT 0",
@@ -111,6 +110,7 @@ def _migrate():
         # 移除已废弃的列（SQLite >= 3.35 支持 DROP COLUMN）
         deprecated = {
             "llm_configs": ("mode",),
+            "projects": ("cover_as_first_ref",),  # 已移除：封面不再作为第 1 章参考
             "drawthing_configs": ("mode", "protocol", "shared_secret", "model_name", "media_type",
                                   "steps", "guidance_scale", "num_frames", "fps",
                                   "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）

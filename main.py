@@ -1159,7 +1159,6 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "count_mode": project.count_mode or "auto",
             "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
-            "cover_as_first_ref": bool(project.cover_as_first_ref),
             "created_at": project.created_at, "updated_at": project.updated_at,
             "llm_config_id": project.llm_config_id,
             "drawthings_config_id": project.drawthings_config_id,
@@ -1581,19 +1580,6 @@ async def project_first_image_generate(request: Request, project_id: str,
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【生成封面】失败：{e}", f"[Generate cover] failed: {e}"))
     return {"ok": True}
-
-
-@app.post("/api/projects/{project_id}/first-image/ref")
-async def project_cover_ref(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """设置是否把封面作为第 1 章参考（漫画 img2img / 短剧首帧）。"""
-    lang = _lang(request)
-    body = await _json_body(request)
-    project = pipeline.get(db, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
-    pipeline.set_cover_ref(db, project, bool(body.get("enabled")))
-    return {"ok": True, "enabled": bool(body.get("enabled"))}
 
 
 # ---------------- 季封面 ----------------

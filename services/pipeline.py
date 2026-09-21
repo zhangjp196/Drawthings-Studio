@@ -758,7 +758,6 @@ class Pipeline:
                 self._rm_media(c.get("image"))
             project.characters = ""
             project.global_prompt = ""
-            project.cover_as_first_ref = False
             project.res_width = 0
             project.res_height = 0
             project.count_mode = "auto"
@@ -956,7 +955,6 @@ class Pipeline:
         llm_cfg, supports_vision, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
-        first_img = (project.first_image or "").strip()
         agent = make_agent(model or build_model(llm_cfg), self._script_system(project),
                            output_type=ScriptOut)
         prev = chapters[i - 1] if i > 0 else None
@@ -973,7 +971,7 @@ class Pipeline:
                 else:
                     ref_img = prev_media
         else:
-            # 季内第 1 章：非第一季则参考上一季末章；第一季则参考封面（若开启）
+            # 季内第 1 章：非第一季则参考上一季末章（第一季无参考图）
             if season.number > 1:
                 prev_last = self._prev_season_last_chapter(db, project, season)
                 if prev_last and prev_last.media_path:
@@ -984,10 +982,6 @@ class Pipeline:
                         ref_img = await run_sync(extract_last_frame, pm, media_dir)
                     else:
                         ref_img = pm
-            elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
-                context += "\n附封面（第 1 章视觉基准）：它是全系列的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
-                if supports_vision:
-                    ref_img = first_img
         if not supports_vision:
             ref_img = None
         chars = chars_to_text(self._combined_chars(project, season))
@@ -1016,7 +1010,7 @@ class Pipeline:
                              chapter_done_cb=None) -> Project:
         """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
         indices: 季内章节序号列表（0 起）；None=该季全部章节。
-        季内第 1 章参考：非第一季→上一季末章；第一季→封面（若开启）或为空。
+        季内第 1 章参考：非第一季→上一季末章；第一季→无参考（文生图）。
         其余章沿用上一章媒体。"""
         dt = self._clients(db, project, lang)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
@@ -1025,19 +1019,16 @@ class Pipeline:
             targets = list(enumerate(chapters))
         else:
             targets = [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
-        first_img = (project.first_image or "").strip()
         try:
             for pos, (i, ch) in enumerate(targets, start=1):
                 if progress_cb:
                     await progress_cb(pos, len(targets), ch.title)
                 await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
-                # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章或封面）
+                # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章）
                 if i == 0:
                     if season.number > 1:
                         prev_last = self._prev_season_last_chapter(db, project, season)
                         ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
-                    elif first_img and Path(first_img).is_file() and project.cover_as_first_ref:
-                        ref = first_img
                     else:
                         ref = ""
                 else:
@@ -1130,12 +1121,6 @@ class Pipeline:
         """记录封面路径（文件已由调用方落盘到 data/media），并把该图存为原图（叠字每次从原图重绘）。"""
         project.first_image = (path or "").strip()
         project.first_image_base = self._snapshot_base(project.first_image)
-        self._save(db, project)
-        return project
-
-    def set_cover_ref(self, db, project: Project, enabled: bool) -> Project:
-        """设置是否把封面作为第 1 章参考。"""
-        project.cover_as_first_ref = bool(enabled)
         self._save(db, project)
         return project
 

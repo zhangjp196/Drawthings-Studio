@@ -9,7 +9,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 
 from db import Base
@@ -86,9 +86,8 @@ class Project(Base):
     count_mode = Column(String(10), default="auto")        # 章节数量模式（遗留字段；现按季存于 Season）
     count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
     count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
-    first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面；可选作为第 1 章参考）
+    first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面）
     first_image_base = Column(String(500), default="")     # 封面原图（无叠字）：叠字每次从原图重绘，反复调整不叠加
-    cover_as_first_ref = Column(Boolean, default=False)    # 是否把封面作为第 1 章参考（漫画 img2img / 短剧首帧），默认关
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     llm_config = relationship("LLMConfig")
