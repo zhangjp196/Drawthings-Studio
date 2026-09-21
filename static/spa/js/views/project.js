@@ -74,8 +74,8 @@ Views.project = {
               <template v-else>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.seasonChars') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'plan' }" @click="oSub = 'plan'">{{ I18N.t('p.subPlan') }}</button>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.seasonCover') }}</button>
+                <button type="button" class="subtabs-item" :class="{ active: oSub === 'plan' }" @click="oSub = 'plan'">{{ I18N.t('p.subPlan') }}</button>
               </template>
             </nav>
             <div class="subtabs-body">
@@ -263,6 +263,16 @@ Views.project = {
                   </div>
                   <el-empty v-if="!seasonChars.length" :description="I18N.t('p.seasonCharsEmpty')" :image-size="48" />
                 </el-card>
+                <template v-else-if="oSub === 'cover'">
+                  <div class="actions outline-bar">
+                    <el-button type="primary" :loading="busySeasonFirst" :disabled="locked" @click="openCoverGenDlg('season')">{{ I18N.t('p.genSeasonFirst') }}</el-button>
+                    <span class="muted" v-if="busySeasonFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
+                  </div>
+                  <season-cover :season="curSeason" :project-id="data.project.id" :season-id="seasonId"
+                                v-model:prompt="seasonCoverPrompt" :locked="locked"
+                                @preview="openLb([$event], 0)" @reloaded="load"
+                                @overlay="openOvlDlg('season')" />
+                </template>
                 <el-card v-else-if="oSub === 'plan'" shadow="never">
                   <div class="actions outline-bar">
                     <el-popconfirm :title="I18N.t('p.chRegenConfirm')" @confirm="planChapters">
@@ -311,16 +321,6 @@ Views.project = {
                   </div>
                   <el-empty v-if="!seasonChapters.length" :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
                 </el-card>
-                <template v-else-if="oSub === 'cover'">
-                  <div class="actions outline-bar">
-                    <el-button type="primary" :loading="busySeasonFirst" :disabled="locked" @click="openCoverGenDlg('season')">{{ I18N.t('p.genSeasonFirst') }}</el-button>
-                    <span class="muted" v-if="busySeasonFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
-                  </div>
-                  <season-cover :season="curSeason" :project-id="data.project.id" :season-id="seasonId"
-                                v-model:prompt="seasonCoverPrompt" :locked="locked"
-                                @preview="openLb([$event], 0)" @reloaded="load"
-                                @overlay="openOvlDlg('season')" />
-                </template>
               </template>
             </div>
           </div>
