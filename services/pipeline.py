@@ -44,6 +44,30 @@ from .agent import (
 from .drawthings import DrawThingsClient, extract_last_frame
 
 
+# 封面自动模式叠加作品名称用的中文字体：按系统取第一个存在的（结果缓存，避免反复探盘）
+_CJK_FONT_CANDIDATES = (
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/Songti.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+)
+_cjk_font: str | None = None
+
+
+def _cjk_font_path() -> str:
+    """找一个可渲染中文/日文的字体文件；没有返回 ''（调用方跳过叠加）。"""
+    global _cjk_font
+    if _cjk_font is None:
+        _cjk_font = next((p for p in _CJK_FONT_CANDIDATES if Path(p).is_file()), "")
+    return _cjk_font
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1114,19 +1138,57 @@ class Pipeline:
                 return project
         raise ValueError("角色不存在（Character not found）")
 
+    def _overlay_cover_title(self, path: Path, project: Project) -> None:
+        """封面自动模式：在成品图底部叠加作品名称（半透明底条 + 居中文字）。
+
+        用系统中文字体渲染（保持原文，不翻译）；字体缺失时静默跳过，
+        不影响生成本身。就地覆写 path 文件。"""
+        title = (project.title or "").strip()
+        font_file = _cjk_font_path()
+        if not title or not font_file:
+            return
+        from PIL import ImageDraw, ImageFont
+        img = Image.open(path).convert("RGBA")
+        w, h = img.size
+        # 字号 ≈ 最短边 8%（下限 20px）；标题过宽时逐级缩小到 90% 图宽以内
+        size = max(20, int(min(w, h) * 0.08))
+        font = ImageFont.truetype(font_file, size)
+        draw = ImageDraw.Draw(img)
+        bbox = draw.textbbox((0, 0), title, font=font)
+        tw = bbox[2] - bbox[0]
+        while tw > w * 0.9 and size > 14:
+            size = int(size * 0.88)
+            font = ImageFont.truetype(font_file, size)
+            bbox = draw.textbbox((0, 0), title, font=font)
+            tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        # 底部半透明深色底条（高度取字号 1.9 倍 / 图高 10% / 48px 的较大者）
+        band = max(size * 19 // 10, h // 10, 48)
+        shade = Image.new("RGBA", (w, band), (10, 10, 14, 120))
+        img.alpha_composite(shade, (0, h - band))
+        draw = ImageDraw.Draw(img)
+        draw.text(((w - tw) // 2, h - band + (band - th) // 2 - bbox[1]),
+                  title, font=font, fill=(255, 255, 255, 255),
+                  stroke_width=max(1, size // 18), stroke_fill=(0, 0, 0, 200))
+        out = img if path.suffix.lower() == ".png" else img.convert("RGB")
+        out.save(path)
+
     async def generate_first_image(self, db, project: Project, prompt: str = "",
                                    lang: str = "zh") -> Project:
         """用 DrawThings 生成封面（文生图）。
 
-        prompt 为空时让 LLM 结合一句话创意 + 风格 + 故事大纲 + 角色设定 自动写封面提示词。
+        prompt 为空时（自动模式）让 LLM 结合一句话创意 + 风格 + 故事大纲 + 角色设定
+        自动写封面提示词，并在成品图上用 PIL 叠加作品名称（标题保持原文）。
         产物存为 data/media/first_<项目id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
         prompt = (prompt or "").strip()
+        auto = not prompt
         if not prompt:
             scope = project.scope or {}
             system = ("你是封面美术提示词作者。请结合一句话创意、风格、故事大纲与角色设定，"
-                      "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。只输出提示词文本。")
+                      "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+                      "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（作品名由程序叠加）。")
             agent = make_agent(build_model(llm_cfg), system)
             user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
             if (project.arc or "").strip():
@@ -1145,6 +1207,9 @@ class Pipeline:
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
             shutil.move(str(path), str(dest))
+        if auto:
+            # 自动模式：PIL 叠加作品名称（纯本地快速操作，无需进线程池）
+            self._overlay_cover_title(dest, project)
         project.first_image = str(dest)
         self._save(db, project)
         return project

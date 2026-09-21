@@ -12,7 +12,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-import httpx2
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext, ModelSettings
 from pydantic_ai.models import Model
@@ -108,7 +107,7 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
     provider = OpenAIProvider(
         base_url=cfg.base_url,
         api_key=cfg.api_key or "sk-local",
-        http_client=httpx2.AsyncClient(timeout=600.0, trust_env=host not in _LOOPBACK_HOSTS),
+        http_client=httpx.AsyncClient(timeout=600.0, trust_env=host not in _LOOPBACK_HOSTS),
     )
     model = OpenAIChatModel(cfg.model, provider=provider, settings=_thinking_settings(cfg))
     if cid:
