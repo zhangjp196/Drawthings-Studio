@@ -8,6 +8,7 @@ base_url / api_key / model 来自用户所选的 LLMConfig。
 """
 import base64
 import threading
+import warnings
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -28,6 +29,19 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from models import LLMConfig
+
+# 精确压制「httpx.AsyncClient → httpx2.AsyncClient」这条 pydantic-ai 迁移提示。
+# 原因：当前安装的 openai 2.x 依赖 httpx<1，客户端类型校验只认 httpx.AsyncClient，
+# 传入 httpx2.AsyncClient 会直接 TypeError，无法按提示迁移；
+# 待 openai 升到 3.x（本身基于 httpx2）后再切换（见 build_model 注释）。
+# 只过滤消息里含 httpx 的这一条，其他弃用告警照常提示。
+try:
+    from pydantic_ai._warnings import PydanticAIDeprecationWarning as _PydanticAIRDeprecation
+except Exception:  # pragma: no cover - 老/新版本可能没有该内部模块
+    _PydanticAIRDeprecation = None
+
+if isinstance(_PydanticAIRDeprecation, type):
+    warnings.filterwarnings("ignore", category=_PydanticAIRDeprecation, message=r".*httpx.*")
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "::1")
 
