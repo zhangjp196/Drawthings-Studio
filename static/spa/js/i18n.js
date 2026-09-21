@@ -308,6 +308,7 @@ window.I18N = (function () {
       'p.genSeasonFirst': '生成季封面',
       'p.seasonFirstConfirm': '生成季封面？',
       'p.seasonGenPromptPh': '在自动撰写的基础上额外补充（留空即可；季名自动叠加）',
+      'p.seasonCoverAsFirstRef': '同时作为本季第 1 章参考（本季第 1 章将据此出图 / 作为视频首帧）',
       'p.msgSeasonFirstUploaded': '季封面已上传',
       'p.msgSeasonFirstGenerated': '季封面已生成',
 
@@ -787,6 +788,7 @@ window.I18N = (function () {
       'p.genSeasonFirst': 'Generate season cover',
       'p.seasonFirstConfirm': 'Generate the season cover?',
       'p.seasonGenPromptPh': 'Extra hints added on top of the auto-written prompt (can be empty; season name overlaid automatically)',
+      'p.seasonCoverAsFirstRef': "Also use as this season's chapter-1 reference (chapter 1 renders from it / as the video first frame)",
       'p.msgSeasonFirstUploaded': 'Season cover uploaded',
       'p.msgSeasonFirstGenerated': 'Season cover generated',
 

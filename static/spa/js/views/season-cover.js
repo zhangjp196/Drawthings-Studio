@@ -38,11 +38,25 @@ Views.seasonCover = {
             <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('p.seasonGenPromptPh')"
                       @update:modelValue="(v) => $emit('update:prompt', v)" />
           </div>
+          <div class="frow">
+            <el-checkbox v-model="coverRef" :disabled="locked" @change="onCoverRefChange">{{ I18N.t('p.seasonCoverAsFirstRef') }}</el-checkbox>
+          </div>
         </div>
       </div>
     </el-card>
   `,
   setup(props, { emit }) {
+    const coverRef = ref(!!props.season.cover_as_first_ref);
+
+    async function onCoverRefChange(v) {
+      try {
+        await API.post(`/api/projects/${props.projectId}/seasons/${props.seasonId}/first-image/ref`,
+          { enabled: !!v });
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
+
     function onFile(uploadFile) {
       const file = uploadFile.raw;
       if (!file) return;
@@ -57,6 +71,6 @@ Views.seasonCover = {
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
 
-    return { onFile };
+    return { coverRef, onCoverRefChange, onFile };
   },
 };

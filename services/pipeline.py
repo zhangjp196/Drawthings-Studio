@@ -971,8 +971,13 @@ class Pipeline:
                 else:
                     ref_img = prev_media
         else:
-            # 季内第 1 章：非第一季则参考上一季末章（第一季无参考图）
-            if season.number > 1:
+            # 季内第 1 章：优先本季封面（若开启）；否则非第一季参考上一季末章（第一季无参考图）
+            season_cover = (season.first_image or "").strip()
+            if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
+                context = "附本季封面（本季第 1 章视觉基准）：它是本季的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
+                if supports_vision:
+                    ref_img = season_cover
+            elif season.number > 1:
                 prev_last = self._prev_season_last_chapter(db, project, season)
                 if prev_last and prev_last.media_path:
                     context = f"上一季末章：{prev_last.description}"
@@ -1010,7 +1015,7 @@ class Pipeline:
                              chapter_done_cb=None) -> Project:
         """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
         indices: 季内章节序号列表（0 起）；None=该季全部章节。
-        季内第 1 章参考：非第一季→上一季末章；第一季→无参考（文生图）。
+        季内第 1 章参考：开启「本季封面作为第 1 章参考」→ 本季封面；否则非第一季→上一季末章，第一季→无参考（文生图）。
         其余章沿用上一章媒体。"""
         dt = self._clients(db, project, lang)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
@@ -1026,7 +1031,10 @@ class Pipeline:
                 await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
                 # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章）
                 if i == 0:
-                    if season.number > 1:
+                    season_cover = (season.first_image or "").strip()
+                    if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
+                        ref = season_cover
+                    elif season.number > 1:
                         prev_last = self._prev_season_last_chapter(db, project, season)
                         ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
                     else:
@@ -1148,6 +1156,13 @@ class Pipeline:
         d, b = Path(display), Path(base or "")
         if b.is_file() and b.resolve() != d.resolve():
             shutil.copy(b, d)
+
+    def set_season_cover_ref(self, db, project: Project, season: Season, enabled: bool) -> Season:
+        """设置是否把季封面作为本季第 1 章参考。"""
+        season.cover_as_first_ref = bool(enabled)
+        season.updated_at = _now()
+        self._save(db, project)
+        return season
 
     def overlay_first_image_title(self, db, project: Project, lang: str = "zh",
                                   opts: dict | None = None) -> Project:

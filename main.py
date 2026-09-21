@@ -1170,6 +1170,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
                 "id": s.id, "number": s.number, "title": s.title or "",
                 "arc": s.arc or "",
                 "first_image_url": _media_url(s.first_image or ""),
+                "cover_as_first_ref": bool(s.cover_as_first_ref),
                 "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
                                  "image_url": _media_url(c["image"])}
                                 for c in chars_from_raw(s.characters)],
@@ -1653,6 +1654,24 @@ async def project_first_image_overlay_title(request: Request, project_id: str,
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【叠加标题】失败：{e}", f"[Overlay title] failed: {e}"))
     return {"ok": True, "url": _media_url(project.first_image or "")}
+
+
+@app.post("/api/projects/{project_id}/seasons/{season_id}/first-image/ref")
+async def season_cover_ref(request: Request, project_id: str, season_id: str,
+                           db: Session = Depends(get_db)):
+    """设置是否把季封面作为本季第 1 章参考（漫画 img2img / 短剧首帧）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline._get_season(db, project, season_id)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+    _ensure_not_finished(project, lang)
+    enabled = bool(body.get("enabled"))
+    pipeline.set_season_cover_ref(db, project, season, enabled)
+    return {"ok": True, "enabled": enabled}
 
 
 @app.post("/api/projects/{project_id}/seasons/{season_id}/first-image/overlay-title")
