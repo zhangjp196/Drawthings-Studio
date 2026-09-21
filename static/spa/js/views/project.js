@@ -1,5 +1,6 @@
-// 项目详情：头部/封面 + 一级菜单（季选择器：总体/各季，作用于下方全部二级页签）+ 二级页签（企划 / 章节 / 完成）
-// 企划：总体=全局子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面），季=本季大纲 / 季角色 / 章节规划
+// 项目详情：头部/封面 + 季选择器（仅各季）+ 固定的「总体」入口（与各季用竖线分隔）
+// 总体：独立入口，直接显示写作子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面/完结），无二级页签
+// 季：二级页签（企划 / 章节 / 预览 / 完成）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步）+ 返回企划
 // 完成：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP/PDF（无整部作品级完成标记）
 window.Views = window.Views || {};
@@ -42,11 +43,12 @@ Views.project = {
         </div>
       </el-alert>
 
-      <!-- 一级菜单：季（篇章）选择器——最左为「总体」（全局），其后为各季；作用于下方全部二级页签 -->
+      <!-- 季（篇章）选择栏：最左为独立的「总体」入口（固定，不随各季 tab 切换），其后为各季 -->
       <div class="season-bar">
-        <button type="button" class="season-item" :class="{ active: isOverall }" @click="selectSeason('overall')">
+        <button type="button" class="season-item season-overall" :class="{ active: isOverall }" @click="selectSeason('overall')">
           {{ I18N.t('p.tabOverall') }}
         </button>
+        <span class="season-sep" aria-hidden="true"></span>
         <button v-for="s in seasons" :key="s.id" type="button" class="season-item"
                 :class="{ active: seasonId === s.id }" @click="selectSeason(s.id)">
           {{ s.title || I18N.t('p.season', s.number) }}
@@ -59,28 +61,16 @@ Views.project = {
         </el-popconfirm>
       </div>
 
-      <!-- 二级页签：企划 / 章节 / 完成（随所选季作用域） -->
-      <el-tabs v-model="tab" class="proj-tabs">
-        <!-- ============ 企划：总体=全局子页签（故事大纲 / 角色 / 封面）；季=本季大纲 / 季角色 / 章节规划 ============ -->
-        <el-tab-pane :label="I18N.t('p.tabOutline')" name="outline">
-          <div class="subtabs">
-            <nav class="subtabs-nav">
-              <template v-if="isOverall">
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subStory') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'finish' }" @click="oSub = 'finish'">{{ I18N.t('p.subFinish') }}</button>
-              </template>
-              <template v-else>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.seasonChars') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.seasonCover') }}</button>
-                <button type="button" class="subtabs-item" :class="{ active: oSub === 'plan' }" @click="oSub = 'plan'">{{ I18N.t('p.subPlan') }}</button>
-              </template>
-            </nav>
-            <div class="subtabs-body">
-              <!-- ============ 总体模式（全局字段：风格 / 整体故事大纲 / 全局提示词 / 分辨率 / 角色 / 封面）============ -->
-              <template v-if="isOverall">
+      <!-- ============ 总体：独立入口，直接显示写作子页签（无 企划/章节/预览/完成 二级页签，那些均为季作用域）============ -->
+      <div v-if="isOverall" class="subtabs">
+        <nav class="subtabs-nav">
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subStory') }}</button>
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'finish' }" @click="oSub = 'finish'">{{ I18N.t('p.subFinish') }}</button>
+        </nav>
+        <div class="subtabs-body">
+              <!-- 全局字段：风格 / 整体故事大纲 / 全局提示词 / 分辨率 / 角色 / 封面 / 完结 -->
                 <el-card v-if="oSub === 'story'" shadow="never">
                   <div class="actions outline-bar">
                     <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('arc', I18N.t('p.genArc'))">{{ I18N.t('p.genArc') }}</el-button>
@@ -216,10 +206,21 @@ Views.project = {
                                :locked="locked" @preview="openLb([$event], 0)" @reloaded="load"
                                @overlay="openOvlDlg('project')" />
                 </div>
-              </template>
-              <!-- ============ 季模式（每季字段：本季大纲 / 季角色 / 章节规划）============ -->
-              <template v-else>
-                <el-card v-if="oSub === 'arc'" shadow="never">
+              </div>
+            </div>
+
+      <!-- ============ 季：二级页签 企划 / 章节 / 预览 / 完成（随所选季作用域）============ -->
+      <el-tabs v-else v-model="tab" class="proj-tabs">
+        <el-tab-pane :label="I18N.t('p.tabOutline')" name="outline">
+          <div class="subtabs">
+            <nav class="subtabs-nav">
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.seasonChars') }}</button>
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.seasonCover') }}</button>
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'plan' }" @click="oSub = 'plan'">{{ I18N.t('p.subPlan') }}</button>
+            </nav>
+            <div class="subtabs-body">
+              <el-card v-if="oSub === 'arc'" shadow="never">
                   <div class="actions outline-bar">
                     <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_arc', I18N.t('p.seasonArcGen'))">{{ I18N.t('p.seasonArcGen') }}</el-button>
                     <el-popconfirm :title="I18N.t('p.seasonArcSaveConfirm')" @confirm="saveSeasonArc">
@@ -321,7 +322,6 @@ Views.project = {
                   </div>
                   <el-empty v-if="!seasonChapters.length" :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
                 </el-card>
-              </template>
             </div>
           </div>
         </el-tab-pane>
@@ -397,8 +397,8 @@ Views.project = {
           </div>
         </el-tab-pane>
 
-        <!-- ============ 完成（季作用域：显示当前所选季的完成情况；总体无「本季」，禁用） ============ -->
-        <el-tab-pane :label="I18N.t('p.tabDone')" name="done" :disabled="isOverall">
+        <!-- ============ 完成（季作用域：显示当前所选季的完成情况） ============ -->
+        <el-tab-pane :label="I18N.t('p.tabDone')" name="done">
           <el-card shadow="never">
             <template #header><b>{{ I18N.t('p.tabDone') }}</b></template>
             <template v-if="seasonChapters.length">

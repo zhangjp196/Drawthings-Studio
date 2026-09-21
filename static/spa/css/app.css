@@ -715,6 +715,9 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .season-item.active:hover { transform: translateY(-1px); }
 .season-add { color: var(--primary); border-style: dashed; }
 .season-del { color: var(--err); border-style: dashed; }
+/* 「总体」独立入口：与各季 tab 用竖线分隔，视觉上更突出 */
+.season-sep { width: 1px; align-self: stretch; min-height: 24px; background: var(--line); margin: 2px 5px; flex: none; }
+.season-overall { color: var(--primary); border-color: var(--el-color-primary-light-5); font-weight: 600; }
 
 /* ---------- 完结（锁定）横幅 + 完结页各季进度行 ---------- */
 .finish-banner { margin-bottom: 10px; border-radius: 10px; }
