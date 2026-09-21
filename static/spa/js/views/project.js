@@ -544,6 +544,24 @@ Views.project = {
 
     // 企划子页签：总体模式 story（故事大纲）/ chars（角色）/ cover（封面）；季模式 arc（本季大纲）/ chars（季角色）/ plan（章节规划）
     const oSub = ref('story');
+    // 季（篇章）：seasonId = 'overall' 表示选中「总体」（全局），否则为某季 id
+    // 注意：必须声明在引用 seasonChapters 的 computed / watch 之前——
+    // Vue 的 watch 注册时会立即执行一次 getter 取旧值，声明靠后会触发 TDZ ReferenceError
+    const seasonId = ref('overall');
+    const isOverall = computed(() => seasonId.value === 'overall');
+    const seasonArcText = ref('');
+    const seasonTitleText = ref('');
+    const seasonChars = ref([]);
+    const seasons = computed(() => (data.value?.seasons || []));
+    const curSeason = computed(() => seasons.value.find(x => x.id === seasonId.value) || null);
+    const seasonChapters = computed(() => {
+      if (isOverall.value) return [];
+      return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
+    });
+    const seasonDoneCount = computed(() => seasonChapters.value.filter(c => c.status === 'done').length);
+    // 季完成 = 本季章节全部生成（派生值，不存储）；空季不算完成
+    const seasonCompleted = computed(() => seasonChapters.value.length > 0 && seasonDoneCount.value === seasonChapters.value.length);
+
     // 章节主从布局：当前选中章节序号
     const cur = ref(0);
     const curCh = computed(() => {
@@ -630,22 +648,6 @@ Views.project = {
     const cMode = ref('auto');   // 章节数量：auto（模型决定）/ range（区间）
     const cMin = ref(3);
     const cMax = ref(5);
-
-    // 季（篇章）：seasonId = 'overall' 表示选中「总体」（全局），否则为某季 id
-    const seasonId = ref('overall');
-    const isOverall = computed(() => seasonId.value === 'overall');
-    const seasonArcText = ref('');
-    const seasonTitleText = ref('');
-    const seasonChars = ref([]);
-    const seasons = computed(() => (data.value?.seasons || []));
-    const curSeason = computed(() => seasons.value.find(x => x.id === seasonId.value) || null);
-    const seasonChapters = computed(() => {
-      if (isOverall.value) return [];
-      return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
-    });
-    const seasonDoneCount = computed(() => seasonChapters.value.filter(c => c.status === 'done').length);
-    // 季完成 = 本季章节全部生成（派生值，不存储）；空季不算完成
-    const seasonCompleted = computed(() => seasonChapters.value.length > 0 && seasonDoneCount.value === seasonChapters.value.length);
 
     // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各季完成进度
     const locked = computed(() => (data.value?.project.status) === 'done');
