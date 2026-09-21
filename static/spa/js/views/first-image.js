@@ -6,6 +6,7 @@ Views.firstImage = {
     project: { type: Object, required: true },   // data.project
     projectId: { type: String, required: true },
     prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
+    locked: { type: Boolean, default: false },   // 作品已完结（锁定）：操作只读
   },
   emits: ['preview', 'reloaded', 'update:prompt'],
   template: `
@@ -23,8 +24,8 @@ Views.firstImage = {
         <div class="first-forms">
           <div class="frow">
             <span class="k">{{ I18N.t('p.upload') }}</span>
-            <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :on-change="onFile">
-              <el-button size="small">{{ I18N.t('p.uploadBtn') }}</el-button>
+            <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :disabled="locked" :on-change="onFile">
+              <el-button size="small" :disabled="locked">{{ I18N.t('p.uploadBtn') }}</el-button>
             </el-upload>
           </div>
           <div class="frow">
@@ -33,7 +34,7 @@ Views.firstImage = {
                       @update:modelValue="(v) => $emit('update:prompt', v)" />
           </div>
           <div class="frow">
-            <el-checkbox v-model="coverRef" @change="onCoverRefChange">{{ I18N.t('p.coverAsFirstRef') }}</el-checkbox>
+            <el-checkbox v-model="coverRef" :disabled="locked" @change="onCoverRefChange">{{ I18N.t('p.coverAsFirstRef') }}</el-checkbox>
           </div>
         </div>
       </div>

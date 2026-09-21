@@ -733,6 +733,60 @@ class Pipeline:
         self._save(db, project)
         return project
 
+    # ---------------- 整部作品完结（finished）/ 解锁 ----------------
+    def is_finished(self, project: Project) -> bool:
+        """作品是否已完结（锁定）：status = done。"""
+        return (project.status or "") == "done"
+
+    def season_progress(self, db, project: Project) -> list[dict]:
+        """各季完成进度：[{id, number, title, total, done, ok}]（ok = 本季有章节且全部已生成）。"""
+        out = []
+        for s in self._load_seasons(db, project):
+            chs = self._season_chapters(db, project, s)
+            done = sum(1 for c in chs if c.status == "done")
+            out.append({"id": s.id, "number": s.number, "title": s.title or "",
+                        "total": len(chs), "done": done,
+                        "ok": len(chs) > 0 and done == len(chs)})
+        return out
+
+    def check_finished(self, db, project: Project, lang: str = "zh") -> list[str]:
+        """完结条件检查：返回未满足项（本地化文案列表）；空列表 = 满足。
+        条件：每季至少 1 章，且全部季的全部章节均已生成（done）。"""
+        issues: list[str] = []
+        for row in self.season_progress(db, project):
+            label = L(lang, f"第{row['number']}季", f"Season {row['number']}")
+            if row["title"]:
+                label += f"（{row['title']}）" if lang == "zh" else f" ({row['title']})"
+            if row["total"] == 0:
+                issues.append(L(lang, f"{label}：无章节", f"{label}: no chapters"))
+            elif row["done"] < row["total"]:
+                issues.append(L(lang, f"{label}：已完成 {row['done']}/{row['total']} 章",
+                                f"{label}: only {row['done']}/{row['total']} chapters done"))
+        return issues
+
+    def complete_project(self, db, project: Project, lang: str = "zh") -> Project:
+        """标记整部作品完结（锁定）：要求全部季的章节都已完成（done），否则抛 ValueError（含未满足明细）。"""
+        if not self.season_progress(db, project):
+            raise ValueError(L(lang, "该项目还没有任何季/章节，不能完结",
+                               "No seasons/chapters yet — cannot finish"))
+        issues = self.check_finished(db, project, lang)
+        if issues:
+            sep = "；" if lang == "zh" else "; "
+            raise ValueError(L(lang, f"尚不能完结：{sep.join(issues)}",
+                               f"Cannot finish yet: {sep.join(issues)}"))
+        project.status = "done"
+        self._save(db, project)
+        return project
+
+    def unlock_project(self, db, project: Project, lang: str = "zh") -> Project:
+        """解锁：已完结（锁定）→ chaptered，可继续编辑 / 生成。"""
+        if not self.is_finished(project):
+            raise ValueError(L(lang, "该作品未处于完结（锁定）状态，无需解锁",
+                               "This project is not finished/locked — nothing to unlock"))
+        project.status = "chaptered"
+        self._save(db, project)
+        return project
+
     async def step_chapters(self, db, project: Project, season: Season, lang: str = "zh",
                              count_mode: str = "auto", count_min: int = 0, count_max: int = 0) -> Project:
         """「章节规划」：依据季大纲/风格/角色 + 章节数量设定（auto / range）规划章节（标题 + 主题摘要）。

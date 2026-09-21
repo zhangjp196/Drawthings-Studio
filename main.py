@@ -977,6 +977,14 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
 
 
 # ---------------- 项目（JSON API） ----------------
+def _ensure_not_finished(project: Project, lang: str) -> None:
+    """已完结（锁定）的作品禁止一切编辑/生成操作：需先解锁（服务端兜底，前端按钮同步禁用）。"""
+    if pipeline.is_finished(project):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "该作品已完结（锁定），请先点「解锁」再操作",
+                                     "This work is finished (locked) — click Unlock first"))
+
+
 @app.get("/api/projects")
 def projects_list(db: Session = Depends(get_db), page: int = 1, size: int = 10,
                   kind: str = "", status: str = "", q: str = "", sort: str = "desc"):
@@ -1026,6 +1034,7 @@ async def project_rename(request: Request, project_id: str, db: Session = Depend
     project = pipeline.get(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     title = str(body.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail=L(lang, "标题不能为空", "Title cannot be empty"))
@@ -1044,6 +1053,7 @@ async def project_reset(request: Request, project_id: str, db: Session = Depends
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     try:
         pipeline.reset_settings(db, project,
                                 title=str(body.get("title") or ""),
@@ -1068,6 +1078,36 @@ def project_delete(request: Request, project_id: str, db: Session = Depends(get_
                             detail=L(_lang(request), "项目不存在", "Project not found"))
     pipeline.delete_project(db, project)
     return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/complete")
+def project_complete(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """完结整部作品：要求全部季的章节都已完成（done），完结后作品锁定（只读），需解锁才能继续操作。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)  # 已完结 → 防重复
+    try:
+        pipeline.complete_project(db, project, lang=lang)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
+    return {"ok": True, "status": project.status}
+
+
+@app.post("/api/projects/{project_id}/unlock")
+def project_unlock(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """解锁已完结（锁定）的作品：回到「章节已定」状态，可继续编辑 / 生成。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    if not pipeline.is_finished(project):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "该作品未处于完结（锁定）状态，无需解锁",
+                                     "This project is not finished/locked — nothing to unlock"))
+    pipeline.unlock_project(db, project, lang=lang)
+    return {"ok": True, "status": project.status}
 
 
 @app.get("/api/projects/{project_id}")
@@ -1132,6 +1172,7 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(str(body.get("llm_config_id") or ""))
     dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
@@ -1155,6 +1196,7 @@ async def project_season_create(request: Request, project_id: str, db: Session =
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     season = pipeline.add_season(db, project, title=str(body.get("title") or ""))
     return {"id": season.id, "number": season.number, "title": season.title or ""}
 
@@ -1168,6 +1210,7 @@ async def project_season_update(request: Request, project_id: str, season_id: st
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     season = pipeline._get_season(db, project, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
@@ -1203,6 +1246,7 @@ def project_season_delete(request: Request, project_id: str, season_id: str,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     try:
         pipeline.delete_season(db, project, season_id)
     except ValueError as e:
@@ -1220,6 +1264,7 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     season = None
     if step in ("chapters", "generate", "season_arc", "season_chars"):
         sid = str(body.get("season_id") or "")
@@ -1277,6 +1322,7 @@ async def project_action_stream(request: Request, project_id: str, db: Session =
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline._get_season(db, project, sid) if sid else None
     if season is None:
@@ -1361,6 +1407,7 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline._get_season(db, project, sid) if sid else None
     if season is None:
@@ -1387,6 +1434,7 @@ async def project_edit(request: Request, project_id: str, index: int,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline._get_season(db, project, sid) if sid else None
     if season is None:
@@ -1408,6 +1456,7 @@ async def project_chapter_add(request: Request, project_id: str, db: Session = D
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline._get_season(db, project, sid) if sid else None
     if season is None:
@@ -1424,6 +1473,7 @@ async def project_chapter_delete(request: Request, project_id: str, index: int, 
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     sid = str(request.query_params.get("season_id") or "")
     if not sid:
         try:
@@ -1451,6 +1501,7 @@ async def project_chapter_move(request: Request, project_id: str, index: int,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline._get_season(db, project, sid) if sid else None
     if season is None:
@@ -1472,6 +1523,7 @@ def project_first_image_upload(request: Request, project_id: str, file: UploadFi
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
@@ -1498,6 +1550,7 @@ async def project_first_image_generate(request: Request, project_id: str,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     try:
         project = await pipeline.generate_first_image(db, project, str(body.get("prompt") or ""),
                                                        lang=lang)
@@ -1515,6 +1568,7 @@ async def project_cover_ref(request: Request, project_id: str, db: Session = Dep
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     pipeline.set_cover_ref(db, project, bool(body.get("enabled")))
     return {"ok": True, "enabled": bool(body.get("enabled"))}
 
@@ -1527,6 +1581,7 @@ def project_char_image_upload(request: Request, project_id: str, char_id: str,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
@@ -1558,6 +1613,7 @@ def project_char_image_delete(request: Request, project_id: str, char_id: str,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     try:
         pipeline.set_char_image(db, project, char_id, "")
     except Exception as e:
@@ -1575,6 +1631,7 @@ async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     try:
         desc = await pipeline.gen_char_description(db, project, char_id, lang)
     except Exception as e:
@@ -1592,6 +1649,7 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
     raw_chars = body.get("characters")
     characters = None
     if isinstance(raw_chars, list):

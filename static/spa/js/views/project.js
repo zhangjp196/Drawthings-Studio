@@ -21,14 +21,26 @@ Views.project = {
             · {{ I18N.t('p.metaDt', data.project.dt_name) }}</p>
         </div>
         <div class="proj-head-actions">
-          <el-button @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
-          <el-button @click="openReset">{{ I18N.t('p.reset') }}</el-button>
+          <el-button :disabled="locked" @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
+          <el-button :disabled="locked" @click="openReset">{{ I18N.t('p.reset') }}</el-button>
           <el-button @click="router.push('/projects')">{{ I18N.t('p.back') }}</el-button>
           <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del">
             <template #reference><el-button type="danger" plain>{{ I18N.t('p.del') }}</el-button></template>
           </el-popconfirm>
         </div>
       </div>
+
+      <!-- 已完结（锁定）：内容只读，点「解锁」后恢复操作 -->
+      <el-alert v-if="locked" type="success" :closable="false" class="finish-banner">
+        <div class="finish-banner-body">
+          <span>{{ I18N.t('p.lockedMsg') }}</span>
+          <el-popconfirm :title="I18N.t('p.unlockConfirm')" @confirm="unlock">
+            <template #reference>
+              <el-button size="small" type="primary" plain style="margin-left: 12px;">{{ I18N.t('p.unlockBtn') }}</el-button>
+            </template>
+          </el-popconfirm>
+        </div>
+      </el-alert>
 
       <!-- 一级菜单：季（篇章）选择器——最左为「总体」（全局），其后为各季；作用于下方全部二级页签 -->
       <div class="season-bar">
@@ -40,9 +52,9 @@ Views.project = {
           {{ s.title || I18N.t('p.season', s.number) }}
         </button>
         <el-popconfirm :title="I18N.t('p.seasonAddConfirm')" @confirm="addSeason">
-          <template #reference><button type="button" class="season-item season-add">{{ I18N.t('p.seasonAdd') }}</button></template>
+          <template #reference><button type="button" class="season-item season-add" :disabled="locked">{{ I18N.t('p.seasonAdd') }}</button></template>
         </el-popconfirm>
-        <el-popconfirm v-if="seasons.length > 1 && !isOverall" :title="I18N.t('p.seasonDelConfirm')" @confirm="delSeason">
+        <el-popconfirm v-if="seasons.length > 1 && !isOverall && !locked" :title="I18N.t('p.seasonDelConfirm')" @confirm="delSeason">
           <template #reference><button type="button" class="season-item season-del">{{ I18N.t('p.seasonDel') }}</button></template>
         </el-popconfirm>
       </div>
@@ -57,6 +69,7 @@ Views.project = {
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subStory') }}</button>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
+                <button type="button" class="subtabs-item" :class="{ active: oSub === 'finish' }" @click="oSub = 'finish'">{{ I18N.t('p.subFinish') }}</button>
               </template>
               <template v-else>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
@@ -69,9 +82,9 @@ Views.project = {
               <template v-if="isOverall">
                 <el-card v-if="oSub === 'story'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" @click="openGenDlg('arc', I18N.t('p.genArc'))">{{ I18N.t('p.genArc') }}</el-button>
+                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('arc', I18N.t('p.genArc'))">{{ I18N.t('p.genArc') }}</el-button>
                     <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveStory">
-                      <template #reference><el-button :loading="busySave">{{ I18N.t('p.outSave') }}</el-button></template>
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.outSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
@@ -109,16 +122,16 @@ Views.project = {
                 </el-card>
                 <el-card v-else-if="oSub === 'chars'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" @click="openGenDlg('chars', I18N.t('p.genChars'))">{{ I18N.t('p.genChars') }}</el-button>
+                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('chars', I18N.t('p.genChars'))">{{ I18N.t('p.genChars') }}</el-button>
                     <el-popconfirm :title="I18N.t('p.charsSaveConfirm')" @confirm="saveChars">
-                      <template #reference><el-button :loading="busySave">{{ I18N.t('p.charsSave') }}</el-button></template>
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.charsSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
                   <div v-for="(c, i) in chars" :key="c.id || ('new' + i)" class="char-card">
                     <div class="row-between" style="margin-bottom:6px;">
                       <b class="muted small">{{ I18N.t('p.char', i + 1) }}</b>
-                      <el-button size="small" type="danger" plain @click="delChar(i)">{{ I18N.t('p.charDel') }}</el-button>
+                      <el-button size="small" type="danger" plain :disabled="locked" @click="delChar(i)">{{ I18N.t('p.charDel') }}</el-button>
                     </div>
                     <el-form label-position="top">
                       <el-form-item :label="I18N.t('p.charName')">
@@ -140,11 +153,12 @@ Views.project = {
                         <div class="char-ref">
                           <img v-if="c.image_url" :src="c.image_url" class="char-ref-img" :alt="c.name || ''"
                                loading="lazy" decoding="async" @click="openLb([c.image_url], 0)">
-                          <el-upload :auto-upload="false" :show-file-list="false" accept="image/*"
+                          <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :disabled="locked"
                                      :on-change="(f) => uploadCharImage(i, f)">
-                            <el-button size="small">{{ c.image_url ? I18N.t('p.charRefChange') : I18N.t('p.uploadBtn') }}</el-button>
+                            <el-button size="small" :disabled="locked">{{ c.image_url ? I18N.t('p.charRefChange') : I18N.t('p.uploadBtn') }}</el-button>
                           </el-upload>
                           <el-button v-if="c.image_url" size="small" type="danger" plain
+                                     :disabled="locked"
                                      @click="removeCharImage(i)">{{ I18N.t('p.charRefDel') }}</el-button>
                         </div>
                         <div class="hint" style="margin-top:4px;">{{ I18N.t('p.charRefHint') }}</div>
@@ -152,28 +166,64 @@ Views.project = {
                     </el-form>
                   </div>
                   <div class="actions" style="margin-top:10px;">
-                    <el-button @click="addChar">{{ I18N.t('p.charAdd') }}</el-button>
+                    <el-button :disabled="locked" @click="addChar">{{ I18N.t('p.charAdd') }}</el-button>
                   </div>
                   <el-empty v-if="!chars.length" :description="I18N.t('p.charsEmpty')" :image-size="48" />
+                </el-card>
+                <!-- ============ 完结：全部季章节完成才可完结；完结后锁定，需解锁才能操作 ============ -->
+                <el-card v-else-if="oSub === 'finish'" shadow="never">
+                  <template #header><b>{{ I18N.t('p.subFinish') }}</b></template>
+                  <p class="hint mb8">{{ I18N.t('p.finishDesc') }}</p>
+                  <p class="muted small mb8">{{ I18N.t('p.finishTotal', totalDoneCount, totalChCount) }}</p>
+                  <el-alert v-if="finishReady" type="success" :closable="false" class="mb8"
+                            :title="I18N.t('p.finishReadyMsg')" />
+                  <div v-for="r in finishRows" :key="r.id" class="finish-row">
+                    <b class="finish-row-name">{{ r.label }}</b>
+                    <span class="muted small">{{ I18N.t('p.finishSeasonProgress', r.done, r.total) }}</span>
+                    <el-tag size="small" :type="r.ok ? 'success' : (r.total === 0 ? 'info' : 'warning')"
+                             effect="light" style="margin-left: auto;">
+                      {{ r.ok ? I18N.t('p.finishTagOk') : (r.total === 0 ? I18N.t('p.finishNoCh') : I18N.t('p.finishTagDoing')) }}
+                    </el-tag>
+                  </div>
+                  <el-empty v-if="!finishRows.length" :description="I18N.t('p.seasonNoChapters')" :image-size="48" />
+                  <div class="actions" style="margin-top: 12px;">
+                    <template v-if="locked">
+                      <el-popconfirm :title="I18N.t('p.unlockConfirm')" @confirm="unlock">
+                        <template #reference>
+                          <el-button type="primary" plain :loading="finishBusy">{{ I18N.t('p.unlockBtn') }}</el-button>
+                        </template>
+                      </el-popconfirm>
+                      <span class="muted small" style="margin-left: 10px;">{{ I18N.t('p.lockedMsg') }}</span>
+                    </template>
+                    <el-tooltip v-else :content="finishIssues || I18N.t('p.finishReadyMsg')" placement="top" :disabled="finishReady">
+                      <span>
+                        <el-popconfirm :title="I18N.t('p.finishConfirm')" @confirm="markFinished">
+                          <template #reference>
+                            <el-button type="primary" :loading="finishBusy" :disabled="!finishReady">{{ I18N.t('p.finishBtn') }}</el-button>
+                          </template>
+                        </el-popconfirm>
+                      </span>
+                    </el-tooltip>
+                  </div>
                 </el-card>
                 <div v-else>
                   <div class="actions outline-bar">
                     <el-popconfirm :title="I18N.t('p.firstImageConfirm')" @confirm="genFirst">
-                      <template #reference><el-button type="primary" :loading="busyFirst">{{ I18N.t('p.genFirst') }}</el-button></template>
+                      <template #reference><el-button type="primary" :loading="busyFirst" :disabled="locked">{{ I18N.t('p.genFirst') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="busyFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
                   <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt"
-                               @preview="openLb([$event], 0)" @reloaded="load" />
+                               :locked="locked" @preview="openLb([$event], 0)" @reloaded="load" />
                 </div>
               </template>
               <!-- ============ 季模式（每季字段：本季大纲 / 季角色 / 章节规划）============ -->
               <template v-else>
                 <el-card v-if="oSub === 'arc'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" @click="openGenDlg('season_arc', I18N.t('p.seasonArcGen'))">{{ I18N.t('p.seasonArcGen') }}</el-button>
+                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_arc', I18N.t('p.seasonArcGen'))">{{ I18N.t('p.seasonArcGen') }}</el-button>
                     <el-popconfirm :title="I18N.t('p.seasonArcSaveConfirm')" @confirm="saveSeasonArc">
-                      <template #reference><el-button :loading="busySave">{{ I18N.t('p.seasonArcSave') }}</el-button></template>
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.seasonArcSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
@@ -188,9 +238,9 @@ Views.project = {
                 </el-card>
                 <el-card v-else-if="oSub === 'chars'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" @click="openGenDlg('season_chars', I18N.t('p.seasonCharsGen'))">{{ I18N.t('p.seasonCharsGen') }}</el-button>
+                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_chars', I18N.t('p.seasonCharsGen'))">{{ I18N.t('p.seasonCharsGen') }}</el-button>
                     <el-popconfirm :title="I18N.t('p.seasonCharsSaveConfirm')" @confirm="saveSeasonChars">
-                      <template #reference><el-button :loading="busySave">{{ I18N.t('p.seasonCharsSave') }}</el-button></template>
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.seasonCharsSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
@@ -216,10 +266,10 @@ Views.project = {
                 <el-card v-else-if="oSub === 'plan'" shadow="never">
                   <div class="actions outline-bar">
                     <el-popconfirm :title="I18N.t('p.chRegenConfirm')" @confirm="planChapters">
-                      <template #reference><el-button type="primary" :loading="actBusy">{{ I18N.t('p.planChapters') }}</el-button></template>
+                      <template #reference><el-button type="primary" :loading="actBusy" :disabled="locked">{{ I18N.t('p.planChapters') }}</el-button></template>
                     </el-popconfirm>
                     <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="savePlan">
-                      <template #reference><el-button :loading="busySave">{{ I18N.t('p.planSave') }}</el-button></template>
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.planSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
@@ -246,13 +296,13 @@ Views.project = {
                   </el-form>
                   <div class="row-between" style="margin-bottom:8px;">
                     <b class="muted small">{{ I18N.t('p.chPlan') }}（{{ seasonChapters.length }}）</b>
-                    <el-button size="small" @click="addChapter">{{ I18N.t('p.addChapter') }}</el-button>
+                    <el-button size="small" :disabled="locked" @click="addChapter">{{ I18N.t('p.addChapter') }}</el-button>
                   </div>
                   <div v-for="(c, i) in planPageChapters" :key="'pl' + c.index" class="plan-row">
                     <span class="plan-idx">{{ planPageStart + i + 1 }}</span>
                     <el-input v-model="c.title" size="small" :placeholder="I18N.t('p.chPlanTitle')" style="width:180px" />
                     <el-input v-model="c.summary" size="small" type="textarea" :rows="2" :placeholder="I18N.t('p.chPlanSummary')" />
-                    <el-button size="small" type="danger" plain @click="delChapter(planPageStart + i)">{{ I18N.t('p.chDelete') }}</el-button>
+                    <el-button size="small" type="danger" plain :disabled="locked" @click="delChapter(planPageStart + i)">{{ I18N.t('p.chDelete') }}</el-button>
                   </div>
                   <div class="md-pager" style="margin-top:8px;" v-if="totalPages > 1">
                     <el-button size="small" :disabled="planPage === 1" @click="planPage--">‹</el-button>
@@ -273,7 +323,7 @@ Views.project = {
             <el-checkbox :model-value="allSelected" @change="toggleAllSelect">{{ I18N.t('p.selAll') }}</el-checkbox>
             <el-popconfirm :title="I18N.t('p.genAllConfirm')" @confirm="genAll">
               <template #reference>
-                <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!seasonChapters.length">
+                <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!seasonChapters.length || locked">
                   {{ selected.length ? I18N.t('p.genAllSel', selected.length) : I18N.t('p.genAll') }}
                 </el-button>
               </template>
@@ -310,7 +360,7 @@ Views.project = {
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :kind="data.project.kind" :project-id="data.project.id"
                               :season-id="seasonId" :season-index="cur"
                               :def-w="oW" :def-h="oH"
-                              :expanded="true" :no-toggle="true"
+                              :expanded="true" :no-toggle="true" :locked="locked"
                               :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
                               @preview="openLb([$event], 0)" @reloaded="onChapterReloaded" />
               <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="54" />
@@ -372,7 +422,12 @@ Views.project = {
             <el-input v-model="rogin" type="textarea" :rows="2" />
           </el-form-item>
           <el-form-item :label="I18N.t('p.resetStyle')">
-            <el-input v-model="rstyle" />
+            <el-select v-model="rstyle" style="width: 100%">
+              <el-option value="" :label="I18N.t('cf.styleAuto')" />
+              <el-option v-for="s in stylePresets" :key="s" :value="s" :label="s" />
+              <el-option value="custom" :label="I18N.t('cf.styleCustom')" />
+            </el-select>
+            <el-input v-if="rstyle === 'custom'" v-model="rstyleCustom" class="mt8" :placeholder="I18N.t('cf.styleCustomPh')" />
           </el-form-item>
         </el-form>
         <el-checkbox v-model="rclear" style="margin-bottom: 4px;">{{ I18N.t('p.resetClear') }}</el-checkbox>
@@ -518,6 +573,48 @@ Views.project = {
     // 季完成 = 本季章节全部生成（派生值，不存储）；空季不算完成
     const seasonCompleted = computed(() => seasonChapters.value.length > 0 && seasonDoneCount.value === seasonChapters.value.length);
 
+    // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各季完成进度
+    const locked = computed(() => (data.value?.project.status) === 'done');
+    const totalChCount = computed(() => (data.value?.chapters || []).length);
+    const totalDoneCount = computed(() => (data.value?.chapters || []).filter(c => c.status === 'done').length);
+    const finishRows = computed(() => (data.value?.seasons || []).map(s => {
+      const chs = (data.value?.chapters || []).filter(c => c.season_id === s.id);
+      const done = chs.filter(c => c.status === 'done').length;
+      return { id: s.id, label: s.title || I18N.t('p.season', s.number),
+               total: chs.length, done, ok: chs.length > 0 && done === chs.length };
+    }));
+    // 可完结 = 每季都有章节且全部已生成（与后端 complete 校验一致）
+    const finishReady = computed(() => finishRows.value.length > 0 && finishRows.value.every(r => r.ok));
+    const finishIssues = computed(() => finishRows.value.filter(r => !r.ok)
+      .map(r => `${r.label}：${r.total === 0 ? I18N.t('p.finishNoCh')
+        : I18N.t('p.finishSeasonProgress', r.done, r.total)}`)
+      .join(I18N.isEn() ? '; ' : '；'));
+    const finishBusy = ref(false);
+    async function markFinished() {
+      finishBusy.value = true;
+      try {
+        await API.post(`/api/projects/${props.id}/complete`);
+        ElementPlus.ElMessage.success(I18N.t('p.msgFinished'));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        finishBusy.value = false;
+        await load();
+      }
+    }
+    async function unlock() {
+      finishBusy.value = true;
+      try {
+        await API.post(`/api/projects/${props.id}/unlock`);
+        ElementPlus.ElMessage.success(I18N.t('p.msgUnlocked'));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        finishBusy.value = false;
+        await load();
+      }
+    }
+
     // 生成弹框（生成大纲 / 生成本季大纲 / 生成角色 共用）：额外提示词
     const genDlg = ref(false);
     const genDlgStep = ref('');   // 'arc' / 'season_arc' / 'chars'
@@ -532,7 +629,10 @@ Views.project = {
     const rtitle = ref('');
     const rogin = ref('');
     const rstyle = ref('');
+    const rstyleCustom = ref('');   // 风格选「自定义」时的描述
     const rclear = ref(false);
+    // 与「新建创作」一致的风格预设下拉
+    const stylePresets = computed(() => [0, 1, 2, 3, 4, 5].map(i => I18N.t('cf.preset.' + i)));
 
     function syncOutlineForm() {
       const p = data.value.project;
@@ -979,7 +1079,16 @@ Views.project = {
     function openReset() {
       rtitle.value = data.value.project.title || '';
       rogin.value = data.value.project.origin || '';
-      rstyle.value = (data.value.project.scope || {}).style || '';
+      // 现有风格：命中预设则选中该预设；否则归入「自定义」并回填原文
+      const cur = (data.value.project.scope || {}).style || '';
+      const presets = stylePresets.value;
+      if (cur && presets.includes(cur)) {
+        rstyle.value = cur; rstyleCustom.value = '';
+      } else if (cur) {
+        rstyle.value = 'custom'; rstyleCustom.value = cur;
+      } else {
+        rstyle.value = ''; rstyleCustom.value = '';
+      }
       rclear.value = false;
       resetDlg.value = true;
     }
@@ -990,7 +1099,8 @@ Views.project = {
       }
       try {
         await API.post(`/api/projects/${props.id}/reset`, {
-          title: rtitle.value, origin: rogin.value, style: rstyle.value,
+          title: rtitle.value, origin: rogin.value,
+          style: rstyle.value === 'custom' ? rstyleCustom.value.trim() : rstyle.value,
           clear_downstream: rclear.value,
         });
         ElementPlus.ElMessage.success(I18N.t('p.resetSaved'));
@@ -1046,10 +1156,11 @@ Views.project = {
       page, totalPages, pageStart, pageChapters,
       planPage, planPageStart, planPageChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
+      locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyFirst, genDescBusy, coverPrompt, progress,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
-      cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rclear, genDlg, genDlgTitle, genDlgExtra,
+      cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,

@@ -683,6 +683,16 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .season-add { color: var(--primary); border-style: dashed; }
 .season-del { color: var(--err); border-style: dashed; }
 
+/* ---------- 完结（锁定）横幅 + 完结页各季进度行 ---------- */
+.finish-banner { margin-bottom: 10px; border-radius: 10px; }
+.finish-banner-body { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.finish-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 2px; border-bottom: 1px dashed var(--line);
+}
+.finish-row:last-of-type { border-bottom: none; }
+.finish-row-name { min-width: 96px; }
+
 /* ---------- 可访问性 / 动效偏好 ---------- */
 button:focus-visible, a:focus-visible, .tnav:focus-visible, .season-item:focus-visible,
 .el-button:focus-visible, .mc-attach:focus-visible {
