@@ -382,6 +382,27 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .ovl-stage img { display: block; width: 100%; height: auto; max-height: 340px; object-fit: contain; pointer-events: none; }
 .ovl-text { position: absolute; pointer-events: none; white-space: nowrap; line-height: 1.15; max-width: 96%; }
 
+/* ---------- 章节预览页签：平铺（小图网格）/ 画廊（大图），无分页 ---------- */
+.pv-grid { display: grid; gap: 10px; }
+.pv-tile { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+.pv-gallery { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.pv-cell { min-width: 0; }
+.pv-cell img {
+  display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in;
+}
+.pv-gallery .pv-cell img { aspect-ratio: auto; max-height: 72vh; object-fit: contain; }
+.pv-ph {
+  width: 100%; aspect-ratio: 2 / 3; background: #fff; border: 1px dashed var(--line);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  color: #ccd0d9; font-size: 20px; font-weight: 600;
+}
+.pv-gallery .pv-ph { aspect-ratio: auto; height: 260px; }
+.pv-cap {
+  margin-top: 4px; font-size: 12px; color: var(--muted); text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* ---------- 章节：主从布局（左竖排章节列表 + 右详情）---------- */
 .md-layout { display: flex; gap: 14px; align-items: flex-start; }
 .md-left {

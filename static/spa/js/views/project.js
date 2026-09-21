@@ -378,6 +378,25 @@ Views.project = {
           </div>
         </el-tab-pane>
 
+        <!-- ============ 预览（当前季全部章节图按顺序排列，无分页；缺图白色占位；点击放大） ============ -->
+        <el-tab-pane :label="I18N.t('p.tabPreview')" name="preview" :disabled="!seasonChapters.length">
+          <div class="actions mb8">
+            <el-radio-group v-model="pvMode" size="small">
+              <el-radio-button value="tile">{{ I18N.t('p.pvTile') }}</el-radio-button>
+              <el-radio-button value="gallery">{{ I18N.t('p.pvGallery') }}</el-radio-button>
+            </el-radio-group>
+            <span class="muted small">{{ I18N.t('p.pvHint', pvUrls.length, seasonChapters.length) }}</span>
+          </div>
+          <div class="pv-grid" :class="'pv-' + pvMode">
+            <div v-for="(it, i) in pvItems" :key="'pv' + it.index" class="pv-cell">
+              <img v-if="it.has" :src="it.url" :alt="it.title || I18N.t('p.ch', it.index + 1)"
+                   loading="lazy" decoding="async" @click="openLb(pvUrls, it.k)">
+              <div v-else class="pv-ph" :title="I18N.t('p.pvMissing')">{{ it.index + 1 }}</div>
+              <div class="pv-cap">{{ i + 1 }}. {{ it.title || I18N.t('p.ch', it.index + 1) }}</div>
+            </div>
+          </div>
+        </el-tab-pane>
+
         <!-- ============ 完成（季作用域：显示当前所选季的完成情况；总体无「本季」，禁用） ============ -->
         <el-tab-pane :label="I18N.t('p.tabDone')" name="done" :disabled="isOverall">
           <el-card shadow="never">
@@ -559,6 +578,17 @@ Views.project = {
       return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
     });
     const seasonDoneCount = computed(() => seasonChapters.value.filter(c => c.status === 'done').length);
+    // 预览页签：平铺 / 画廊；pvItems 带「有图序号 k」（无图章节不进放大列表），缺图白色占位
+    const pvMode = ref('tile');
+    const pvItems = computed(() => {
+      let k = -1;
+      return seasonChapters.value.map(c => {
+        const has = !!(c.media_url || '').trim();
+        if (has) k += 1;
+        return { index: c.index, title: c.title, url: c.media_url || '', has, k };
+      });
+    });
+    const pvUrls = computed(() => pvItems.value.filter(x => x.has).map(x => x.url));
     // 季完成 = 本季章节全部生成（派生值，不存储）；空季不算完成
     const seasonCompleted = computed(() => seasonChapters.value.length > 0 && seasonDoneCount.value === seasonChapters.value.length);
 
@@ -1339,7 +1369,7 @@ Views.project = {
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
-      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle,
+      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
