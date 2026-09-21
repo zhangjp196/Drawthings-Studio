@@ -87,6 +87,7 @@ class Project(Base):
     count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
     count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
     first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面；可选作为第 1 章参考）
+    first_image_base = Column(String(500), default="")     # 封面原图（无叠字）：叠字每次从原图重绘，反复调整不叠加
     cover_as_first_ref = Column(Boolean, default=False)    # 是否把封面作为第 1 章参考（漫画 img2img / 短剧首帧），默认关
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
@@ -113,6 +114,7 @@ class Season(Base):
     arc = Column(Text, default="")                           # 季大纲（本段故事路线，可编辑）
     characters = Column(Text, default="")                    # 本季新增角色（JSON，结构同 project.characters）
     first_image = Column(String(500), default="")             # 季封面（媒体路径，语义同项目封面）
+    first_image_base = Column(String(500), default="")        # 季封面原图（无叠字），同项目封面
     count_mode = Column(String(10), default="auto")          # 本季章节数量：auto | range
     count_min = Column(Integer, default=0)                   # range：最少章节数
     count_max = Column(Integer, default=0)                   # range：最多章节数

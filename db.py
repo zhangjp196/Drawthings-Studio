@@ -80,11 +80,13 @@ def _migrate():
         },
         "seasons": {
             "first_image": "VARCHAR(500) DEFAULT ''",
+            "first_image_base": "VARCHAR(500) DEFAULT ''",
         },
         "projects": {
             "title": "VARCHAR(200) DEFAULT ''",
             "arc": "TEXT DEFAULT ''",
             "first_image": "VARCHAR(500) DEFAULT ''",
+            "first_image_base": "VARCHAR(500) DEFAULT ''",
             "cover_as_first_ref": "INTEGER DEFAULT 0",
             "characters": "TEXT DEFAULT ''",
             "global_prompt": "TEXT DEFAULT ''",

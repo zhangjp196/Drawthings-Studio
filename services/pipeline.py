@@ -1127,8 +1127,9 @@ class Pipeline:
 
     # ---------------- 首图 ----------------
     def set_first_image_path(self, db, project: Project, path: str) -> Project:
-        """记录封面路径（文件已由调用方落盘到 data/media）。"""
+        """记录封面路径（文件已由调用方落盘到 data/media），并把该图存为原图（叠字每次从原图重绘）。"""
         project.first_image = (path or "").strip()
+        project.first_image_base = self._snapshot_base(project.first_image)
         self._save(db, project)
         return project
 
@@ -1138,9 +1139,37 @@ class Pipeline:
         self._save(db, project)
         return project
 
+    @staticmethod
+    def _snapshot_base(path: str) -> str:
+        """把封面复制一份作为「原图」（无叠字）并返回其路径；path 无效返回 ''。"""
+        p = Path(path or "")
+        if not p.is_file():
+            return ""
+        base = p.with_name(f"{p.stem}_base{p.suffix}")
+        if base.resolve() != p.resolve():
+            shutil.copy(p, base)
+        return str(base)
+
+    def _base_or_snapshot(self, display: str, base: str) -> str:
+        """取原图路径：已有原图直接返回；否则把当前封面存为原图（历史数据兼容）。"""
+        b = Path(base or "")
+        if b.is_file():
+            return str(b)
+        return self._snapshot_base(display)
+
+    @staticmethod
+    def _restore_base(display: str, base: str) -> None:
+        """叠字前先用原图覆盖显示图，保证每次都是从原图重绘（不会越叠越多）。"""
+        d, b = Path(display), Path(base or "")
+        if b.is_file() and b.resolve() != d.resolve():
+            shutil.copy(b, d)
+
     def overlay_first_image_title(self, db, project: Project, lang: str = "zh",
                                   opts: dict | None = None) -> Project:
-        """把作品标题叠加到现有封面上（PIL 合成，可指定位置/字号/样式/颜色）；文件就地覆写，不重新生图。"""
+        """把作品标题叠加到现有封面上（可指定位置/字号/样式/颜色）。
+
+        每次从「原图」重新绘制：反复调整参数只会得到最新一次效果，不会层层叠加。
+        文件就地覆写，不重新生图。"""
         path = (project.first_image or "").strip()
         if not path or not Path(path).is_file():
             raise ValueError(L(lang, "暂无封面，请先生成或上传封面",
@@ -1149,17 +1178,28 @@ class Pipeline:
         if not title:
             raise ValueError(L(lang, "作品标题为空，先给作品起个标题再叠加",
                                "The work title is empty — set one first, then overlay"))
+        base = self._base_or_snapshot(path, project.first_image_base)
+        if base:
+            project.first_image_base = base
+            self._restore_base(path, base)
         self._overlay_title(Path(path), title, **(opts or {}))
+        self._save(db, project)
         return project
 
     def overlay_season_first_image_title(self, db, project: Project, season: Season,
                                          lang: str = "zh", opts: dict | None = None) -> Season:
-        """把季名叠加到现有季封面上（PIL 合成，可指定位置/字号/样式/颜色）；文件就地覆写，不重新生图。"""
+        """把季名叠加到现有季封面上（每次从原图重绘，反复调整不叠加）；文件就地覆写，不重新生图。"""
         path = (season.first_image or "").strip()
         if not path or not Path(path).is_file():
             raise ValueError(L(lang, "暂无季封面，请先生成或上传季封面",
                                "No season cover yet — generate or upload one first"))
+        base = self._base_or_snapshot(path, season.first_image_base)
+        if base:
+            season.first_image_base = base
+            self._restore_base(path, base)
         self._overlay_title(Path(path), self._season_label(season, lang), **(opts or {}))
+        season.updated_at = _now()
+        self._save(db, project)
         return season
 
     def set_char_image(self, db, project: Project, char_id: str, path: str) -> Project:
@@ -1268,6 +1308,11 @@ class Pipeline:
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
             shutil.move(str(path), str(dest))
+        # 原图留底（无叠字）：叠字每次都从原图重绘
+        old_base = project.first_image_base or ""
+        project.first_image_base = self._snapshot_base(str(dest))
+        if old_base and Path(old_base).name != Path(project.first_image_base or "").name:
+            self._rm_media(old_base)   # 重新生成后旧原图不再使用（扩展名可能变化）
         if include_title:
             # 勾选「包含标题」：生成后用 PIL 叠加作品名称（纯本地快速操作，无需进线程池）
             self._overlay_title(dest, project.title)
@@ -1277,8 +1322,9 @@ class Pipeline:
 
     # ---------------- 季封面 ----------------
     def set_season_first_image_path(self, db, project: Project, season: Season, path: str) -> Season:
-        """记录季封面路径（文件已由调用方落盘到 data/media）。"""
+        """记录季封面路径（文件已由调用方落盘到 data/media），并把该图存为原图（叠字每次从原图重绘）。"""
         season.first_image = (path or "").strip()
+        season.first_image_base = self._snapshot_base(season.first_image)
         season.updated_at = _now()
         self._save(db, project)
         return season
@@ -1329,6 +1375,11 @@ class Pipeline:
         dest = media_dir / f"seasonfirst_{season.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
             shutil.move(str(path), str(dest))
+        # 原图留底（无叠字）：叠字每次都从原图重绘
+        old_base = season.first_image_base or ""
+        season.first_image_base = self._snapshot_base(str(dest))
+        if old_base and Path(old_base).name != Path(season.first_image_base or "").name:
+            self._rm_media(old_base)
         if include_title:
             # 勾选「包含标题」：生成后用 PIL 叠加季名（纯本地快速操作，无需进线程池）
             self._overlay_title(dest, self._season_label(season, lang))

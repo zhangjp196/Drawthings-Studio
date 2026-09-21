@@ -503,6 +503,7 @@ Views.project = {
             <el-color-picker v-model="ovlDlg.color" />
             <span class="muted small">{{ I18N.t('p.overlayDragHint') }}</span>
           </div>
+          <p class="hint">{{ I18N.t('p.overlayBaseHint') }}</p>
         </div>
         <template #footer>
           <el-button @click="ovlDlg.show = false">{{ I18N.t('common.cancel') }}</el-button>
