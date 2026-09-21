@@ -35,7 +35,7 @@ from i18n import L, lang_of
 from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessage
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
-from services.pipeline import Pipeline, _now, chars_from_raw, run_sync
+from services.pipeline import Pipeline, _now, chars_from_raw, hex_to_rgb, run_sync
 from services.drawthings import DrawThingsClient
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -985,6 +985,27 @@ def _ensure_not_finished(project: Project, lang: str) -> None:
                                      "This work is finished (locked) — click Unlock first"))
 
 
+def _overlay_opts(body: dict) -> dict:
+    """封面标题叠加参数（位置/字号/样式/颜色/底条）；非法值回退默认。"""
+    def _f(v, default, lo, hi):
+        try:
+            return min(hi, max(lo, float(v)))
+        except (TypeError, ValueError):
+            return default
+
+    style = str(body.get("style") or "bold_outline")
+    if style not in ("bold_outline", "outline", "shadow", "plain"):
+        style = "bold_outline"
+    return {
+        "x": _f(body.get("x"), 0.5, 0.0, 1.0),
+        "y": _f(body.get("y"), 1 / 3, 0.0, 1.0),
+        "size_pct": _f(body.get("size_pct"), 8.0, 2.0, 40.0),
+        "style": style,
+        "color": hex_to_rgb(str(body.get("color") or "#ffffff")),
+        "band": bool(body.get("band", True)),
+    }
+
+
 @app.get("/api/projects")
 def projects_list(db: Session = Depends(get_db), page: int = 1, size: int = 10,
                   kind: str = "", status: str = "", q: str = "", sort: str = "desc"):
@@ -1554,7 +1575,8 @@ async def project_first_image_generate(request: Request, project_id: str,
     _ensure_not_finished(project, lang)
     try:
         project = await pipeline.generate_first_image(db, project, str(body.get("prompt") or ""),
-                                                       lang=lang)
+                                                       lang=lang,
+                                                       include_title=bool(body.get("include_title", True)))
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【生成封面】失败：{e}", f"[Generate cover] failed: {e}"))
@@ -1620,7 +1642,8 @@ async def season_first_image_generate(request: Request, project_id: str, season_
     try:
         season = await pipeline.generate_season_first_image(db, project, season,
                                                             str(body.get("prompt") or ""),
-                                                            lang=lang)
+                                                            lang=lang,
+                                                            include_title=bool(body.get("include_title", True)))
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【生成季封面】失败：{e}",
@@ -1629,15 +1652,17 @@ async def season_first_image_generate(request: Request, project_id: str, season_
 
 
 @app.post("/api/projects/{project_id}/first-image/overlay-title")
-def project_first_image_overlay_title(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """把作品标题叠加到现有封面上（PIL 合成；不重新生图）。"""
+async def project_first_image_overlay_title(request: Request, project_id: str,
+                                            db: Session = Depends(get_db)):
+    """把作品标题叠加到现有封面上（PIL 合成；可传位置/字号/样式/颜色；不重新生图）。"""
     lang = _lang(request)
+    body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     try:
-        project = pipeline.overlay_first_image_title(db, project, lang)
+        project = pipeline.overlay_first_image_title(db, project, lang, _overlay_opts(body))
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【叠加标题】失败：{e}", f"[Overlay title] failed: {e}"))
@@ -1645,10 +1670,11 @@ def project_first_image_overlay_title(request: Request, project_id: str, db: Ses
 
 
 @app.post("/api/projects/{project_id}/seasons/{season_id}/first-image/overlay-title")
-def season_first_image_overlay_title(request: Request, project_id: str, season_id: str,
-                                      db: Session = Depends(get_db)):
-    """把季名叠加到现有季封面上（PIL 合成；不重新生图）。"""
+async def season_first_image_overlay_title(request: Request, project_id: str, season_id: str,
+                                           db: Session = Depends(get_db)):
+    """把季名叠加到现有季封面上（PIL 合成；可传位置/字号/样式/颜色；不重新生图）。"""
     lang = _lang(request)
+    body = await _json_body(request)
     project = pipeline.get(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
@@ -1657,7 +1683,7 @@ def season_first_image_overlay_title(request: Request, project_id: str, season_i
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
     _ensure_not_finished(project, lang)
     try:
-        season = pipeline.overlay_season_first_image_title(db, project, season, lang)
+        season = pipeline.overlay_season_first_image_title(db, project, season, lang, _overlay_opts(body))
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【叠加季名】失败：{e}", f"[Overlay season name] failed: {e}"))

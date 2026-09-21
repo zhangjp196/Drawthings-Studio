@@ -8,7 +8,7 @@ Views.firstImage = {
     prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
     locked: { type: Boolean, default: false },   // 作品已完结（锁定）：操作只读
   },
-  emits: ['preview', 'reloaded', 'update:prompt'],
+  emits: ['preview', 'reloaded', 'overlay', 'update:prompt'],
   template: `
     <el-card class="first-card" shadow="never">
       <template #header>
@@ -30,7 +30,7 @@ Views.firstImage = {
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.overlayTitleK') }}</span>
-            <el-button size="small" :loading="ovlBusy" :disabled="locked || !project.first_image_url" @click="onOverlay">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
+            <el-button size="small" :disabled="locked || !project.first_image_url" @click="$emit('overlay')">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>
@@ -46,26 +46,12 @@ Views.firstImage = {
   `,
   setup(props, { emit }) {
     const coverRef = ref(!!props.project.cover_as_first_ref);
-    const ovlBusy = ref(false);
 
     async function onCoverRefChange(v) {
       try {
         await API.post(`/api/projects/${props.projectId}/first-image/ref`, { enabled: !!v });
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
-      }
-    }
-
-    async function onOverlay() {
-      ovlBusy.value = true;
-      try {
-        await API.post(`/api/projects/${props.projectId}/first-image/overlay-title`, {}, 0);
-        ElementPlus.ElMessage.success(I18N.t('p.msgOverlayTitle'));
-        emit('reloaded');
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      } finally {
-        ovlBusy.value = false;
       }
     }
 
@@ -83,6 +69,6 @@ Views.firstImage = {
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
 
-    return { coverRef, ovlBusy, onCoverRefChange, onOverlay, onFile };
+    return { coverRef, onCoverRefChange, onFile };
   },
 };

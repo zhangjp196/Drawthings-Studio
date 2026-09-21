@@ -9,7 +9,7 @@ Views.seasonCover = {
     prompt: { type: String, required: true },        // 生成提示词（v-model:prompt，父组件持有）
     locked: { type: Boolean, default: false },       // 作品已完结（锁定）：操作只读
   },
-  emits: ['preview', 'reloaded', 'update:prompt'],
+  emits: ['preview', 'reloaded', 'overlay', 'update:prompt'],
   template: `
     <el-card class="first-card" shadow="never">
       <template #header>
@@ -31,7 +31,7 @@ Views.seasonCover = {
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.overlayTitleK') }}</span>
-            <el-button size="small" :loading="ovlBusy" :disabled="locked || !season.first_image_url" @click="onOverlay">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
+            <el-button size="small" :disabled="locked || !season.first_image_url" @click="$emit('overlay')">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>
@@ -43,21 +43,6 @@ Views.seasonCover = {
     </el-card>
   `,
   setup(props, { emit }) {
-    const ovlBusy = ref(false);
-
-    async function onOverlay() {
-      ovlBusy.value = true;
-      try {
-        await API.post(`/api/projects/${props.projectId}/seasons/${props.seasonId}/first-image/overlay-title`, {}, 0);
-        ElementPlus.ElMessage.success(I18N.t('p.msgOverlayTitle'));
-        emit('reloaded');
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      } finally {
-        ovlBusy.value = false;
-      }
-    }
-
     function onFile(uploadFile) {
       const file = uploadFile.raw;
       if (!file) return;
@@ -72,6 +57,6 @@ Views.seasonCover = {
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
 
-    return { ovlBusy, onOverlay, onFile };
+    return { onFile };
   },
 };

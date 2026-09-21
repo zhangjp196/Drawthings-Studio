@@ -209,13 +209,12 @@ Views.project = {
                 </el-card>
                 <div v-else>
                   <div class="actions outline-bar">
-                    <el-popconfirm :title="I18N.t('p.firstImageConfirm')" @confirm="genFirst">
-                      <template #reference><el-button type="primary" :loading="busyFirst" :disabled="locked">{{ I18N.t('p.genFirst') }}</el-button></template>
-                    </el-popconfirm>
+                    <el-button type="primary" :loading="busyFirst" :disabled="locked" @click="openCoverGenDlg('project')">{{ I18N.t('p.genFirst') }}</el-button>
                     <span class="muted" v-if="busyFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
                   <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt"
-                               :locked="locked" @preview="openLb([$event], 0)" @reloaded="load" />
+                               :locked="locked" @preview="openLb([$event], 0)" @reloaded="load"
+                               @overlay="openOvlDlg('project')" />
                 </div>
               </template>
               <!-- ============ 季模式（每季字段：本季大纲 / 季角色 / 章节规划）============ -->
@@ -314,14 +313,13 @@ Views.project = {
                 </el-card>
                 <el-card v-else-if="oSub === 'cover'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-popconfirm :title="I18N.t('p.seasonFirstConfirm')" @confirm="genSeasonFirst">
-                      <template #reference><el-button type="primary" :loading="busySeasonFirst" :disabled="locked">{{ I18N.t('p.genSeasonFirst') }}</el-button></template>
-                    </el-popconfirm>
+                    <el-button type="primary" :loading="busySeasonFirst" :disabled="locked" @click="openCoverGenDlg('season')">{{ I18N.t('p.genSeasonFirst') }}</el-button>
                     <span class="muted" v-if="busySeasonFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
                   <season-cover :season="curSeason" :project-id="data.project.id" :season-id="seasonId"
                                 v-model:prompt="seasonCoverPrompt" :locked="locked"
-                                @preview="openLb([$event], 0)" @reloaded="load" />
+                                @preview="openLb([$event], 0)" @reloaded="load"
+                                @overlay="openOvlDlg('season')" />
                 </el-card>
               </template>
             </div>
@@ -462,6 +460,56 @@ Views.project = {
         </template>
       </el-dialog>
 
+      <!-- 生成封面：勾选「包含标题」= 生成后自动叠加作品标题 / 季名 -->
+      <el-dialog v-model="coverGenDlg.show"
+                 :title="coverGenDlg.target === 'season' ? I18N.t('p.genSeasonFirst') : I18N.t('p.genFirst')"
+                 width="440px">
+        <el-checkbox v-model="coverGenDlg.includeTitle">{{ I18N.t('p.includeTitle') }}</el-checkbox>
+        <p class="hint" style="margin-top:8px;">{{ I18N.t('p.includeTitleHint') }}</p>
+        <template #footer>
+          <el-button @click="coverGenDlg.show = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="busyFirst || busySeasonFirst" @click="confirmCoverGen">{{ I18N.t('p.genStart') }}</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 叠加标题：位置（自由拖动）+ 字号 / 样式 / 颜色 / 底条 -->
+      <el-dialog v-model="ovlDlg.show" :title="I18N.t('p.overlayDlgTitle')" width="640px">
+        <div class="ovl-dlg">
+          <div class="ovl-row">
+            <div class="ovl-label">{{ I18N.t('p.overlayPos') }}</div>
+            <div ref="ovlBox" class="ovl-stage" @pointerdown="ovlDragStart" @pointermove="ovlDragMove"
+                 @pointerup="ovlDragEnd" @pointercancel="ovlDragEnd">
+              <img :src="ovlDlg.coverUrl" draggable="false" alt="" />
+              <div class="ovl-text" :style="ovlTextStyle">{{ ovlDlg.titleText }}</div>
+            </div>
+          </div>
+          <div class="ovl-row">
+            <div class="ovl-label">{{ I18N.t('p.overlaySize') }}</div>
+            <el-slider v-model="ovlDlg.sizePct" :min="4" :max="20" :step="1" style="flex:1" />
+            <span class="muted small" style="width:46px;text-align:right;">{{ ovlDlg.sizePct }}%</span>
+          </div>
+          <div class="ovl-row">
+            <div class="ovl-label">{{ I18N.t('p.overlayStyle') }}</div>
+            <el-select v-model="ovlDlg.style" style="width:150px">
+              <el-option value="bold_outline" :label="I18N.t('p.overlayStyleBold')" />
+              <el-option value="outline" :label="I18N.t('p.overlayStyleOutline')" />
+              <el-option value="shadow" :label="I18N.t('p.overlayStyleShadow')" />
+              <el-option value="plain" :label="I18N.t('p.overlayStylePlain')" />
+            </el-select>
+            <el-checkbox v-model="ovlDlg.band" style="margin-left:16px;">{{ I18N.t('p.overlayBand') }}</el-checkbox>
+          </div>
+          <div class="ovl-row">
+            <div class="ovl-label">{{ I18N.t('p.overlayColor') }}</div>
+            <el-color-picker v-model="ovlDlg.color" />
+            <span class="muted small">{{ I18N.t('p.overlayDragHint') }}</span>
+          </div>
+        </div>
+        <template #footer>
+          <el-button @click="ovlDlg.show = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="ovlBusy" @click="applyOvl">{{ I18N.t('p.overlayApply') }}</el-button>
+        </template>
+      </el-dialog>
+
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>
     <div v-else class="page loading"><el-skeleton :rows="6" animated /></div>
@@ -477,6 +525,16 @@ Views.project = {
     const busyGenAll = ref(false);
     const busyFirst = ref(false);
     const busySeasonFirst = ref(false);
+    // 生成封面弹框：包含标题（生成后自动叠加作品标题 / 季名）
+    const coverGenDlg = reactive({ show: false, target: 'project', includeTitle: true });
+    // 叠加标题弹框：位置（自由拖动）/ 字号 / 样式 / 颜色 / 底条
+    const ovlDlg = reactive({ show: false, target: 'project', titleText: '', coverUrl: '',
+                              x: 0.5, y: 1 / 3, sizePct: 8, style: 'bold_outline',
+                              color: '#ffffff', band: true });
+    const ovlBox = ref(null);      // 预览容器（拖动坐标系）
+    const ovlBoxW = ref(300);      // 预览宽度（按比例换算预览字号）
+    const ovlBusy = ref(false);
+    let ovlDragging = false;
     const genDescBusy = ref(null);  // 正在 AI 生成描述的字符 id（null = 空闲）
     const coverPrompt = ref('');   // 封面生成提示词（first-image 子组件持有输入，顶部「生成封面」按钮使用）
     const seasonCoverPrompt = ref('');   // 季封面生成提示词（season-cover 子组件持有输入，季封面子页「生成季封面」按钮使用）
@@ -872,10 +930,11 @@ Views.project = {
         genDescBusy.value = null;
       }
     }
-    async function genFirst() {
+    async function genFirst(includeTitle = true) {
       busyFirst.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/first-image/generate`, { prompt: coverPrompt.value }, 0);
+        await API.post(`/api/projects/${props.id}/first-image/generate`,
+          { prompt: coverPrompt.value, include_title: includeTitle !== false }, 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgFirstGenerated'));
         coverPrompt.value = '';
         await load();
@@ -886,11 +945,11 @@ Views.project = {
         busyFirst.value = false;
       }
     }
-    async function genSeasonFirst() {
+    async function genSeasonFirst(includeTitle = true) {
       busySeasonFirst.value = true;
       try {
         await API.post(`/api/projects/${props.id}/seasons/${seasonId.value}/first-image/generate`,
-          { prompt: seasonCoverPrompt.value }, 0);
+          { prompt: seasonCoverPrompt.value, include_title: includeTitle !== false }, 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgSeasonFirstGenerated'));
         seasonCoverPrompt.value = '';
         await load();
@@ -899,6 +958,94 @@ Views.project = {
         await load();
       } finally {
         busySeasonFirst.value = false;
+      }
+    }
+
+    // ---------------- 生成封面弹框（包含标题勾选） ----------------
+    function openCoverGenDlg(target) {
+      coverGenDlg.target = target;
+      coverGenDlg.includeTitle = true;
+      coverGenDlg.show = true;
+    }
+    function confirmCoverGen() {
+      coverGenDlg.show = false;
+      if (coverGenDlg.target === 'season') genSeasonFirst(coverGenDlg.includeTitle);
+      else genFirst(coverGenDlg.includeTitle);
+    }
+
+    // ---------------- 叠加标题弹框（位置自由拖动 + 字号/样式/颜色） ----------------
+    function openOvlDlg(target) {
+      ovlDlg.target = target;
+      if (target === 'season') {
+        const s = curSeason.value;
+        ovlDlg.titleText = (s && s.title) || I18N.t('p.season', (s && s.number) || 1);
+        ovlDlg.coverUrl = (s && s.first_image_url) || '';
+      } else {
+        ovlDlg.titleText = (data.value && data.value.project.title) || '';
+        ovlDlg.coverUrl = (data.value && data.value.project.first_image_url) || '';
+      }
+      ovlDlg.x = 0.5; ovlDlg.y = 1 / 3; ovlDlg.sizePct = 8;
+      ovlDlg.style = 'bold_outline'; ovlDlg.color = '#ffffff'; ovlDlg.band = true;
+      ovlDlg.show = true;
+      // 弹框渲染后量取预览宽度，用于把字号百分比换算成预览像素
+      setTimeout(syncOvlBoxW, 0);
+    }
+    function syncOvlBoxW() {
+      if (ovlBox.value) ovlBoxW.value = ovlBox.value.clientWidth || ovlBoxW.value;
+    }
+    function ovlDragStart(e) {
+      ovlDragging = true;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { /* 忽略 */ }
+      ovlDragMove(e);
+      e.preventDefault();
+    }
+    function ovlDragMove(e) {
+      if (!ovlDragging || !ovlBox.value) return;
+      const r = ovlBox.value.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      ovlDlg.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      ovlDlg.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    }
+    function ovlDragEnd(e) {
+      ovlDragging = false;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { /* 忽略 */ }
+    }
+    const ovlTextStyle = computed(() => {
+      const fs = Math.max(9, Math.round(ovlBoxW.value * ovlDlg.sizePct / 100));
+      const s = {
+        left: (ovlDlg.x * 100) + '%',
+        top: (ovlDlg.y * 100) + '%',
+        color: ovlDlg.color,
+        fontSize: fs + 'px',
+        transform: 'translate(-50%, -50%)',
+      };
+      if (ovlDlg.style === 'bold_outline') {
+        s.fontWeight = 900;
+        s.textShadow = '0 0 2px #000, 0 0 3px #000, 1px 1px 2px #000, -1px -1px 2px #000';
+      } else if (ovlDlg.style === 'outline') {
+        s.textShadow = '1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000, '
+                     + '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000';
+      } else if (ovlDlg.style === 'shadow') {
+        s.textShadow = '3px 3px 4px rgba(0,0,0,.75)';
+      }
+      return s;
+    });
+    async function applyOvl() {
+      ovlBusy.value = true;
+      const body = { x: ovlDlg.x, y: ovlDlg.y, size_pct: ovlDlg.sizePct,
+                     style: ovlDlg.style, color: ovlDlg.color, band: ovlDlg.band };
+      try {
+        const url = ovlDlg.target === 'season'
+          ? `/api/projects/${props.id}/seasons/${seasonId.value}/first-image/overlay-title`
+          : `/api/projects/${props.id}/first-image/overlay-title`;
+        await API.post(url, body, 0);
+        ElementPlus.ElMessage.success(I18N.t('p.msgOverlayTitle'));
+        ovlDlg.show = false;
+        await load();
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        ovlBusy.value = false;
       }
     }
     async function planChapters() {
@@ -1189,9 +1336,10 @@ Views.project = {
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
+      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, router,

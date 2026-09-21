@@ -370,6 +370,18 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 /* 企划子页动作按钮（放各子页最上面） */
 .outline-bar { margin: 0 0 12px; }
 
+/* ---------- 叠加标题弹框：封面预览 + 标题自由拖动 ---------- */
+.ovl-dlg { display: flex; flex-direction: column; gap: 12px; }
+.ovl-row { display: flex; align-items: center; gap: 12px; }
+.ovl-label { width: 76px; flex-shrink: 0; font-size: 13px; color: var(--muted); }
+.ovl-stage {
+  position: relative; flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden; cursor: crosshair; user-select: none; touch-action: none;
+  background: #101014; line-height: 0;
+}
+.ovl-stage img { display: block; width: 100%; height: auto; max-height: 340px; object-fit: contain; pointer-events: none; }
+.ovl-text { position: absolute; pointer-events: none; white-space: nowrap; line-height: 1.15; max-width: 96%; }
+
 /* ---------- 章节：主从布局（左竖排章节列表 + 右详情）---------- */
 .md-layout { display: flex; gap: 14px; align-items: flex-start; }
 .md-left {

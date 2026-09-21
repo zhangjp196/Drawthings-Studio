@@ -68,6 +68,20 @@ def _cjk_font_path() -> str:
     return _cjk_font
 
 
+def hex_to_rgb(s: str) -> tuple[int, int, int]:
+    """'#rgb' / '#rrggbb'（也接受 '#rrggbbaa'）→ (r,g,b)；非法输入回退白色。"""
+    v = (s or "").strip().lstrip("#")
+    if len(v) == 3:
+        v = "".join(ch * 2 for ch in v)
+    if len(v) not in (6, 8):
+        return (255, 255, 255)
+    try:
+        return (int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16))
+    except ValueError:
+        return (255, 255, 255)
+
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1124,8 +1138,9 @@ class Pipeline:
         self._save(db, project)
         return project
 
-    def overlay_first_image_title(self, db, project: Project, lang: str = "zh") -> Project:
-        """把作品标题叠加到现有封面上（PIL 合成，与自动生成同一套叠加效果）；文件就地覆写，不重新生图。"""
+    def overlay_first_image_title(self, db, project: Project, lang: str = "zh",
+                                  opts: dict | None = None) -> Project:
+        """把作品标题叠加到现有封面上（PIL 合成，可指定位置/字号/样式/颜色）；文件就地覆写，不重新生图。"""
         path = (project.first_image or "").strip()
         if not path or not Path(path).is_file():
             raise ValueError(L(lang, "暂无封面，请先生成或上传封面",
@@ -1134,17 +1149,17 @@ class Pipeline:
         if not title:
             raise ValueError(L(lang, "作品标题为空，先给作品起个标题再叠加",
                                "The work title is empty — set one first, then overlay"))
-        self._overlay_title(Path(path), title)
+        self._overlay_title(Path(path), title, **(opts or {}))
         return project
 
     def overlay_season_first_image_title(self, db, project: Project, season: Season,
-                                         lang: str = "zh") -> Season:
-        """把季名叠加到现有季封面上（PIL 合成）；文件就地覆写，不重新生图。"""
+                                         lang: str = "zh", opts: dict | None = None) -> Season:
+        """把季名叠加到现有季封面上（PIL 合成，可指定位置/字号/样式/颜色）；文件就地覆写，不重新生图。"""
         path = (season.first_image or "").strip()
         if not path or not Path(path).is_file():
             raise ValueError(L(lang, "暂无季封面，请先生成或上传季封面",
                                "No season cover yet — generate or upload one first"))
-        self._overlay_title(Path(path), self._season_label(season, lang))
+        self._overlay_title(Path(path), self._season_label(season, lang), **(opts or {}))
         return season
 
     def set_char_image(self, db, project: Project, char_id: str, path: str) -> Project:
@@ -1161,8 +1176,15 @@ class Pipeline:
                 return project
         raise ValueError("角色不存在（Character not found）")
 
-    def _overlay_title(self, path: Path, title: str) -> None:
-        """自动生成模式：在成品图底部叠加标题文字（半透明底条 + 居中文字）。
+    def _overlay_title(self, path: Path, title: str, x: float = 0.5, y: float = 1 / 3,
+                       size_pct: float = 8.0, style: str = "bold_outline",
+                       color: tuple = (255, 255, 255), band: bool = True) -> None:
+        """在成品图指定位置叠加标题文字（封面自动生成 / 手动叠加共用）。
+
+        - 位置：x / y 为图宽、图高的比例（0~1；默认水平居中、垂直 1/3 处）
+        - 字号：size_pct = 最短边百分比（默认 8%），过宽时自动缩到图宽内
+        - 样式：bold_outline（加粗+深色描边）/ outline（描边）/ shadow（阴影）/ plain（无）
+        - 颜色：color = (r,g,b) 文字颜色；band = 是否画半透明背景底条
 
         用系统中文字体渲染（保持原文，不翻译）；标题为空或字体缺失时静默跳过，
         不影响生成本身。就地覆写 path 文件。"""
@@ -1173,35 +1195,51 @@ class Pipeline:
         from PIL import ImageDraw, ImageFont
         img = Image.open(path).convert("RGBA")
         w, h = img.size
-        # 字号 ≈ 最短边 8%（下限 20px）；标题过宽时逐级缩小到 90% 图宽以内
-        size = max(20, int(min(w, h) * 0.08))
+        size = max(14, int(min(w, h) * float(size_pct) / 100.0))
         font = ImageFont.truetype(font_file, size)
         draw = ImageDraw.Draw(img)
         bbox = draw.textbbox((0, 0), title, font=font)
-        tw = bbox[2] - bbox[0]
-        while tw > w * 0.9 and size > 14:
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        while tw > w * 0.98 and size > 10:      # 标题过宽 → 逐级缩字号（最多接近图宽）
             size = int(size * 0.88)
             font = ImageFont.truetype(font_file, size)
             bbox = draw.textbbox((0, 0), title, font=font)
-            tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        # 底部半透明深色底条（高度取字号 1.9 倍 / 图高 10% / 48px 的较大者）
-        band = max(size * 19 // 10, h // 10, 48)
-        shade = Image.new("RGBA", (w, band), (10, 10, 14, 120))
-        img.alpha_composite(shade, (0, h - band))
-        draw = ImageDraw.Draw(img)
-        draw.text(((w - tw) // 2, h - band + (band - th) // 2 - bbox[1]),
-                  title, font=font, fill=(255, 255, 255, 255),
-                  stroke_width=max(1, size // 18), stroke_fill=(0, 0, 0, 200))
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        cx = int(max(0.0, min(1.0, float(x))) * w)
+        cy = int(max(0.0, min(1.0, float(y))) * h)
+        if band:
+            bh = max(size * 19 // 10, 36)
+            by = int(max(0, min(cy - bh // 2, h - bh)))
+            shade = Image.new("RGBA", (w, bh), (10, 10, 14, 120))
+            img.alpha_composite(shade, (0, by))
+            draw = ImageDraw.Draw(img)
+        px = cx - tw // 2 - bbox[0]
+        py = cy - th // 2 - bbox[1]
+        col = (int(color[0]), int(color[1]), int(color[2]), 255)
+        if style == "shadow":
+            off = max(2, size // 12)
+            draw.text((px + off, py + off), title, font=font, fill=(0, 0, 0, 170))
+            draw.text((px, py), title, font=font, fill=col)
+        elif style == "outline":
+            draw.text((px, py), title, font=font, fill=col,
+                      stroke_width=max(1, size // 18), stroke_fill=(0, 0, 0, 200))
+        elif style == "plain":
+            draw.text((px, py), title, font=font, fill=col)
+        else:  # bold_outline（默认）：同色描边伪加粗 + 深色外描边
+            bold_w = max(2, size // 12)
+            draw.text((px, py), title, font=font, fill=col,
+                      stroke_width=bold_w + 2, stroke_fill=(0, 0, 0, 200))
+            draw.text((px, py), title, font=font, fill=col,
+                      stroke_width=bold_w, stroke_fill=col)
         out = img if path.suffix.lower() == ".png" else img.convert("RGB")
         out.save(path)
 
     async def generate_first_image(self, db, project: Project, prompt: str = "",
-                                   lang: str = "zh") -> Project:
+                                   lang: str = "zh", include_title: bool = True) -> Project:
         """用 DrawThings 生成封面（文生图）。
 
         prompt 为空时（自动模式）让 LLM 结合一句话创意 + 风格 + 故事大纲 + 角色设定
-        自动写封面提示词，并在成品图上用 PIL 叠加作品名称（标题保持原文）。
+        自动写封面提示词；include_title 为真时在成品图上用 PIL 叠加作品名称（标题保持原文）。
         产物存为 data/media/first_<项目id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
@@ -1230,8 +1268,8 @@ class Pipeline:
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
             shutil.move(str(path), str(dest))
-        if auto:
-            # 自动模式：PIL 叠加作品名称（纯本地快速操作，无需进线程池）
+        if include_title:
+            # 勾选「包含标题」：生成后用 PIL 叠加作品名称（纯本地快速操作，无需进线程池）
             self._overlay_title(dest, project.title)
         project.first_image = str(dest)
         self._save(db, project)
@@ -1252,12 +1290,13 @@ class Pipeline:
                                                   f"Season {season.number}")
 
     async def generate_season_first_image(self, db, project: Project, season: Season,
-                                          prompt: str = "", lang: str = "zh") -> Season:
+                                          prompt: str = "", lang: str = "zh",
+                                          include_title: bool = True) -> Season:
         """用 DrawThings 生成季封面（文生图）。
 
         prompt 为空时（自动模式）让 LLM 结合全局一句话创意 + 风格 + 核心角色与
-        季标题/季大纲/季新增角色 自动写季封面提示词，并在成品图上用 PIL 叠加季名
-        （季名为空回退「第N季」，标题保持原文）。
+        季标题/季大纲/季新增角色 自动写季封面提示词；include_title 为真时在成品图上
+        用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。
         产物存为 data/media/seasonfirst_<季id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
@@ -1290,8 +1329,8 @@ class Pipeline:
         dest = media_dir / f"seasonfirst_{season.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
             shutil.move(str(path), str(dest))
-        if auto:
-            # 自动模式：PIL 叠加季名（纯本地快速操作，无需进线程池）
+        if include_title:
+            # 勾选「包含标题」：生成后用 PIL 叠加季名（纯本地快速操作，无需进线程池）
             self._overlay_title(dest, self._season_label(season, lang))
         season.first_image = str(dest)
         season.updated_at = _now()
