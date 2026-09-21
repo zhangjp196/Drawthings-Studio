@@ -311,7 +311,7 @@ Views.project = {
                   </div>
                   <el-empty v-if="!seasonChapters.length" :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
                 </el-card>
-                <el-card v-else-if="oSub === 'cover'" shadow="never">
+                <template v-else-if="oSub === 'cover'">
                   <div class="actions outline-bar">
                     <el-button type="primary" :loading="busySeasonFirst" :disabled="locked" @click="openCoverGenDlg('season')">{{ I18N.t('p.genSeasonFirst') }}</el-button>
                     <span class="muted" v-if="busySeasonFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
@@ -320,7 +320,7 @@ Views.project = {
                                 v-model:prompt="seasonCoverPrompt" :locked="locked"
                                 @preview="openLb([$event], 0)" @reloaded="load"
                                 @overlay="openOvlDlg('season')" />
-                </el-card>
+                </template>
               </template>
             </div>
           </div>
