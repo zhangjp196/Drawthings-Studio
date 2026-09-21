@@ -1280,6 +1280,7 @@ class Pipeline:
 
         prompt 为「额外提示词」：基础提示词始终由 LLM 结合一句话创意 + 风格 + 故事大纲 +
         角色设定自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
+        分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
         include_title 为真时在成品图上用 PIL 叠加作品名称（标题保持原文）。
         产物存为 data/media/first_<项目id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
@@ -1303,8 +1304,12 @@ class Pipeline:
         if not prompt:
             raise RuntimeError(L(lang, "未能获得封面提示词（LLM 无输出），请稍后重试",
                                  "Could not obtain a cover prompt (empty LLM output) — please retry"))
+        # 分辨率统一跟随总体设定（与章节生成一致）
+        w = int(project.res_width or 0)
+        h = int(project.res_height or 0)
+        params = {"width": w, "height": h} if (w and h) else {}
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
-        path = await run_sync(partial(dt.generate_image, prompt))
+        path = await run_sync(partial(dt.generate_image, prompt, params=params))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
@@ -1343,6 +1348,7 @@ class Pipeline:
 
         prompt 为「额外提示词」：基础提示词始终由 LLM 结合全局一句话创意 + 风格 + 核心角色与
         季标题/季大纲/季新增角色自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
+        分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
         include_title 为真时在成品图上用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。
         产物存为 data/media/seasonfirst_<季id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
@@ -1370,8 +1376,12 @@ class Pipeline:
         if not prompt:
             raise RuntimeError(L(lang, "未能获得季封面提示词（LLM 无输出），请稍后重试",
                                   "Could not obtain a season cover prompt (empty LLM output) — please retry"))
+        # 分辨率统一跟随总体设定（与章节生成一致）
+        w = int(project.res_width or 0)
+        h = int(project.res_height or 0)
+        params = {"width": w, "height": h} if (w and h) else {}
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
-        path = await run_sync(partial(dt.generate_image, prompt))
+        path = await run_sync(partial(dt.generate_image, prompt, params=params))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"seasonfirst_{season.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
