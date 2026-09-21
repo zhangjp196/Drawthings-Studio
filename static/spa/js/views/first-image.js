@@ -29,6 +29,10 @@ Views.firstImage = {
             </el-upload>
           </div>
           <div class="frow">
+            <span class="k">{{ I18N.t('p.overlayTitleK') }}</span>
+            <el-button size="small" :loading="ovlBusy" :disabled="locked || !project.first_image_url" @click="onOverlay">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
+          </div>
+          <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>
             <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('p.genPromptPh')"
                       @update:modelValue="(v) => $emit('update:prompt', v)" />
@@ -42,12 +46,26 @@ Views.firstImage = {
   `,
   setup(props, { emit }) {
     const coverRef = ref(!!props.project.cover_as_first_ref);
+    const ovlBusy = ref(false);
 
     async function onCoverRefChange(v) {
       try {
         await API.post(`/api/projects/${props.projectId}/first-image/ref`, { enabled: !!v });
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
+      }
+    }
+
+    async function onOverlay() {
+      ovlBusy.value = true;
+      try {
+        await API.post(`/api/projects/${props.projectId}/first-image/overlay-title`, {}, 0);
+        ElementPlus.ElMessage.success(I18N.t('p.msgOverlayTitle'));
+        emit('reloaded');
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        ovlBusy.value = false;
       }
     }
 
@@ -65,6 +83,6 @@ Views.firstImage = {
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
 
-    return { coverRef, onCoverRefChange, onFile };
+    return { coverRef, ovlBusy, onCoverRefChange, onOverlay, onFile };
   },
 };

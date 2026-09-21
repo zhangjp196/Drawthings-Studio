@@ -1628,6 +1628,42 @@ async def season_first_image_generate(request: Request, project_id: str, season_
     return {"ok": True}
 
 
+@app.post("/api/projects/{project_id}/first-image/overlay-title")
+def project_first_image_overlay_title(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """把作品标题叠加到现有封面上（PIL 合成；不重新生图）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    try:
+        project = pipeline.overlay_first_image_title(db, project, lang)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"【叠加标题】失败：{e}", f"[Overlay title] failed: {e}"))
+    return {"ok": True, "url": _media_url(project.first_image or "")}
+
+
+@app.post("/api/projects/{project_id}/seasons/{season_id}/first-image/overlay-title")
+def season_first_image_overlay_title(request: Request, project_id: str, season_id: str,
+                                      db: Session = Depends(get_db)):
+    """把季名叠加到现有季封面上（PIL 合成；不重新生图）。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline._get_season(db, project, season_id)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+    _ensure_not_finished(project, lang)
+    try:
+        season = pipeline.overlay_season_first_image_title(db, project, season, lang)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"【叠加季名】失败：{e}", f"[Overlay season name] failed: {e}"))
+    return {"ok": True, "url": _media_url(season.first_image or "")}
+
+
 @app.post("/api/projects/{project_id}/characters/{char_id}/image")
 def project_char_image_upload(request: Request, project_id: str, char_id: str,
                               file: UploadFile = File(...), db: Session = Depends(get_db)):

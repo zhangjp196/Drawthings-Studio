@@ -1124,6 +1124,29 @@ class Pipeline:
         self._save(db, project)
         return project
 
+    def overlay_first_image_title(self, db, project: Project, lang: str = "zh") -> Project:
+        """把作品标题叠加到现有封面上（PIL 合成，与自动生成同一套叠加效果）；文件就地覆写，不重新生图。"""
+        path = (project.first_image or "").strip()
+        if not path or not Path(path).is_file():
+            raise ValueError(L(lang, "暂无封面，请先生成或上传封面",
+                               "No cover yet — generate or upload one first"))
+        title = (project.title or "").strip()
+        if not title:
+            raise ValueError(L(lang, "作品标题为空，先给作品起个标题再叠加",
+                               "The work title is empty — set one first, then overlay"))
+        self._overlay_title(Path(path), title)
+        return project
+
+    def overlay_season_first_image_title(self, db, project: Project, season: Season,
+                                         lang: str = "zh") -> Season:
+        """把季名叠加到现有季封面上（PIL 合成）；文件就地覆写，不重新生图。"""
+        path = (season.first_image or "").strip()
+        if not path or not Path(path).is_file():
+            raise ValueError(L(lang, "暂无季封面，请先生成或上传季封面",
+                               "No season cover yet — generate or upload one first"))
+        self._overlay_title(Path(path), self._season_label(season, lang))
+        return season
+
     def set_char_image(self, db, project: Project, char_id: str, path: str) -> Project:
         """设置/清除某角色的参考图（文件已由调用方落盘到 data/media；path 为空 = 清除并删除旧图）。"""
         chars = chars_from_raw(project.characters)

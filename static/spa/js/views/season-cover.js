@@ -30,6 +30,10 @@ Views.seasonCover = {
             </el-upload>
           </div>
           <div class="frow">
+            <span class="k">{{ I18N.t('p.overlayTitleK') }}</span>
+            <el-button size="small" :loading="ovlBusy" :disabled="locked || !season.first_image_url" @click="onOverlay">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
+          </div>
+          <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>
             <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('p.seasonGenPromptPh')"
                       @update:modelValue="(v) => $emit('update:prompt', v)" />
@@ -39,6 +43,21 @@ Views.seasonCover = {
     </el-card>
   `,
   setup(props, { emit }) {
+    const ovlBusy = ref(false);
+
+    async function onOverlay() {
+      ovlBusy.value = true;
+      try {
+        await API.post(`/api/projects/${props.projectId}/seasons/${props.seasonId}/first-image/overlay-title`, {}, 0);
+        ElementPlus.ElMessage.success(I18N.t('p.msgOverlayTitle'));
+        emit('reloaded');
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        ovlBusy.value = false;
+      }
+    }
+
     function onFile(uploadFile) {
       const file = uploadFile.raw;
       if (!file) return;
@@ -53,6 +72,6 @@ Views.seasonCover = {
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
 
-    return { onFile };
+    return { ovlBusy, onOverlay, onFile };
   },
 };
