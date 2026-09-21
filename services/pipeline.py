@@ -1292,16 +1292,33 @@ class Pipeline:
         fname = f"{base}.zip"
         zpath = export_dir / fname
         chars = chars_from_raw(project.characters)
+        # 季封面（总体导出 = 全部季；单季导出 = 仅该季）
+        seasons_all = ([season] if season is not None
+                        else db.query(Season).filter(Season.project_id == project.id)
+                        .order_by(Season.number).all())
+        cover_lines = []
+        if project.first_image and Path(project.first_image).is_file():
+            cover_lines.append(f"项目封面：media/00_first_{Path(project.first_image).name}")
+        for s in seasons_all:
+            if s.first_image and Path(s.first_image).is_file():
+                cover_lines.append(f"第{s.number}季封面：media/00_first_S{s.number}_{Path(s.first_image).name}")
         scope_line = (f"导出范围：第{season.number}季" + (f"（{season.title}）" if season.title else "") + "\n") if season is not None else ""
         readme = (
             f"标题：{project.title}\n类型：{project.kind}\n一句话创意：{project.origin}\n"
             + scope_line +
             f"风格：{scope.get('style', '')}\n主题：{scope.get('theme', '')}\n基调：{scope.get('tone', '')}\n"
-            f"默认分辨率：{project.res_width}×{project.res_height}\n\n"
-            f"角色设定：\n{chars_to_text(chars)}\n\n整体故事大纲：\n{project.arc}\n"
+            f"默认分辨率：{project.res_width}×{project.res_height}\n"
+            + (("\n".join(cover_lines) + "\n") if cover_lines else "") +
+            f"\n角色设定：\n{chars_to_text(chars)}\n\n整体故事大纲：\n{project.arc}\n"
         )
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("README.txt", readme.encode("utf-8"))
+            # 封面排最前（README 之后）：项目封面 + 各季封面
+            if project.first_image and Path(project.first_image).is_file():
+                z.write(project.first_image, f"media/00_first_{Path(project.first_image).name}")
+            for s in seasons_all:
+                if s.first_image and Path(s.first_image).is_file():
+                    z.write(s.first_image, f"media/00_first_S{s.number}_{Path(s.first_image).name}")
             for c in chars:
                 img = (c.get("image") or "").strip()
                 if img and Path(img).is_file():
@@ -1314,15 +1331,6 @@ class Pipeline:
                 z.writestr(f"chapters/{i:02d}.txt", chap_txt.encode("utf-8"))
                 if ch.media_path and Path(ch.media_path).is_file():
                     z.write(ch.media_path, f"media/{i:02d}_{Path(ch.media_path).name}")
-            if project.first_image and Path(project.first_image).is_file():
-                z.write(project.first_image, f"media/00_first_{Path(project.first_image).name}")
-            # 季封面（总体导出 = 全部季；单季导出 = 仅该季）
-            seasons_all = ([season] if season is not None
-                            else db.query(Season).filter(Season.project_id == project.id)
-                            .order_by(Season.number).all())
-            for s in seasons_all:
-                if s.first_image and Path(s.first_image).is_file():
-                    z.write(s.first_image, f"media/00_first_S{s.number}_{Path(s.first_image).name}")
         return str(zpath), fname
 
     def export_pdf(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:
@@ -1331,14 +1339,29 @@ class Pipeline:
         if project.kind != "comic":
             raise ValueError("短剧为视频，暂不支持导出 PDF（可导出 ZIP）")
         chapters = self._season_chapters(db, project, season) if season is not None else self._load_chapters(db, project)
+
+        def _load_img(p: str) -> Image.Image | None:
+            p = (p or "").strip()
+            if p and Path(p).is_file() and Path(p).suffix.lower() in (".png", ".jpg", ".jpeg"):
+                with Image.open(p) as im:      # 及时关闭文件句柄；convert 产生独立图像
+                    return im.convert("RGB")
+            return None
+
+        # 封面页排最前：项目封面 + 各季封面（总体导出 = 全部季；单季导出 = 仅该季）
+        seasons_all = ([season] if season is not None
+                        else db.query(Season).filter(Season.project_id == project.id)
+                        .order_by(Season.number).all())
         imgs = []
+        if (cover := _load_img(project.first_image)) is not None:
+            imgs.append(cover)
+        for s in seasons_all:
+            if (simg := _load_img(s.first_image)) is not None:
+                imgs.append(simg)
         for ch in chapters:
-            mp = (ch.media_path or "").strip()
-            if mp and Path(mp).is_file() and Path(mp).suffix.lower() in (".png", ".jpg", ".jpeg"):
-                with Image.open(mp) as im:      # 及时关闭文件句柄；convert 产生独立图像
-                    imgs.append(im.convert("RGB"))
+            if (im := _load_img(ch.media_path)) is not None:
+                imgs.append(im)
         if not imgs:
-            raise ValueError("没有可导出的章节图片")
+            raise ValueError("没有可导出的图片")
         export_dir = Path(self.data_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
         base = f"{self._safe_name(project)}_{project.id}"
