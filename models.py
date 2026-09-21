@@ -51,7 +51,7 @@ class DrawThingConfig(Base):
     name = Column(String(100), nullable=False)
     base_url = Column(String(500), nullable=False)       # HTTP 端点 URL（http://host:port）
     max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随 app）
-    max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限，跟随 app）
+    max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限/跟随 app；单视频另有 8 秒时长硬上限）
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 

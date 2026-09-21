@@ -189,7 +189,7 @@ Views.configs = {
               <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxFrames')">
-              <el-input-number v-model="f.max_frames" :min="0" :max="2048" :step="1" controls-position="right" style="width: 110px;" />
+              <el-input-number v-model="f.max_frames" :min="0" :max="192" :step="1" controls-position="right" style="width: 110px;" />
               <div class="hint">{{ I18N.t('cfg.maxFramesHint') }}</div>
             </el-form-item>
           </template>

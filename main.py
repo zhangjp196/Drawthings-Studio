@@ -36,7 +36,7 @@ from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessa
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
 from services.pipeline import Pipeline, _now, chars_from_raw, hex_to_rgb, run_sync
-from services.drawthings import DrawThingsClient
+from services.drawthings import DrawThingsClient, MAX_VIDEO_FRAMES
 
 BASE_DIR = Path(__file__).resolve().parent
 MEDIA_DIR = Path(data_dir) / "media"
@@ -173,7 +173,7 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         return v
     return {
         "max_side": int(num("max_side", int, 2048)),
-        "max_frames": int(num("max_frames", int, 2048)),
+        "max_frames": int(num("max_frames", int, MAX_VIDEO_FRAMES)),
     }
 
 

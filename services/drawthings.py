@@ -27,6 +27,8 @@ max_side（最大分辨率，仅最长边）约束：最长边超过上限时等
 未指定分辨率时跟随 app 当前值，若 app 值超过上限同样限幅。
 视频分辨率由 app/视频模型决定（模型专属，不发送 width/height）。
 max_frames 为视频最大帧数上限：实际帧数 = min(app 当前帧数, 上限)。
+单视频另有 8 秒硬上限：按 app 当前 fps 换算成帧数（fps × 8）并限幅，
+fps 读不到时回退 DEFAULT_VIDEO_FPS(24)；任何入口（智能体 / 流水线）生成的视频都不超过该时长。
 """
 import base64
 import io
@@ -64,6 +66,12 @@ def _http_client(base_url: str = "") -> httpx.Client:
 # 视频模型名关键词：子串匹配（无歧义）+ 词元匹配（易混短词，按 _/-/数字 切分后整词比较）
 _VIDEO_SUBSTR = ("video", "svd", "i2v", "t2v", "cogvideo", "sora", "dynami", "kling", "vidu")
 _VIDEO_TOKENS = {"wan", "animate", "motion", "animatediff"}
+
+# 单视频时长硬上限（秒）：上限帧数 = app 当前 fps × 8，保证播出来不超过 8 秒。
+# fps 读不到 / 无效时回退 DEFAULT_VIDEO_FPS；MAX_VIDEO_FRAMES 即回退值（也用作配置输入上限）。
+MAX_VIDEO_SECONDS = 8
+DEFAULT_VIDEO_FPS = 24
+MAX_VIDEO_FRAMES = DEFAULT_VIDEO_FPS * MAX_VIDEO_SECONDS
 
 
 def is_video_model(model_name: str) -> bool:
@@ -187,12 +195,18 @@ class DrawThingsClient:
         if "cfg_scale" in params:
             payload["cfg_scale"] = float(params["cfg_scale"])
         if video:
+            # 帧数来源：调用方 params > 配置上限（与 app 当前帧数取 min）> app 当前帧数；
+            # 最后统一套用 8 秒硬上限（帧数上限 = app 当前 fps × 8，fps 读不到回退 24fps），
+            # 保证任何入口生成的视频播出来都不超过 8 秒。
+            opts = self._http_options()
+            app_frames = int(opts.get("num_frames") or 0)
             if params.get("num_frames") not in (None, ""):
-                payload["num_frames"] = int(params["num_frames"])
+                frames = int(params["num_frames"])
             elif self.max_frames > 0:
-                # 最大帧数上限：实际帧数 = min(app 当前帧数, 上限)；取不到 app 值直接用上限
-                app_frames = int(self._http_options().get("num_frames") or 0)
-                payload["num_frames"] = min(app_frames, self.max_frames) if app_frames else self.max_frames
+                frames = min(app_frames, self.max_frames) if app_frames else self.max_frames
+            else:
+                frames = app_frames
+            payload["num_frames"] = self._cap_video_frames(frames, opts.get("fps"))
             for k in ("motion_scale", "stage_2_steps"):
                 if k in params:
                     payload[k] = int(params[k])
@@ -228,6 +242,22 @@ class DrawThingsClient:
             w = self.max_side if w >= h else w
             h = self.max_side if h > w else h
         return w, h
+
+    @staticmethod
+    def _cap_video_frames(frames: int, fps=0) -> int:
+        """单视频时长硬上限：返回不超过 MAX_VIDEO_SECONDS 的帧数。
+
+        上限 = floor(app 当前 fps × 8)；fps 读不到 / 无效时回退 DEFAULT_VIDEO_FPS(24)。
+        frames <= 0（未指定 / 读不到 app 值）时直接返回上限，确保约束始终生效。
+        """
+        try:
+            f = float(fps or 0)
+        except (TypeError, ValueError):
+            f = 0
+        if f <= 0:
+            f = DEFAULT_VIDEO_FPS
+        cap = max(1, int(MAX_VIDEO_SECONDS * f))
+        return cap if frames <= 0 else min(frames, cap)
 
     def _ref_size(self, ref_path: str, options: dict) -> tuple[int, int]:
         """参考图应缩放到的 (w,h)：app 当前 width/height（>=128 有效），否则参考图自身尺寸。"""

@@ -122,6 +122,8 @@ This repository ships a **Chinese** document and an **English** document (identi
   个性化参数：`max_side`（最大分辨率，仅最长边，具体分辨率由智能体按场景决定、
   最长边超过上限时等比缩小）、`max_frames`（视频最大帧数上限，
   实际帧数 = min(app 当前帧数, 上限)）——**0 = 不限/跟随 app 当前值**。
+  **单视频时长硬上限 8 秒**：按 app 当前 fps 换算成帧数（fps × 8）后强制限幅，
+  fps 读不到时回退 24fps；任何入口（智能体 / 流水线）都不可突破。
   模型不能指定，永远跟随 app 当前选择。
 
 ### 目录结构
@@ -273,6 +275,8 @@ python main.py                # 访问 http://127.0.0.1:8010
 可按需设置：最大分辨率（仅最长边：不限 / 512 / 768 / 1024）、
 最大帧数上限（视频，实际帧数 = min(app 当前帧数, 上限)）
 （**0 = 跟随 app 当前值**）。模型不能指定，永远跟随 app 里当前选中的模型。
+另外，**单视频时长硬上限为 8 秒**：客户端按 app 当前 fps 换算帧数并强制限幅
+（fps 读不到时回退 24fps），不受配置或调用方影响。
 
 > 不使用 gRPC（ImageGenerationService）：app 的 gRPC 服务收到生成请求会闪退，
 > 本应用已移除 gRPC 支持，app 内也请只开启 HTTP 服务器。
