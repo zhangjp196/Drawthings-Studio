@@ -284,6 +284,16 @@ window.I18N = (function () {
       'p.seasonCharsSaveConfirm': '保存季角色？',
       'p.seasonSaved': '本季已保存',
 
+      // 季封面
+      'p.seasonCover': '季封面',
+      'p.seasonCoverHint': '本季封面；可上传，或结合季大纲/季角色用提示词生成（自动模式叠加季名）',
+      'p.noSeasonCover': '暂无季封面',
+      'p.genSeasonFirst': '生成季封面',
+      'p.seasonFirstConfirm': '生成季封面？',
+      'p.seasonGenPromptPh': '留空则由 LLM 结合季大纲/季角色自动撰写（并叠加季名）',
+      'p.msgSeasonFirstUploaded': '季封面已上传',
+      'p.msgSeasonFirstGenerated': '季封面已生成',
+
       'p.subFinish': '完结',
       'p.finishDesc': '当全部季的章节都生成完成后，可点「标记完结」；完结后作品将锁定（只读），点「解锁」才能继续编辑与生成。',
       'p.finishTotal': '全篇已完成 {0}/{1} 章',
@@ -735,6 +745,16 @@ window.I18N = (function () {
       'p.seasonCharsSave': 'Save season characters',
       'p.seasonCharsSaveConfirm': 'Save the season characters?',
       'p.seasonSaved': 'Season saved',
+
+      // Season cover
+      'p.seasonCover': 'Season cover',
+      'p.seasonCoverHint': 'Cover for this season; upload, or generate from a prompt based on the season outline/characters (auto mode overlays the season name)',
+      'p.noSeasonCover': 'No season cover yet',
+      'p.genSeasonFirst': 'Generate season cover',
+      'p.seasonFirstConfirm': 'Generate the season cover?',
+      'p.seasonGenPromptPh': 'Leave empty and the LLM writes it from the season outline/characters (season name is overlaid)',
+      'p.msgSeasonFirstUploaded': 'Season cover uploaded',
+      'p.msgSeasonFirstGenerated': 'Season cover generated',
 
       'p.subFinish': 'Finish',
       'p.finishDesc': 'Once every season\'s chapters are all generated, you can click "Mark as finished". After finishing, the work is locked (read-only) — click "Unlock" to keep editing and generating.',

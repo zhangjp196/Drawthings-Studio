@@ -5,7 +5,7 @@
 window.Views = window.Views || {};
 Views.project = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'chapter-card': Views.chapterCard },
+  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCard },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -75,6 +75,7 @@ Views.project = {
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.seasonChars') }}</button>
                 <button type="button" class="subtabs-item" :class="{ active: oSub === 'plan' }" @click="oSub = 'plan'">{{ I18N.t('p.subPlan') }}</button>
+                <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.seasonCover') }}</button>
               </template>
             </nav>
             <div class="subtabs-body">
@@ -311,6 +312,17 @@ Views.project = {
                   </div>
                   <el-empty v-if="!seasonChapters.length" :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
                 </el-card>
+                <el-card v-else-if="oSub === 'cover'" shadow="never">
+                  <div class="actions outline-bar">
+                    <el-popconfirm :title="I18N.t('p.seasonFirstConfirm')" @confirm="genSeasonFirst">
+                      <template #reference><el-button type="primary" :loading="busySeasonFirst" :disabled="locked">{{ I18N.t('p.genSeasonFirst') }}</el-button></template>
+                    </el-popconfirm>
+                    <span class="muted" v-if="busySeasonFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
+                  </div>
+                  <season-cover :season="curSeason" :project-id="data.project.id" :season-id="seasonId"
+                                v-model:prompt="seasonCoverPrompt" :locked="locked"
+                                @preview="openLb([$event], 0)" @reloaded="load" />
+                </el-card>
               </template>
             </div>
           </div>
@@ -464,8 +476,10 @@ Views.project = {
     const busySave = ref(false);
     const busyGenAll = ref(false);
     const busyFirst = ref(false);
+    const busySeasonFirst = ref(false);
     const genDescBusy = ref(null);  // 正在 AI 生成描述的字符 id（null = 空闲）
     const coverPrompt = ref('');   // 封面生成提示词（first-image 子组件持有输入，顶部「生成封面」按钮使用）
+    const seasonCoverPrompt = ref('');   // 季封面生成提示词（season-cover 子组件持有输入，季封面子页「生成季封面」按钮使用）
     const progress = reactive({ text: '' });
     let sseCtrl = null;            // 当前流式任务（规划/生成）：离开页面或重开时中断，服务端随之清理
 
@@ -565,6 +579,7 @@ Views.project = {
     const seasonTitleText = ref('');
     const seasonChars = ref([]);
     const seasons = computed(() => (data.value?.seasons || []));
+    const curSeason = computed(() => seasons.value.find(x => x.id === seasonId.value) || null);
     const seasonChapters = computed(() => {
       if (isOverall.value) return [];
       return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
@@ -871,6 +886,21 @@ Views.project = {
         busyFirst.value = false;
       }
     }
+    async function genSeasonFirst() {
+      busySeasonFirst.value = true;
+      try {
+        await API.post(`/api/projects/${props.id}/seasons/${seasonId.value}/first-image/generate`,
+          { prompt: seasonCoverPrompt.value }, 0);
+        ElementPlus.ElMessage.success(I18N.t('p.msgSeasonFirstGenerated'));
+        seasonCoverPrompt.value = '';
+        await load();
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+        await load();
+      } finally {
+        busySeasonFirst.value = false;
+      }
+    }
     async function planChapters() {
       // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），SSE 实时逐个补入
       if (!seasonId.value) {
@@ -1157,11 +1187,11 @@ Views.project = {
       planPage, planPageStart, planPageChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
-      selectSeason, addSeason, delSeason, addSeasonChar, delSeasonChar,
-      actBusy, busySave, busyGenAll, busyFirst, genDescBusy, coverPrompt, progress,
+      selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
+      actBusy, busySave, busyGenAll, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, router,

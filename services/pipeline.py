@@ -1138,12 +1138,12 @@ class Pipeline:
                 return project
         raise ValueError("角色不存在（Character not found）")
 
-    def _overlay_cover_title(self, path: Path, project: Project) -> None:
-        """封面自动模式：在成品图底部叠加作品名称（半透明底条 + 居中文字）。
+    def _overlay_title(self, path: Path, title: str) -> None:
+        """自动生成模式：在成品图底部叠加标题文字（半透明底条 + 居中文字）。
 
-        用系统中文字体渲染（保持原文，不翻译）；字体缺失时静默跳过，
+        用系统中文字体渲染（保持原文，不翻译）；标题为空或字体缺失时静默跳过，
         不影响生成本身。就地覆写 path 文件。"""
-        title = (project.title or "").strip()
+        title = (title or "").strip()
         font_file = _cjk_font_path()
         if not title or not font_file:
             return
@@ -1209,10 +1209,71 @@ class Pipeline:
             shutil.move(str(path), str(dest))
         if auto:
             # 自动模式：PIL 叠加作品名称（纯本地快速操作，无需进线程池）
-            self._overlay_cover_title(dest, project)
+            self._overlay_title(dest, project.title)
         project.first_image = str(dest)
         self._save(db, project)
         return project
+
+    # ---------------- 季封面 ----------------
+    def set_season_first_image_path(self, db, project: Project, season: Season, path: str) -> Season:
+        """记录季封面路径（文件已由调用方落盘到 data/media）。"""
+        season.first_image = (path or "").strip()
+        season.updated_at = _now()
+        self._save(db, project)
+        return season
+
+    @staticmethod
+    def _season_label(season: Season, lang: str = "zh") -> str:
+        """季名展示：有季名用季名，否则回退「第N季 / Season N」."""
+        return (season.title or "").strip() or L(lang, f"第{season.number}季",
+                                                  f"Season {season.number}")
+
+    async def generate_season_first_image(self, db, project: Project, season: Season,
+                                          prompt: str = "", lang: str = "zh") -> Season:
+        """用 DrawThings 生成季封面（文生图）。
+
+        prompt 为空时（自动模式）让 LLM 结合全局一句话创意 + 风格 + 核心角色与
+        季标题/季大纲/季新增角色 自动写季封面提示词，并在成品图上用 PIL 叠加季名
+        （季名为空回退「第N季」，标题保持原文）。
+        产物存为 data/media/seasonfirst_<季id>.<ext>（可重复生成覆盖）。"""
+        llm_cfg = self._llm_cfg(db, project, lang)
+        dt = self._clients(db, project, lang)
+        prompt = (prompt or "").strip()
+        auto = not prompt
+        if not prompt:
+            scope = project.scope or {}
+            system = ("你是封面美术提示词作者。请结合一句话创意、风格、角色设定与本季标题/大纲/新增角色，"
+                      "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+                      "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（季名由程序叠加）。")
+            agent = make_agent(build_model(llm_cfg), system)
+            user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
+            chars_text = chars_to_text(chars_from_raw(project.characters))
+            if chars_text:
+                user += f"\n核心角色：{chars_text}"
+            user += f"\n本季：{self._season_label(season, lang)}"
+            if (season.arc or "").strip():
+                user += f"\n季大纲：{season.arc.strip()}"
+            s_chars_text = chars_to_text(chars_from_raw(season.characters))
+            if s_chars_text:
+                user += f"\n本季新增角色：{s_chars_text}"
+            async with agent:
+                prompt = ((await agent.run(user)).output or "").strip()
+        if not prompt:
+            raise RuntimeError(L(lang, "未能获得季封面提示词，请填写后重试",
+                                  "Could not obtain a season cover prompt — please fill one in and retry"))
+        # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
+        path = await run_sync(partial(dt.generate_image, prompt))
+        media_dir = Path(self.data_dir) / "media"
+        dest = media_dir / f"seasonfirst_{season.id}{Path(path).suffix or '.png'}"
+        if Path(path).resolve() != dest.resolve():
+            shutil.move(str(path), str(dest))
+        if auto:
+            # 自动模式：PIL 叠加季名（纯本地快速操作，无需进线程池）
+            self._overlay_title(dest, self._season_label(season, lang))
+        season.first_image = str(dest)
+        season.updated_at = _now()
+        self._save(db, project)
+        return season
 
     # ---------------- 导出（ZIP / PDF） ----------------
     def _safe_name(self, project: Project) -> str:
@@ -1255,6 +1316,13 @@ class Pipeline:
                     z.write(ch.media_path, f"media/{i:02d}_{Path(ch.media_path).name}")
             if project.first_image and Path(project.first_image).is_file():
                 z.write(project.first_image, f"media/00_first_{Path(project.first_image).name}")
+            # 季封面（总体导出 = 全部季；单季导出 = 仅该季）
+            seasons_all = ([season] if season is not None
+                            else db.query(Season).filter(Season.project_id == project.id)
+                            .order_by(Season.number).all())
+            for s in seasons_all:
+                if s.first_image and Path(s.first_image).is_file():
+                    z.write(s.first_image, f"media/00_first_S{s.number}_{Path(s.first_image).name}")
         return str(zpath), fname
 
     def export_pdf(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:

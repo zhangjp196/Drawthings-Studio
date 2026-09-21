@@ -1149,6 +1149,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             {
                 "id": s.id, "number": s.number, "title": s.title or "",
                 "arc": s.arc or "",
+                "first_image_url": _media_url(s.first_image or ""),
                 "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
                                  "image_url": _media_url(c["image"])}
                                 for c in chars_from_raw(s.characters)],
@@ -1571,6 +1572,60 @@ async def project_cover_ref(request: Request, project_id: str, db: Session = Dep
     _ensure_not_finished(project, lang)
     pipeline.set_cover_ref(db, project, bool(body.get("enabled")))
     return {"ok": True, "enabled": bool(body.get("enabled"))}
+
+
+# ---------------- 季封面 ----------------
+@app.post("/api/projects/{project_id}/seasons/{season_id}/first-image")
+def season_first_image_upload(request: Request, project_id: str, season_id: str,
+                              file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """上传季封面。"""
+    lang = _lang(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline._get_season(db, project, season_id)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+    _ensure_not_finished(project, lang)
+    data = file.file.read(MAX_IMAGE_UPLOAD + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
+    if len(data) > MAX_IMAGE_UPLOAD:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "文件过大（上限 20MB）", "File too large (20MB max)"))
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请上传图片文件（png/jpg/webp/gif）",
+                                     "Please upload an image file (png/jpg/webp/gif)"))
+    dest = MEDIA_DIR / f"seasonfirst_{season.id}{ext}"
+    dest.write_bytes(data)
+    pipeline.set_season_first_image_path(db, project, season, str(dest))
+    return {"ok": True, "url": _media_url(str(dest))}
+
+
+@app.post("/api/projects/{project_id}/seasons/{season_id}/first-image/generate")
+async def season_first_image_generate(request: Request, project_id: str, season_id: str,
+                                      db: Session = Depends(get_db)):
+    """提示词生成季封面（prompt 为空时由 LLM 依据季大纲/季角色自动撰写并叠加季名）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline._get_season(db, project, season_id)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+    _ensure_not_finished(project, lang)
+    try:
+        season = await pipeline.generate_season_first_image(db, project, season,
+                                                            str(body.get("prompt") or ""),
+                                                            lang=lang)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"【生成季封面】失败：{e}",
+                                     f"[Generate season cover] failed: {e}"))
+    return {"ok": True}
 
 
 @app.post("/api/projects/{project_id}/characters/{char_id}/image")

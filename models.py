@@ -112,6 +112,7 @@ class Season(Base):
     title = Column(String(200), default="")                 # 季名（如「赛亚人篇」，空=第N季）
     arc = Column(Text, default="")                           # 季大纲（本段故事路线，可编辑）
     characters = Column(Text, default="")                    # 本季新增角色（JSON，结构同 project.characters）
+    first_image = Column(String(500), default="")             # 季封面（媒体路径，语义同项目封面）
     count_mode = Column(String(10), default="auto")          # 本季章节数量：auto | range
     count_min = Column(Integer, default=0)                   # range：最少章节数
     count_max = Column(Integer, default=0)                   # range：最多章节数

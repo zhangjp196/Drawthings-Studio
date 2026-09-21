@@ -78,6 +78,9 @@ def _migrate():
             "summary": "TEXT DEFAULT ''",
             "season_id": "VARCHAR(12)",
         },
+        "seasons": {
+            "first_image": "VARCHAR(500) DEFAULT ''",
+        },
         "projects": {
             "title": "VARCHAR(200) DEFAULT ''",
             "arc": "TEXT DEFAULT ''",
