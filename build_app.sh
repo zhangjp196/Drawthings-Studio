@@ -23,26 +23,13 @@ sips -z 512 512   assets/icon_1024.png --out "$ICONSET/icon_512x512.png"   >/dev
 sips -z 1024 1024 assets/icon_1024.png --out "$ICONSET/icon_512x512@2x.png" >/dev/null
 iconutil -c icns "$ICONSET" -o assets/Drawthings.icns
 
-echo "==> 2/3 PyInstaller 打包"
-rm -rf dist build "$APP_NAME.spec"
-"$PY" -m PyInstaller --noconfirm \
-  --name "$APP_NAME" \
-  --onedir \
-  --windowed \
-  --icon assets/Drawthings.icns \
-  --osx-bundle-identifier "com.drawthings.studio" \
-  --add-data "static:static" \
-  --collect-all pywebview \
-  --hidden-import drawthings_py \
-  --exclude-module tkinter \
-  --exclude-module logfire \
-  --copy-metadata genai_prices \
-  --copy-metadata pydantic_ai_slim \
-  --copy-metadata pydantic_ai \
-  --copy-metadata pydantic_graph \
-  --copy-metadata pydantic_evals \
-  --copy-metadata logfire_api \
-  app.py
+echo "==> 2/3 PyInstaller 打包（依据 \"$APP_NAME.spec\"，spec 为构建唯一依据，勿单独加参数）"
+# 清空旧产物：Finder / Spotlight 可能并发重建 .DS_Store 导致一次性 rm 失败，重试几次
+for _ in 1 2 3 4 5; do
+  rm -rf dist build && break
+  sleep 1
+done
+"$PY" -m PyInstaller --noconfirm "$APP_NAME.spec"
 
 echo "==> 3/3 完成"
 echo "✅ dist/$APP_NAME.app（双击运行，或拖到 应用程序 文件夹）"

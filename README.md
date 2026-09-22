@@ -148,6 +148,7 @@ This repository ships a **Chinese** document and an **English** document (identi
 ├── i18n.py              # 后端中英文本地化（Accept-Language → zh|en + L() 文案助手）
 ├── build_app.sh         # 一键打包 .app（PyInstaller）
 ├── build_dmg.sh         # 一键打包可发布 DMG（.app + 应用程序替身，可选签名/公证）
+├── Drawthings Studio.spec  # PyInstaller 构建配置（资源/图标/排除模块/元数据；打包唯一依据）
 ├── tools/make_icon.py   # 生成应用图标（紫色渐变圆角方块 + 四角星）
 ├── requirements.txt
 ├── services/
@@ -264,6 +265,9 @@ python client.py             # 自动拉起本地服务 + 打开原生窗口（m
 
 - **统一入口 `app.py`**：PyInstaller 的打包目标；无参数 = 桌面客户端（自动拉起服务），
   `--server` = 服务模式（客户端以此拉子进程，无需外置 Python）。
+- **构建配置 `Drawthings Studio.spec`**：打包的**唯一依据**——资源（`static/`）、图标、
+  排除模块（`tkinter` / `logfire`）、`copy_metadata`（genai_prices / pydantic_ai_slim 等）与 BUNDLE 标识都在其中；
+  `build_app.sh` 直接按 spec 打包，**要改打包参数请改 spec**（不要再加命令行参数）。
 - **资源 / 数据分离**：`static/` 打进 bundle（只读）；数据（SQLite + 媒体）在
   `~/Library/Application Support/Drawthings Studio/data`（源码模式仍为 `<项目根>/data`，两者互不影响）。
 - **ffmpeg** 未打包：视频末帧抽取依赖系统 `ffmpeg`（`brew install ffmpeg`），缺失时自动降级、不影响其余功能。
@@ -478,6 +482,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── i18n.py              # backend zh/en localization (Accept-Language → zh|en + L() text helper)
 ├── build_app.sh         # one-step .app packaging (PyInstaller)
 ├── build_dmg.sh         # one-step distributable DMG (.app + Applications alias, optional sign/notarize)
+├── Drawthings Studio.spec  # PyInstaller build config (resources/icon/excludes/metadata; single source of truth)
 ├── tools/make_icon.py   # app icon generator (purple gradient rounded square + four-point star)
 ├── requirements.txt
 ├── services/
@@ -594,6 +599,9 @@ The client + server can be packaged as a standard macOS app (with icon, double-c
 
 - **Unified entry `app.py`**: the PyInstaller target; no args = desktop client (auto-starts the server),
   `--server` = server mode (the client spawns it as a subprocess — no external Python needed).
+- **Build config `Drawthings Studio.spec`**: the **single source of truth** for packaging — resources (`static/`), the icon,
+  excluded modules (`tkinter` / `logfire`), `copy_metadata` (genai_prices / pydantic_ai_slim, etc.) and the BUNDLE identifier all live here;
+  `build_app.sh` builds straight from the spec, so **change packaging options in the spec** (not via extra CLI flags).
 - **Resources / data separation**: `static/` is baked into the bundle (read-only); data (SQLite + media) lives in
   `~/Library/Application Support/Drawthings Studio/data` (source mode stays `<project root>/data`; the two don't affect each other).
 - **ffmpeg** is not bundled: last-frame extraction relies on the system `ffmpeg` (`brew install ffmpeg`); it degrades gracefully when missing.
