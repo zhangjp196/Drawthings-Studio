@@ -61,6 +61,26 @@ def cap_size(w: int, h: int, max_side: int) -> tuple[int, int]:
     return w, h
 
 
+def frame_step_for(model: str) -> int:
+    """视频模型的合法帧数步长：合法帧数 = step×n + 1（LTX 为 8n+1，Wan/Hunyuan 等为 4n+1）。"""
+    n = (model or "").lower()
+    if "ltx" in n:
+        return 8
+    if any(k in n for k in ("wan", "hunyuan", "svd", "i2v", "t2v", "cogvideo",
+                            "mochi", "framepack", "animatediff", "dynamicrafter")):
+        return 4
+    return 1
+
+
+def snap_frames(frames: int, step: int, mode: str = "nearest") -> int:
+    """把帧数吸附到合法值（step×n + 1）：mode = nearest（就近）| floor（不超过）。"""
+    frames = max(1, int(frames))
+    if step <= 1 or frames <= 1:
+        return frames
+    k = round((frames - 1) / step) if mode == "nearest" else (frames - 1) // step
+    return max(1, step * int(k) + 1)
+
+
 def extract_last_frame(video_path: str, media_dir: Path) -> str | None:
     """上一段视频 → 末帧图（供下一段参考 / 喂多模态 LLM）。
 
@@ -304,19 +324,31 @@ class DrawThingsClient:
             if w and h:
                 cfg["width"], cfg["height"] = w, h
         else:
-            # 帧数 = 调用方 params > 预设，受 max_seconds（秒 × 帧率）与「8 秒硬上限」（fps×8）双重约束
+            # 时长（秒）：调用方/LLM 指定 > 配置上限（0=不限→内置上限）> 内置上限；
+            # 三者都受「内置 8 秒上限」约束；帧数 = min(秒数 × 帧率, 预设帧数)。
+            cap_sec = self.max_seconds if self.max_seconds > 0 else MAX_VIDEO_SECONDS
+            cap_sec = min(cap_sec, MAX_VIDEO_SECONDS)
             try:
-                frames = int(cfg["num_frames"] or 0)
+                req_sec = float(params.get("seconds") or 0)
+            except (TypeError, ValueError):
+                req_sec = 0
+            sec = req_sec if req_sec > 0 else float(cap_sec)
+            sec = max(1.0, min(sec, float(cap_sec)))
+            step = frame_step_for(model)
+            frames = snap_frames(max(1, int(sec * fps)), step, "nearest")
+            try:
+                preset_frames = int(cfg["num_frames"] or 0)
             except Exception:
-                frames = 0
+                preset_frames = 0
+            if preset_frames > 0:
+                frames = min(frames, snap_frames(preset_frames, step, "floor"))
             if params.get("num_frames"):
                 frames = int(params["num_frames"])
-            if self.max_seconds > 0:
-                sec_cap = max(1, int(self.max_seconds * fps))
-                frames = min(frames, sec_cap) if frames > 0 else sec_cap
             hard = max(1, int(fps * MAX_VIDEO_SECONDS))
-            frames = min(frames, hard) if frames > 0 else hard
-            cfg["num_frames"] = frames
+            if frames > hard:
+                frames = snap_frames(hard, step, "floor")   # 硬上限以下的最大合法帧数
+            frames = min(frames, hard)
+            cfg["num_frames"] = max(1, frames)
             # 视频分辨率也受 max_side 限幅（可显著降低显存/耗时；0 = 用预设尺寸）
             if self.max_side:
                 try:

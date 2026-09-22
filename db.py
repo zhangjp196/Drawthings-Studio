@@ -70,7 +70,7 @@ def _migrate():
         },
         "drawthing_configs": {
             "max_side": "INTEGER DEFAULT 0",
-            "max_seconds": "INTEGER DEFAULT 5",
+            "max_seconds": "INTEGER DEFAULT 8",
             "model_image": "VARCHAR(200) DEFAULT ''",
             "model_video": "VARCHAR(200) DEFAULT ''",
         },

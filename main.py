@@ -1086,9 +1086,16 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                      f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
                      f"用户未指定时 width/height 传 0。")
         default_media = "video" if can_video else "image"
+        sec_hint = ""
+        if can_video:
+            cap = int(getattr(dt_cfg, "max_seconds", 0) or 0) or MAX_VIDEO_SECONDS
+            cap = min(cap, MAX_VIDEO_SECONDS)
+            sec_hint = (f"生成视频时用 seconds 参数指定时长（秒，1~{cap}；用户未指定时传 0 = 用 {cap} 秒），"
+                        f"单段视频最长 {cap} 秒。")
         instructions = MC_SYSTEM + (
             f"当前只能生成：{avail}。调用 generate_media 时必须用 media 参数指明类型"
-            f"（图片传 media=\"image\"，视频传 media=\"video\"）；用户未明确时默认用 {default_media}。" + ratio)
+            f"（图片传 media=\"image\"，视频传 media=\"video\"）；用户未明确时默认用 {default_media}。"
+            + sec_hint + ratio)
     else:
         instructions = MC_SYSTEM + "当前未配置生成服务，无法出图/出视频：用户要求生成时，请说明暂时无法生成，" \
                                    "但可以代为撰写详细的英文提示词供其后续使用。"
@@ -1113,7 +1120,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                 if dt:
                     @agent.tool
                     async def generate_media(ctx: RunContext, prompt: str, media: str = "",
-                                             width: int = 0, height: int = 0) -> str:
+                                             width: int = 0, height: int = 0, seconds: int = 0) -> str:
                         """生成图片或视频：根据详细英文提示词产出单张图或单个视频。
 
                         Args:
@@ -1121,6 +1128,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             media: 产出类型："image" 生成图片 / "video" 生成视频（用户未明确时可留空）
                             width: 图片宽（64 的倍数；用户未指定比例时传 0）
                             height: 图片高（64 的倍数；用户未指定比例时传 0）
+                            seconds: 视频时长（秒，1~上限；用户未指定时传 0 = 用配置上限）
                         """
                         kind = (media or "").strip().lower()
                         if kind not in ("image", "video"):
@@ -1134,8 +1142,13 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             return f"生成失败：{msg}"
                         # 提示词随工具事件立即下发：生成期间（可达数十秒）气泡内先展示提示词，媒体就绪后同块出现
                         tid = f"t{next(tool_ids)}"
-                        label = L(lang, "正在生成图像…", "Generating image…") if kind == "image" \
-                            else L(lang, "正在生成视频…", "Generating video…")
+                        if kind == "image":
+                            label = L(lang, "正在生成图像…", "Generating image…")
+                        elif seconds:
+                            label = L(lang, f"正在生成视频（约 {int(seconds)} 秒）…",
+                                      f"Generating video (~{int(seconds)}s)…")
+                        else:
+                            label = L(lang, "正在生成视频…", "Generating video…")
                         block = {"type": "tool", "id": tid, "label": label, "prompt": prompt,
                                  "status": "running", "media": kind, "url": "", "message": ""}
                         parts.append(block)
@@ -1143,6 +1156,8 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                         params = {}
                         if width and height:
                             params = {"width": int(width), "height": int(height)}
+                        if kind == "video" and seconds:
+                            params["seconds"] = int(seconds)
                         try:
                             if kind == "image":
                                 path = await run_sync(partial(dt.generate_image, prompt, params=params))

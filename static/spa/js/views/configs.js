@@ -231,7 +231,7 @@ Views.configs = {
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
       supports_vision: 'yes', thinking: 'default', thinking_param: 'auto',
-      model_image: '', model_video: '', max_side: 0, max_seconds: 5,
+      model_image: '', model_video: '', max_side: 0, max_seconds: 8,
     });
     const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
     const loadingDtModels = ref(false);
@@ -325,7 +325,7 @@ Views.configs = {
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
         thinking: 'default', thinking_param: 'auto',
-        model_image: '', model_video: '', max_side: 0, max_seconds: 5,
+        model_image: '', model_video: '', max_side: 0, max_seconds: 8,
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -338,7 +338,7 @@ Views.configs = {
           config_type: 'drawthings', name: row.name, base_url: row.base_url,
           model_image: row.model_image || '', model_video: row.model_video || '',
           max_side: row.max_side || 0,
-          max_seconds: row.max_seconds == null ? 5 : row.max_seconds,
+          max_seconds: row.max_seconds == null ? 8 : row.max_seconds,
         });
         if (row.base_url) fetchDtModels();  // 预取已下载模型
       } else {

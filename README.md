@@ -129,7 +129,7 @@ This repository ships a **Chinese** document and an **English** document (identi
   **图像模型 / 视频模型**（`model_image` / `model_video`，各可空、至少填一个；点「获取模型」从 app 读取已下载模型）。
   生成参数（预设）按模型名**自动推断**，无需填写。所有项目/作品可选任意 DrawThings 配置。
   个性化参数：`max_side`（最大分辨率，仅最长边，图片与视频都限幅）、
-  `max_seconds`（视频最大时长，秒；帧数 = min(预设帧数, 秒数 × 帧率)，默认 5 秒）——**0 = 不限**。
+  `max_seconds`（视频最大时长，秒，**默认 8 = 内置上限**，0 = 用内置上限）——实际时长可由模型在生成时按用户要求决定（不超过上限）。
   **单视频时长硬上限 8 秒**：按 fps 换算成帧数（fps × 8）后强制限幅。
 
 ### 目录结构
@@ -265,7 +265,9 @@ HTTP API 已移除：它对视频模型只返回单帧 PNG，无法出视频。
 - 分辨率：图片 = 调用方（智能体）决定 > 预设，受 `max_side`（最长边）限幅；**视频同样受 `max_side` 限幅**
   （0 = 用预设尺寸。LTX 预设默认 1280×768，很吃显存，实测 25 帧 >10 分钟；建议 `max_side=768` → 768×448，
   25 帧约 90 秒）。
-- 时长 = `max_seconds`（默认 5 秒，0 = 不限）：帧数 = min(预设帧数, 秒数 × 帧率)，并受 **8 秒硬上限**（fps × 8）约束。
+- 时长：配置 `max_seconds`（**默认 8 = 内置上限**，0 = 用内置上限）为上限；**模型可在生成时按用户要求决定更短的时长**
+  （微创作工具带 `seconds` 参数）。帧数 = 秒数 × 帧率，并吸附到该模型的**合法帧数**（LTX 为 `8n+1`、Wan/Hunyuan 等为 `4n+1`），
+  再受预设帧数与 **8 秒内置上限**约束。（例：LTX 预设 fps=5 时 5s=25 帧、6.6s=33 帧，8s 因 8n+1 约束实际取 33 帧。）
 - 连续性参考：漫画沿用上一张图、短剧沿用上一段视频末帧（客户端自动抽取）。
 
 分辨率优先级（项目）：章节自身的宽/高 > 大纲里的**默认分辨率** > 智能体在剧本阶段按场景构图决定
@@ -393,7 +395,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   "Fetch models" to read the downloaded models from the app). The generation preset (steps / sampler / size) is
   **inferred from the model name**, no input needed. Any project/work can use any Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
-  `max_seconds` (max video duration in seconds; frames = min(preset frames, seconds × fps), default 5) — **0 = unlimited**.
+  `max_seconds` (max video duration in seconds; **default 8 = built-in cap**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap).
   There is also a **hard 8-second cap** on a single video (frames = fps × 8).
 
 ### Directory structure
@@ -532,7 +534,7 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 - Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
   → 768×448, ~90 s for 25 frames).
-- Duration = `max_seconds` (default 5s, 0 = unlimited): frames = min(preset frames, seconds × fps), also bounded by the **hard 8-second cap** (fps × 8).
+- Duration: the config's `max_seconds` (**default 8 = built-in cap**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), then bounded by the preset frame count and the **built-in 8s cap**. (E.g. with the LTX preset at fps=5: 5s = 25 frames, 6.6s = 33 frames; 8s actually yields 33 frames due to the 8n+1 constraint.)
 - Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically).
 
 Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's
