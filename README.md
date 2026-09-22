@@ -130,7 +130,7 @@ This repository ships a **Chinese** document and an **English** document (identi
   与 **图像预设 / 视频预设**（`preset_image` / `preset_video`，drawthings-py 预设，提供 steps / sampler / 尺寸等；
   可空则按模型名推断）。所有项目/作品可选任意 DrawThings 配置。
   个性化参数：`max_side`（最大分辨率，仅最长边，图片与视频都限幅）、
-  `max_frames`（视频最大帧数上限，实际帧数 = min(预设/调用方帧数, 上限)）——**0 = 不限**。
+  `max_seconds`（视频最大时长，秒；帧数 = min(预设帧数, 秒数 × 帧率)，默认 5 秒）——**0 = 不限**。
   **单视频时长硬上限 8 秒**：按 fps 换算成帧数（fps × 8）后强制限幅。
 
 ### 目录结构
@@ -266,7 +266,7 @@ HTTP API 已移除：它对视频模型只返回单帧 PNG，无法出视频。
 - 分辨率：图片 = 调用方（智能体）决定 > 预设，受 `max_side`（最长边）限幅；**视频同样受 `max_side` 限幅**
   （0 = 用预设尺寸。LTX 预设默认 1280×768，很吃显存，实测 25 帧 >10 分钟；建议 `max_side=768` → 768×448，
   25 帧约 90 秒）。
-- 帧数 = 预设帧数，受 `max_frames` 上限与 **8 秒硬上限**（fps × 8）双重约束（`max_frames=0` = 不限）。
+- 时长 = `max_seconds`（默认 5 秒，0 = 不限）：帧数 = min(预设帧数, 秒数 × 帧率)，并受 **8 秒硬上限**（fps × 8）约束。
 - 连续性参考：漫画沿用上一张图、短剧沿用上一段视频末帧（客户端自动抽取）。
 
 分辨率优先级（项目）：章节自身的宽/高 > 大纲里的**默认分辨率** > 智能体在剧本阶段按场景构图决定
@@ -395,7 +395,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   (`preset_image` / `preset_video`, drawthings-py presets supplying steps / sampler / size etc.; inferred from the model
   name when empty). Any project/work can use any Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
-  `max_frames` (max video frame cap; actual frames = min(preset/caller frames, cap)) — **0 = unlimited**.
+  `max_seconds` (max video duration in seconds; frames = min(preset frames, seconds × fps), default 5) — **0 = unlimited**.
   There is also a **hard 8-second cap** on a single video (frames = fps × 8).
 
 ### Directory structure
@@ -533,7 +533,7 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 - Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
   → 768×448, ~90 s for 25 frames).
-- Frames = the preset's frame count, bounded by `max_frames` and the **hard 8-second cap** (fps × 8); `max_frames=0` = unlimited.
+- Duration = `max_seconds` (default 5s, 0 = unlimited): frames = min(preset frames, seconds × fps), also bounded by the **hard 8-second cap** (fps × 8).
 - Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically).
 
 Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's

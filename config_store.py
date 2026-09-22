@@ -88,7 +88,7 @@ class ConfigStore:
 
     # ---------------- DrawThings 配置（HTTP 协议；个性化参数 0/空 = 跟随 app）----------------
     def create_drawthing(self, name, base_url, **gen) -> DrawThingConfig:
-        """gen：width/height/max_frames 个性化参数。"""
+        """gen：max_side / max_seconds 等个性化参数。"""
         cfg = DrawThingConfig(
             id=uuid.uuid4().hex[:12],
             name=name,

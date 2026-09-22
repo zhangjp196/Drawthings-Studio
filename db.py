@@ -70,7 +70,7 @@ def _migrate():
         },
         "drawthing_configs": {
             "max_side": "INTEGER DEFAULT 0",
-            "max_frames": "INTEGER DEFAULT 0",
+            "max_seconds": "INTEGER DEFAULT 5",
             "model_image": "VARCHAR(200) DEFAULT ''",
             "model_video": "VARCHAR(200) DEFAULT ''",
             "preset_image": "VARCHAR(64) DEFAULT ''",
@@ -136,6 +136,7 @@ def _migrate():
             "drawthing_configs": ("mode", "protocol", "shared_secret", "model_name", "media_type",
                                   "transport",  # 已移除：只保留 gRPC
                                   "model", "preset",  # 已拆分为 model_image/model_video 与 preset_image/preset_video
+                                  "max_frames",  # 已改为 max_seconds（秒）
                                   "steps", "guidance_scale", "num_frames", "fps",
                                   "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）
             "micro_works": ("media_type",),  # 产出类型改由 app 当前模型自动判断

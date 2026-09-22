@@ -10,7 +10,7 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
 - 模型清单可从 app 读取（`get_models`，需 refresh_cache），生成前会校验模型已下载。
 
 图像分辨率：调用方 params > 预设，受 max_side（最长边）限幅。
-视频帧数：调用方 params > 预设，受 max_frames 上限与「8 秒硬上限」（fps × 8）双重约束。
+视频帧数：调用方 params > 预设，受 max_seconds（秒）上限与「8 秒硬上限」（fps × 8）双重约束。
 `drawthings-py` 为懒加载：未安装时只有实际生成会报错。
 """
 import asyncio
@@ -35,11 +35,8 @@ _VIDEO_SUBSTR = (
 )
 _VIDEO_TOKENS = {"wan", "ltx", "animate", "animation", "motion", "animatediff", "framepack"}
 
-# 单视频时长硬上限（秒）：上限帧数 = fps × 8；fps 读不到 / 无效时回退 DEFAULT_VIDEO_FPS。
-# MAX_VIDEO_FRAMES 即回退值（也用作配置输入上限）。
+# 单视频时长硬上限（秒）：上限帧数 = fps × 8（fps 取预设值；预设没有时回退 25）。
 MAX_VIDEO_SECONDS = 8
-DEFAULT_VIDEO_FPS = 24
-MAX_VIDEO_FRAMES = DEFAULT_VIDEO_FPS * MAX_VIDEO_SECONDS
 
 
 def is_video_model(model_name: str) -> bool:
@@ -177,7 +174,7 @@ class DrawThingsClient:
         self.preset_image = str(getattr(cfg, "preset_image", "") or "").strip()
         self.preset_video = str(getattr(cfg, "preset_video", "") or "").strip()
         self.max_side = int(getattr(cfg, "max_side", 0) or 0)
-        self.max_frames = int(getattr(cfg, "max_frames", 0) or 0)
+        self.max_seconds = int(getattr(cfg, "max_seconds", 0) or 0)
         self.media_dir = Path(data_dir) / "media"
         self.media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -260,16 +257,17 @@ class DrawThingsClient:
             if w and h:
                 cfg["width"], cfg["height"] = w, h
         else:
-            # 帧数 = 调用方 params > 预设，受 max_frames 上限与「8 秒硬上限」（fps×8）双重约束
+            # 帧数 = 调用方 params > 预设，受 max_seconds（秒 × 帧率）与「8 秒硬上限」（fps×8）双重约束
             try:
                 frames = int(cfg["num_frames"] or 0)
             except Exception:
                 frames = 0
             if params.get("num_frames"):
                 frames = int(params["num_frames"])
-            if self.max_frames > 0 and frames > 0:
-                frames = min(frames, self.max_frames)
-            hard = max(1, int(fps * 8))
+            if self.max_seconds > 0:
+                sec_cap = max(1, int(self.max_seconds * fps))
+                frames = min(frames, sec_cap) if frames > 0 else sec_cap
+            hard = max(1, int(fps * MAX_VIDEO_SECONDS))
             frames = min(frames, hard) if frames > 0 else hard
             cfg["num_frames"] = frames
             # 视频分辨率也受 max_side 限幅（可显著降低显存/耗时；0 = 用预设尺寸）

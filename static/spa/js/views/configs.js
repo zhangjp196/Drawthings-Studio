@@ -216,9 +216,9 @@ Views.configs = {
               </el-select>
               <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
             </el-form-item>
-            <el-form-item :label="I18N.t('cfg.maxFrames')">
-              <el-input-number v-model="f.max_frames" :min="0" :max="192" :step="1" controls-position="right" style="width: 110px;" />
-              <div class="hint">{{ I18N.t('cfg.maxFramesHint') }}</div>
+            <el-form-item :label="I18N.t('cfg.maxSeconds')">
+              <el-input-number v-model="f.max_seconds" :min="0" :max="8" :step="1" controls-position="right" style="width: 110px;" />
+              <div class="hint">{{ I18N.t('cfg.maxSecondsHint') }}</div>
             </el-form-item>
           </template>
         </el-form>
@@ -246,32 +246,14 @@ Views.configs = {
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
       supports_vision: 'yes', thinking: 'default', thinking_param: 'auto',
-      preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_frames: 0,
+      preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_seconds: 5,
     });    const presets = ref([]);        // gRPC 预设（/api/dt-presets）
     const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
     const loadingDtModels = ref(false);
-    const presetModels = computed(() => {
-      const out = [];
-      for (const p of presets.value) {
-        if (p.model && !out.includes(p.model)) out.push(p.model);
-      }
-      return out;
-    });
-    // 模型下拉候选：app 实际已下载的模型（优先）+ 预设默认模型（兜底）
-    const modelChoices = computed(() => {
-      const seen = new Set();
-      const out = [];
-      for (const m of dtModels.value) {
-        if (m.file && !seen.has(m.file)) {
-          seen.add(m.file);
-          out.push({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') });
-        }
-      }
-      for (const f of presetModels.value) {
-        if (f && !seen.has(f)) { seen.add(f); out.push({ file: f, label: f }); }
-      }
-      return out;
-    });
+    // 模型下拉候选：只列 app 里实际已下载的模型（点「获取模型」从 gRPC 读取）
+    const modelChoices = computed(() => dtModels.value
+      .filter(m => m.file)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
     async function loadPresets() {
       try {
         const data = await API.get('/api/dt-presets');
@@ -298,6 +280,8 @@ Views.configs = {
       const name = kind === 'video' ? f.preset_video : f.preset_image;
       const p = presets.value.find(x => x.name === name);
       if (!p || !p.model) return;
+      // 只自动填入「本地已下载」的模型（下拉只列本地模型）
+      if (!dtModels.value.some(m => m.file === p.model)) return;
       if (kind === 'video') { if (!f.model_video) f.model_video = p.model; }
       else if (!f.model_image) f.model_image = p.model;
     }
@@ -371,7 +355,7 @@ Views.configs = {
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
         thinking: 'default', thinking_param: 'auto',
-        preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_frames: 0,
+        preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_seconds: 5,
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -385,7 +369,7 @@ Views.configs = {
           preset_image: row.preset_image || '', preset_video: row.preset_video || '',
           model_image: row.model_image || '', model_video: row.model_video || '',
           max_side: row.max_side || 0,
-          max_frames: row.max_frames || 0,
+          max_seconds: row.max_seconds == null ? 5 : row.max_seconds,
         });
         if (row.base_url) fetchDtModels();  // 预取已下载模型
       } else {
@@ -454,13 +438,13 @@ Views.configs = {
       if (r.model_image) p.push(I18N.t('cfg.dtMetaImage', r.model_image));
       if (r.model_video) p.push(I18N.t('cfg.dtMetaVideo', r.model_video));
       p.push(I18N.t(r.max_side ? 'cfg.maxSide' : 'cfg.maxSideNone', r.max_side ? r.max_side : ''));
-      if (r.max_frames) p.push(I18N.t('cfg.frames', r.max_frames));
+      p.push(r.max_seconds ? I18N.t('cfg.seconds', r.max_seconds) : I18N.t('cfg.secondsNone'));
       return p.join(' · ');
     }
     onMounted(() => { load(); loadBasic(); loadPresets(); scrollByQuery(); });
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
-      presets, presetModels, onPresetChange,
+      presets, onPresetChange,
       dtModels, loadingDtModels, modelChoices, fetchDtModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
       urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,

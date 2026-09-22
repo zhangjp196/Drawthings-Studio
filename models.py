@@ -56,7 +56,7 @@ class DrawThingConfig(Base):
     preset_image = Column(String(64), default="")        # 图像生成预设（可空 = 按模型名推断）
     preset_video = Column(String(64), default="")        # 视频生成预设（可空 = 按模型名推断）
     max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随预设）
-    max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限；单视频另有 8 秒时长硬上限）
+    max_seconds = Column(Integer, default=5)             # 视频最大时长（秒，0=不限；单视频另有 8 秒硬上限）；帧数 = min(预设帧数, 秒数×帧率)
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 

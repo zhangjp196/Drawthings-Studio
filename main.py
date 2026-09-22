@@ -40,7 +40,7 @@ from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessa
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
 from services.pipeline import Pipeline, _now, chars_from_raw, hex_to_rgb, run_sync
-from services.drawthings import build_drawthings_client, MAX_VIDEO_FRAMES
+from services.drawthings import build_drawthings_client, MAX_VIDEO_SECONDS
 
 BASE_DIR = Path(__file__).resolve().parent
 MEDIA_DIR = Path(data_dir) / "media"
@@ -158,7 +158,7 @@ def _dt_view(c) -> dict:
         "preset_image": getattr(c, "preset_image", "") or "",
         "preset_video": getattr(c, "preset_video", "") or "",
         "max_side": c.max_side or 0,
-        "max_frames": c.max_frames or 0,
+        "max_seconds": getattr(c, "max_seconds", 0) or 0,
         "created_at": c.created_at,
     }
 
@@ -191,7 +191,7 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         "preset_image": str(body.get("preset_image") or "").strip(),
         "preset_video": str(body.get("preset_video") or "").strip(),
         "max_side": int(num("max_side", int, 2048)),
-        "max_frames": int(num("max_frames", int, MAX_VIDEO_FRAMES)),
+        "max_seconds": int(num("max_seconds", int, MAX_VIDEO_SECONDS)),
     }
 def _project_view(p: Project, chapter_count: int = 0) -> dict:
     scope = p.scope or {}
