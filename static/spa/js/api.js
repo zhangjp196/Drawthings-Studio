@@ -102,7 +102,43 @@ window.API = {
     }
   },
 
-  // 文件下载：GET -> Blob，按 Content-Disposition 命名并触发保存；非 2xx 抛本地化错误
+  // ---- CS 桌面客户端桥 ----
+  // pywebview 注入 window.pywebview.api（浏览器里不存在）；桥方法名与 client.py 的 NativeApi 一致。
+  native() {
+    try {
+      if (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) {
+        return window.pywebview.api;
+      }
+    } catch (e) { /* 非桌面环境 */ }
+    return null;
+  },
+  isDesktop() { return !!API.native(); },
+  // 系统通知（仅 CS 生效；浏览器里静默忽略）
+  notify(title, message) {
+    const n = API.native();
+    if (n && n.notify) { try { n.notify(title, message || ''); } catch (e) {} }
+  },
+  // 外部链接：CS 用系统浏览器打开；返回是否已交给原生处理
+  openExternal(url) {
+    const n = API.native();
+    if (n && n.openExternal && /^https?:\/\//i.test(url)) {
+      try { n.openExternal(url); return true; } catch (e) {}
+    }
+    return false;
+  },
+
+  // Blob → base64（去掉 data:xxx;base64, 前缀），供 CS 桌面客户端原生「另存为」使用
+  _blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split("base64,")[1]);
+      fr.onerror = () => reject(new Error("read blob failed"));
+      fr.readAsDataURL(blob);
+    });
+  },
+
+  // 文件下载：GET -> Blob，按 Content-Disposition 命名并触发保存；非 2xx 抛本地化错误。
+  // CS 桌面客户端（window.pywebview.api 可用）时改走系统「另存为」对话框；浏览器里保持原下载行为。
   download: async (url) => {
     const resp = await fetch(url, { headers: { 'Accept-Language': API._lang() } });
     if (!resp.ok) {
@@ -119,6 +155,17 @@ window.API = {
     let m = /filename\*=utf-8''([^;]+)/i.exec(cd);
     if (m) { try { name = decodeURIComponent(m[1].trim()); } catch (e) {} }
     else if ((m = /filename="?([^";]+)"?/i.exec(cd))) { name = m[1].trim(); }
+
+    // CS 桌面客户端：优先系统「另存为」（用户取消则静默返回；桥异常/失败回退浏览器下载）
+    const native = API.native();
+    if (native && native.saveBlob) {
+      try {
+        const b64 = await API._blobToBase64(blob);
+        const r = await native.saveBlob(name, b64);
+        if (r && (r.ok || r.canceled)) return;
+      } catch (e) { /* 原生桥异常 → 回退浏览器下载 */ }
+    }
+
     const a = document.createElement('a');
     const obj = URL.createObjectURL(blob);
     a.href = obj; a.download = name; a.style.display = 'none';

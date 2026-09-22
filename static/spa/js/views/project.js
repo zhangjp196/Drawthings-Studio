@@ -408,11 +408,11 @@ Views.project = {
             </template>
             <p class="muted small mb8" v-else>{{ I18N.t('p.seasonNoChapters') }}</p>
             <div class="actions">
-              <el-button type="primary" :disabled="!seasonDoneCount" @click="exportZip">{{ I18N.t('p.exportZip') }}</el-button>
+              <el-button type="primary" :loading="exporting" :disabled="!seasonDoneCount" @click="exportZip">{{ I18N.t('p.exportZip') }}</el-button>
               <el-tooltip v-if="data.project.kind === 'drama'" :content="I18N.t('p.exportPdfDrama')" placement="top">
                 <el-button :disabled="true">{{ I18N.t('p.exportPdf') }}</el-button>
               </el-tooltip>
-              <el-button v-else type="primary" :disabled="!seasonDoneCount" @click="exportPdf">{{ I18N.t('p.exportPdf') }}</el-button>
+              <el-button v-else type="primary" :loading="exporting" :disabled="!seasonDoneCount" @click="exportPdf">{{ I18N.t('p.exportPdf') }}</el-button>
             </div>
           </el-card>
         </el-tab-pane>
@@ -543,6 +543,7 @@ Views.project = {
     const actBusy = ref(false);
     const busySave = ref(false);
     const busyGenAll = ref(false);
+    const exporting = ref(false);  // 导出 ZIP/PDF 进行中（CS 走系统「另存为」，耗时期间禁用按钮）
     const busyFirst = ref(false);
     const busySeasonFirst = ref(false);
     // 生成封面弹框：包含标题（生成后自动叠加作品标题 / 季名）
@@ -1264,8 +1265,21 @@ Views.project = {
     }
 
     // 导出作用域为当前所选季（「完成」页签仅在选定季时可用）
-    function exportZip() { window.location.href = `/api/projects/${props.id}/export/zip?season_id=${encodeURIComponent(seasonId.value)}`; }
-    function exportPdf() { window.location.href = `/api/projects/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}`; }
+    // 统一走 API.download：浏览器 = 常规下载；CS 桌面客户端 = 系统「另存为」对话框
+    async function exportMedia(fmt) {
+      if (exporting.value) return;
+      exporting.value = true;
+      try {
+        await API.download(`/api/projects/${props.id}/export/${fmt}?season_id=${encodeURIComponent(seasonId.value)}`);
+        API.notify(I18N.t('app.title'), I18N.t('p.exportDone'));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        exporting.value = false;
+      }
+    }
+    function exportZip() { return exportMedia('zip'); }
+    function exportPdf() { return exportMedia('pdf'); }
 
     async function addChapter() {
       if (!seasonId.value) return;
@@ -1368,7 +1382,7 @@ Views.project = {
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
-      actBusy, busySave, busyGenAll, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
+      actBusy, busySave, busyGenAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,

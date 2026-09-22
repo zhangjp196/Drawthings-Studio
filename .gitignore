@@ -5,3 +5,9 @@ __pycache__/
 .env
 data/
 tools/flatc
+# PyInstaller 打包产物（./build_app.sh 重新生成）
+dist/
+build/
+*.spec
+assets/icon_1024.png
+assets/Drawthings.icns

@@ -285,6 +285,7 @@ window.I18N = (function () {
       'p.exportZip': '导出 ZIP',
       'p.exportPdf': '导出 PDF',
       'p.exportPdfDrama': '短剧为视频，不支持 PDF（可导出 ZIP）',
+      'p.exportDone': '导出完成',
       'p.chSummary': '主题摘要',
       'p.season': '第{0}季',
       'p.seasonAdd': '＋ 新建季',
@@ -508,6 +509,7 @@ window.I18N = (function () {
 
       'common.cancel': '取消',
       'common.save': '保存',
+      'common.quitApp': '退出应用',
       'common.create': '创建',
       'common.unnamed': '（未命名）',
       'common.copy': '复制',
@@ -798,6 +800,7 @@ window.I18N = (function () {
       'p.exportZip': 'Export ZIP',
       'p.exportPdf': 'Export PDF',
       'p.exportPdfDrama': 'Drama is video — no PDF (export ZIP instead)',
+      'p.exportDone': 'Export complete',
       'p.chSummary': 'Topic summary',
       'p.season': 'Season {0}',
       'p.seasonAdd': '＋ New season',
@@ -1021,6 +1024,7 @@ window.I18N = (function () {
 
       'common.cancel': 'Cancel',
       'common.save': 'Save',
+      'common.quitApp': 'Quit app',
       'common.create': 'Create',
       'common.unnamed': '(Untitled)',
       'common.copy': 'Copy',

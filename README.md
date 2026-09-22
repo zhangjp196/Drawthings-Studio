@@ -17,6 +17,7 @@ This repository ships a **Chinese** document and an **English** document (identi
 ### 简介
 
 本地一体化应用：**FastAPI（JSON API + SSE）后端 + Vue 3 / Element Plus 单页前端（SPA）**。
+支持两种形态：**BS**（浏览器直接访问）与 **CS**（`python client.py` 原生桌面客户端：自动拉起服务 + 原生窗口，免浏览器，见下文「桌面客户端」）。
 前端为**本地 vendor、免构建**（Vue / vue-router / Element Plus 均下载至 `static/vendor/` 以 UMD 引入），
 离线可用；FastAPI 兜底返回 SPA 外壳，支持任意路径刷新（history 路由）。
 
@@ -137,11 +138,16 @@ This repository ships a **Chinese** document and an **English** document (identi
 ```
 .
 ├── main.py              # FastAPI 入口 + /api 路由 + SSE + SPA 外壳兜底（按请求注入 db 会话）
+├── app.py               # 统一入口（PyInstaller 打包目标：无参 = 客户端，--server = 服务模式）
+├── client.py            # CS 桌面客户端（pywebview 原生窗口：自动拉起服务 / 原生「另存为」/ 系统通知 / 单实例）
+├── paths.py             # 路径解析（源码 / 打包两种模式的资源与数据目录）
 ├── config.py            # 仅保留数据目录位置（读环境变量 DATA_DIR，可选）
 ├── db.py                # SQLAlchemy 引擎 / 会话 / init_db（含旧库结构迁移）
 ├── models.py            # ORM 模型：LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
 ├── config_store.py      # 配置增删查（含删除前的“被项目/微创作作品引用”保护）
 ├── i18n.py              # 后端中英文本地化（Accept-Language → zh|en + L() 文案助手）
+├── build_app.sh         # 一键打包 .app（PyInstaller）
+├── tools/make_icon.py   # 生成应用图标（紫色渐变圆角方块 + 四角星）
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 统一 Agent 层（模型构造 / 结构化输出 / 消息历史）
@@ -218,10 +224,48 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # 仅按需改数据目录
 python main.py                # 访问 http://127.0.0.1:8010
+python client.py              # （可选）CS 桌面客户端：自动起服务 + 原生窗口，免浏览器
 ```
 
 > 若遇到 SSL 证书校验失败（macOS Python 常见），装包时加：
 > `SSL_CERT_FILE=/etc/ssl/cert.pem pip install -r requirements.txt`
+
+### 桌面客户端（CS 架构）
+
+默认是 **BS** 形态（浏览器访问 `http://127.0.0.1:8010`）；也可 **CS** 形态运行——原生桌面 App，免浏览器：
+
+```bash
+pip install pywebview        # 已含在 requirements.txt
+python client.py             # 自动拉起本地服务 + 打开原生窗口（macOS = 系统 WKWebView）
+```
+
+客户端行为：
+
+- **一键启动**：探测 `/api/health`；服务未运行则自动拉起（子进程、生产模式无 reload），已运行则直接连上（不重复起服务）；
+- **原生窗口**：加载同一份 SPA（功能 / 中英双语 / 主题与浏览器版完全一致）；
+- **原生 OS 能力**：
+  - 导出 ZIP/PDF 走**系统「另存为」对话框**（前端检测 `window.pywebview` 自动切换；浏览器里仍是常规下载）；
+  - 系统通知、外部链接用系统浏览器打开、`quitApp` 退出（优雅停掉本客户端拉起的服务）；
+- **单实例**：PID 锁防多开（退出自动清理）。
+
+环境变量：`HOST`（默认 `127.0.0.1`，仅本机、不对外）/ `PORT`（默认 `8010`）/ `RELOAD`（默认 `0`；开发可 `RELOAD=1` 热重载）。
+
+> 该形态**仅本地单用户**（无多用户账号、无远程访问）；API Key 与数据仍留在本机。
+> 打包：`./build_app.sh` 一键构建 `dist/Drawthings Studio.app`（见下节）。
+
+### 打包为 .app（PyInstaller）
+
+客户端 + 服务可打包成标准 macOS 应用（带图标，双击即用）：
+
+```bash
+./build_app.sh          # 生成 dist/Drawthings Studio.app
+```
+
+- **统一入口 `app.py`**：PyInstaller 的打包目标；无参数 = 桌面客户端（自动拉起服务），
+  `--server` = 服务模式（客户端以此拉子进程，无需外置 Python）。
+- **资源 / 数据分离**：`static/` 打进 bundle（只读）；数据（SQLite + 媒体）在
+  `~/Library/Application Support/Drawthings Studio/data`（源码模式仍为 `<项目根>/data`，两者互不影响）。
+- **ffmpeg** 未打包：视频末帧抽取依赖系统 `ffmpeg`（`brew install ffmpeg`），缺失时自动降级、不影响其余功能。
 
 ### 环境变量（见 .env.example）
 
@@ -281,6 +325,7 @@ HTTP API 已移除：它对视频模型只返回单帧 PNG，无法出视频。
 ### Overview
 
 A local, all-in-one app: **FastAPI (JSON API + SSE) backend + a Vue 3 / Element Plus single-page frontend (SPA)**.
+Two shapes: **BS** (open it in a browser) and **CS** (`python client.py` native desktop client: auto-starts the server + a native window, no browser — see "Desktop client (CS)" below).
 The frontend uses **local, build-free vendor files** (Vue / vue-router / Element Plus are all downloaded into `static/vendor/` and loaded as UMD),
 so it runs fully offline; FastAPI falls back to serving the SPA shell, so refreshing on any route works (history routing).
 
@@ -403,11 +448,16 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ```
 .
 ├── main.py              # FastAPI entry + /api routes + SSE + SPA shell fallback (db session injected per request)
+├── app.py               # unified entry (PyInstaller target: no args = client, --server = server mode)
+├── client.py            # CS desktop client (pywebview native window: auto-starts server / native "Save As" / notifications / single instance)
+├── paths.py             # path resolution (resource & data dirs for source / packaged modes)
 ├── config.py            # keeps only the data directory (reads env DATA_DIR, optional)
 ├── db.py                # SQLAlchemy engine / session / init_db (incl. legacy-structure migration)
 ├── models.py            # ORM models: LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
 ├── config_store.py      # config CRUD (with "referenced by a project/work" protection before delete)
 ├── i18n.py              # backend zh/en localization (Accept-Language → zh|en + L() text helper)
+├── build_app.sh         # one-step .app packaging (PyInstaller)
+├── tools/make_icon.py   # app icon generator (purple gradient rounded square + four-point star)
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 unified agent layer (model construction / structured output / message history)
@@ -484,10 +534,48 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # only adjust the data directory if needed
 python main.py                # visit http://127.0.0.1:8010
+python client.py              # (optional) CS desktop client: auto-start server + native window, no browser
 ```
 
 > If you hit an SSL certificate verification failure (common on macOS Python), install with:
 > `SSL_CERT_FILE=/etc/ssl/cert.pem pip install -r requirements.txt`
+
+### Desktop client (CS)
+
+By default the app runs **BS**-style (open `http://127.0.0.1:8010` in a browser); it can also run **CS**-style — a native desktop app, no browser:
+
+```bash
+pip install pywebview        # already in requirements.txt
+python client.py             # auto-starts the local server + opens a native window (macOS = system WKWebView)
+```
+
+What the client does:
+
+- **One-click launch**: probes `/api/health`; if the server isn't running it auto-starts it (subprocess, production mode, no reload); if already running it just connects (no duplicate server);
+- **Native window**: loads the same SPA (features / bilingual / theme fully consistent with the browser version);
+- **Native OS features**:
+  - ZIP/PDF export goes through the **system "Save As" dialog** (the frontend detects `window.pywebview` and switches automatically; in a browser it stays a regular download);
+  - system notifications, external links open in the system browser, `quitApp` to exit (gracefully stops the server this client started);
+- **Single instance**: a PID lock prevents duplicate windows (cleaned up on exit).
+
+Env vars: `HOST` (default `127.0.0.1` — local only, not exposed) / `PORT` (default `8010`) / `RELOAD` (default `0`; use `RELOAD=1` for dev hot-reload).
+
+> This shape is **local single-user only** (no multi-user accounts, no remote access); API keys and data stay on this machine.
+> Packaging: `./build_app.sh` builds `dist/Drawthings Studio.app` in one step (see below).
+
+### Packaging as a .app (PyInstaller)
+
+The client + server can be packaged as a standard macOS app (with icon, double-click to run):
+
+```bash
+./build_app.sh          # produces dist/Drawthings Studio.app
+```
+
+- **Unified entry `app.py`**: the PyInstaller target; no args = desktop client (auto-starts the server),
+  `--server` = server mode (the client spawns it as a subprocess — no external Python needed).
+- **Resources / data separation**: `static/` is baked into the bundle (read-only); data (SQLite + media) lives in
+  `~/Library/Application Support/Drawthings Studio/data` (source mode stays `<project root>/data`; the two don't affect each other).
+- **ffmpeg** is not bundled: last-frame extraction relies on the system `ffmpeg` (`brew install ffmpeg`); it degrades gracefully when missing.
 
 ### Environment variables (see .env.example)
 

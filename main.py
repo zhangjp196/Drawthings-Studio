@@ -11,6 +11,12 @@
 其余路径返回 SPA 外壳（前端路由接管）。
 界面支持中文 / English（前端 I18N 切换 + 后端按 Accept-Language 本地化错误文案）。
 """
+import os
+
+# 关闭 pydantic 的第三方插件加载：logfire 的 pydantic 插件会调用 inspect.getsource()，
+# 在 PyInstaller 冻结环境中取不到源码会抛 OSError 导致启动崩溃；本应用不使用 pydantic 插件。
+os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "__all__")
+
 import asyncio
 import base64
 import itertools
@@ -34,6 +40,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config import data_dir
+from paths import resource_root
 from db import get_db, init_db
 from i18n import L, lang_of
 from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessage
@@ -42,7 +49,7 @@ from services.agent import build_model, to_message_history, user_prompt, make_ht
 from services.pipeline import Pipeline, _now, chars_from_raw, hex_to_rgb, run_sync
 from services.drawthings import build_drawthings_client, MAX_VIDEO_SECONDS
 
-BASE_DIR = Path(__file__).resolve().parent
+STATIC_ROOT = resource_root() / "static"
 MEDIA_DIR = Path(data_dir) / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -76,7 +83,7 @@ async def _unhandled_error(request: Request, exc: Exception):
                         content={"detail": L(_lang(request), "服务器内部错误，请查看服务端日志",
                                              "Internal server error — check the server logs")})
 
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_ROOT)), name="static")
 
 
 @app.middleware("http")
@@ -2080,8 +2087,15 @@ def project_export_pdf(request: Request, project_id: str, season_id: str | None 
     return FileResponse(path, filename=fname, media_type="application/pdf")
 
 
+# ---------------- 应用健康检查（CS 桌面客户端探测用） ----------------
+@app.get("/api/health")
+def health():
+    """健康检查：桌面客户端（CS）启动时轮询此端点判断本地服务是否就绪；亦可用于存活监控。"""
+    return {"ok": True, "app": "drawthings-studio"}
+
+
 # ---------------- SPA 外壳 ----------------
-SPA_SHELL = BASE_DIR / "static" / "spa" / "index.html"
+SPA_SHELL = STATIC_ROOT / "spa" / "index.html"
 
 
 @app.get("/{full_path:path}")
@@ -2091,5 +2105,11 @@ def spa_shell(full_path: str):
 
 
 if __name__ == "__main__":
+    import os as _os
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8010, reload=True)
+    # CS 桌面客户端以 RELOAD=0 拉起本进程（生产模式）；开发时可用 RELOAD=1 python main.py。
+    # 默认只绑 127.0.0.1（本地单用户，不对外；如需局域网访问可显式设 HOST=0.0.0.0）。
+    uvicorn.run("main:app",
+                host=_os.getenv("HOST", "127.0.0.1"),
+                port=int(_os.getenv("PORT", "8010")),
+                reload=_os.getenv("RELOAD", "0") == "1")

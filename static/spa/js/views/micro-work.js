@@ -361,6 +361,7 @@ Views.microWork = {
       exporting.value = true;
       try {
         await API.download(`/api/micro/${props.id}/works/export?ids=${ids.join(',')}&format=${format}`);
+        API.notify(I18N.t('app.title'), I18N.t('p.exportDone'));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       } finally {
