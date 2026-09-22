@@ -111,14 +111,63 @@ def parse_endpoint(base_url: str, default_port: int = DEFAULT_GRPC_PORT) -> tupl
     return host, port
 
 
+def _norm_model(model: str) -> str:
+    """模型名归一化：去扩展名 / 量化精度 / 末尾版本号，便于跨量化变体匹配预设。"""
+    s = (model or "").lower()
+    s = re.sub(r"\.(ckpt|safetensors)$", "", s)
+    s = re.sub(r"[._-](q\d+p|i\d+x|f16|bf16|fp16|f8|q\d|i\d)(?=[._-]|$)", "", s)
+    s = re.sub(r"[._-]v?\d+(\.\d+)*$", "", s)   # 末尾版本号，如 _1.1 / _2.3
+    return s.strip("._-")
+
+
+_PRESET_MODEL_MAP: dict[str, str] | None = None
+
+
+def _preset_model_map() -> dict[str, str]:
+    """{归一化模型名: drawthings-py 预设名}（懒加载缓存；未安装返回空）。"""
+    global _PRESET_MODEL_MAP
+    if _PRESET_MODEL_MAP is not None:
+        return _PRESET_MODEL_MAP
+    m: dict[str, str] = {}
+    try:
+        from drawthings_py import Configs
+        from drawthings_py.configs.presets import Presets
+        for p in Presets:
+            name = str(p.value)
+            try:
+                model = str(Configs.from_preset(name)["model"] or "")
+            except Exception:
+                continue
+            if model:
+                key = _norm_model(model)
+                cur = m.get(key)
+                # 同一模型有多个预设时优先非 lightning
+                if cur is None or ("lightning" in cur and "lightning" not in name):
+                    m[key] = name
+    except Exception:
+        pass
+    _PRESET_MODEL_MAP = m
+    return m
+
+
 def infer_preset(model: str) -> str:
-    """按模型文件名推断 drawthings-py 预设（仅覆盖常见视频模型；其它请显式选预设）。"""
-    n = (model or "").lower()
-    if "ltx" in n:
-        return "ltx_2_3_dev" if "dev" in n else "ltx_2_3_distilled"
-    if "wan" in n:
-        return "wan_2_2_14b_i2v" if "i2v" in n else "wan_2_2_14b_t2v"
-    if "hunyuan" in n and "video" in n:
+    """按模型文件名推断 drawthings-py 预设（归一化匹配预设模型 + 关键词兜底）。
+
+    例：ltx_2.3_22b_distilled_1.1_q6p.ckpt → ltx_2_3_distilled；
+        flux_2_klein_9b_q6p.ckpt → flux_2_klein_9b；z_image_turbo_1.0_q6p.ckpt → z_image_turbo。
+    推断不到返回 ""（调用方给出明确错误）。"""
+    n = (model or "").strip()
+    if not n:
+        return ""
+    hit = _preset_model_map().get(_norm_model(n))
+    if hit:
+        return hit
+    low = n.lower()
+    if "ltx" in low:
+        return "ltx_2_3_dev" if "dev" in low else "ltx_2_3_distilled"
+    if "wan" in low:
+        return "wan_2_2_14b_i2v" if "i2v" in low else "wan_2_2_14b_t2v"
+    if "hunyuan" in low and "video" in low:
         return "hunyuan_video"
     return ""
 
@@ -171,8 +220,6 @@ class DrawThingsClient:
         self.host, self.port = parse_endpoint(getattr(cfg, "base_url", ""))
         self.model_image = str(getattr(cfg, "model_image", "") or "").strip()
         self.model_video = str(getattr(cfg, "model_video", "") or "").strip()
-        self.preset_image = str(getattr(cfg, "preset_image", "") or "").strip()
-        self.preset_video = str(getattr(cfg, "preset_video", "") or "").strip()
         self.max_side = int(getattr(cfg, "max_side", 0) or 0)
         self.max_seconds = int(getattr(cfg, "max_seconds", 0) or 0)
         self.media_dir = Path(data_dir) / "media"
@@ -209,19 +256,19 @@ class DrawThingsClient:
         return asyncio.run(self._generate(prompt, video=True, ref_path=ref_frame, params=params or {}))
 
     # ---------------- 内部 ----------------
-    def _gen_config(self, model: str, preset: str = ""):
+    def _gen_config(self, model: str):
         try:
             from drawthings_py import Configs
         except Exception as e:  # 未安装 drawthings-py
             raise RuntimeError(
                 "未安装 drawthings-py，无法使用 Draw Things。请 `pip install \"drawthings-py[ffmpeg]\"`。"
                 f" / drawthings-py is not installed ({e})")
-        preset = (preset or "").strip() or infer_preset(model)
+        preset = infer_preset(model)
         if not preset:
             raise RuntimeError(
-                "Draw Things 配置需要选择「预设」来提供 steps/sampler 等生成参数；"
-                "该模型无法自动推断，请在配置里手动选择。"
-                " / A preset is required (cannot infer one for this model).")
+                f"无法根据模型名「{model}」推断生成预设：该模型不受 drawthings-py 预设支持。"
+                "请改用受支持的模型（如 ltx / flux / z_image / ernie_image / qwen_image / wan / hunyuan 等）。"
+                f" / Cannot infer a preset for model '{model}'.")
         try:
             cfg = Configs.from_preset(preset)
         except Exception as e:
@@ -238,7 +285,7 @@ class DrawThingsClient:
             raise RuntimeError(
                 f"未配置{kind}模型：请在 DrawThings 配置里填写{kind}模型文件名。"
                 f" / No {kind} model configured.")
-        cfg = self._gen_config(model, self.preset_video if video else self.preset_image)
+        cfg = self._gen_config(model)
         # 尺寸：图片 = 调用方 params > 预设，再受 max_side 限幅；视频尺寸由预设/模型决定
         try:
             fps = int(cfg["fps"] or 0) or 25

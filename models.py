@@ -53,8 +53,6 @@ class DrawThingConfig(Base):
     base_url = Column(String(500), nullable=False)       # gRPC 端点 host:port（如 127.0.0.1:7859）
     model_image = Column(String(200), default="")        # 图像模型文件名（可空）
     model_video = Column(String(200), default="")        # 视频模型文件名（可空）
-    preset_image = Column(String(64), default="")        # 图像生成预设（可空 = 按模型名推断）
-    preset_video = Column(String(64), default="")        # 视频生成预设（可空 = 按模型名推断）
     max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随预设）
     max_seconds = Column(Integer, default=5)             # 视频最大时长（秒，0=不限；单视频另有 8 秒硬上限）；帧数 = min(预设帧数, 秒数×帧率)
     created_at = Column(String(40), default=_now)

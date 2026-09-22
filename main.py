@@ -155,8 +155,6 @@ def _dt_view(c) -> dict:
         "id": c.id, "name": c.name, "base_url": c.base_url,
         "model_image": getattr(c, "model_image", "") or "",
         "model_video": getattr(c, "model_video", "") or "",
-        "preset_image": getattr(c, "preset_image", "") or "",
-        "preset_video": getattr(c, "preset_video", "") or "",
         "max_side": c.max_side or 0,
         "max_seconds": getattr(c, "max_seconds", 0) or 0,
         "created_at": c.created_at,
@@ -188,8 +186,6 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
     return {
         "model_image": model_image,
         "model_video": model_video,
-        "preset_image": str(body.get("preset_image") or "").strip(),
-        "preset_video": str(body.get("preset_video") or "").strip(),
         "max_side": int(num("max_side", int, 2048)),
         "max_seconds": int(num("max_seconds", int, MAX_VIDEO_SECONDS)),
     }

@@ -186,25 +186,10 @@ Views.configs = {
               </div>
               <div class="hint">{{ I18N.t('cfg.dtModelGrpcHint') }}</div>
             </el-form-item>
-            <el-form-item :label="I18N.t('cfg.presetImage')">
-              <el-select v-model="f.preset_image" filterable allow-create clearable style="width: 100%"
-                         :placeholder="I18N.t('cfg.presetPh')" @change="onPresetChange('image')">
-                <el-option v-for="p in presets" :key="'pi' + p.name" :value="p.name"
-                           :label="p.name + (p.video ? ' · video' : '')" />
-              </el-select>
-              <div class="hint">{{ I18N.t('cfg.presetHint') }}</div>
-            </el-form-item>
             <el-form-item :label="I18N.t('cfg.dtModelVideo')">
               <el-select v-model="f.model_video" filterable allow-create clearable style="width: 100%"
                          :placeholder="I18N.t('cfg.dtModelPh')">
                 <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
-              </el-select>
-            </el-form-item>
-            <el-form-item :label="I18N.t('cfg.presetVideo')">
-              <el-select v-model="f.preset_video" filterable allow-create clearable style="width: 100%"
-                         :placeholder="I18N.t('cfg.presetPh')" @change="onPresetChange('video')">
-                <el-option v-for="p in presets" :key="'pv' + p.name" :value="p.name"
-                           :label="p.name + (p.video ? ' · video' : '')" />
               </el-select>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxSideOpt')">
@@ -246,20 +231,14 @@ Views.configs = {
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
       supports_vision: 'yes', thinking: 'default', thinking_param: 'auto',
-      preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_seconds: 5,
-    });    const presets = ref([]);        // gRPC 预设（/api/dt-presets）
+      model_image: '', model_video: '', max_side: 0, max_seconds: 5,
+    });
     const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
     const loadingDtModels = ref(false);
     // 模型下拉候选：只列 app 里实际已下载的模型（点「获取模型」从 gRPC 读取）
     const modelChoices = computed(() => dtModels.value
       .filter(m => m.file)
       .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
-    async function loadPresets() {
-      try {
-        const data = await API.get('/api/dt-presets');
-        presets.value = data.presets || [];
-      } catch (e) { /* 未安装 drawthings-py 时为空 */ }
-    }
     async function fetchDtModels() {
       if (!f.base_url) {
         ElementPlus.ElMessage.warning(I18N.t('cfg.urlRequired'));
@@ -275,15 +254,6 @@ Views.configs = {
       } finally {
         loadingDtModels.value = false;
       }
-    }
-    function onPresetChange(kind) {
-      const name = kind === 'video' ? f.preset_video : f.preset_image;
-      const p = presets.value.find(x => x.name === name);
-      if (!p || !p.model) return;
-      // 只自动填入「本地已下载」的模型（下拉只列本地模型）
-      if (!dtModels.value.some(m => m.file === p.model)) return;
-      if (kind === 'video') { if (!f.model_video) f.model_video = p.model; }
-      else if (!f.model_image) f.model_image = p.model;
     }
 
     async function load() {
@@ -355,7 +325,7 @@ Views.configs = {
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
         thinking: 'default', thinking_param: 'auto',
-        preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_seconds: 5,
+        model_image: '', model_video: '', max_side: 0, max_seconds: 5,
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -366,7 +336,6 @@ Views.configs = {
       if (type === 'drawthings') {
         Object.assign(f, {
           config_type: 'drawthings', name: row.name, base_url: row.base_url,
-          preset_image: row.preset_image || '', preset_video: row.preset_video || '',
           model_image: row.model_image || '', model_video: row.model_video || '',
           max_side: row.max_side || 0,
           max_seconds: row.max_seconds == null ? 5 : row.max_seconds,
@@ -441,10 +410,9 @@ Views.configs = {
       p.push(r.max_seconds ? I18N.t('cfg.seconds', r.max_seconds) : I18N.t('cfg.secondsNone'));
       return p.join(' · ');
     }
-    onMounted(() => { load(); loadBasic(); loadPresets(); scrollByQuery(); });
+    onMounted(() => { load(); loadBasic(); scrollByQuery(); });
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
-      presets, onPresetChange,
       dtModels, loadingDtModels, modelChoices, fetchDtModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
       urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,

@@ -126,9 +126,8 @@ This repository ships a **Chinese** document and an **English** document (identi
 
 - **LLM 配置**：`supports_vision`（图片输入）= 支持图片输入（多模态，剧本阶段可参考上一帧/首图）/ 纯文本（不附带任何参考图）。
 - **DrawThings 配置**（仅 gRPC，app 里 API server 设为 gRPC）：
-  **图像模型 / 视频模型**（`model_image` / `model_video`，各可空、至少填一个；点「获取模型」从 app 读取已下载模型）
-  与 **图像预设 / 视频预设**（`preset_image` / `preset_video`，drawthings-py 预设，提供 steps / sampler / 尺寸等；
-  可空则按模型名推断）。所有项目/作品可选任意 DrawThings 配置。
+  **图像模型 / 视频模型**（`model_image` / `model_video`，各可空、至少填一个；点「获取模型」从 app 读取已下载模型）。
+  生成参数（预设）按模型名**自动推断**，无需填写。所有项目/作品可选任意 DrawThings 配置。
   个性化参数：`max_side`（最大分辨率，仅最长边，图片与视频都限幅）、
   `max_seconds`（视频最大时长，秒；帧数 = min(预设帧数, 秒数 × 帧率)，默认 5 秒）——**0 = 不限**。
   **单视频时长硬上限 8 秒**：按 fps 换算成帧数（fps × 8）后强制限幅。
@@ -259,9 +258,9 @@ HTTP API 已移除：它对视频模型只返回单帧 PNG，无法出视频。
 - gRPC 请求**必须自带完整生成配置**，因此配置里要指定：
   - **图像模型 / 视频模型**（`model_image` / `model_video`）：各可留空，**至少填一个**（只填一个 = 只支持该类型）。
     点「获取模型」即可从 app 读取**已下载的模型**（gRPC `get_models`，带名称与是否视频）。
-  - **图像预设 / 视频预设**（`preset_image` / `preset_video`）：`drawthings-py` 自带的配置模板，
-    提供 steps / sampler / guidance / 尺寸等（gRPC 协议本身没有「预设」概念，只接受一份完整配置）；
-    留空则按模型名自动推断（ltx / wan / hunyuan 等）。
+  - 生成参数（**预设**）按模型名**自动推断**（归一化匹配 drawthings-py 预设模型，去量化/版本后缀；
+    如 `ltx_2.3_22b_distilled_1.1_q6p` → `ltx_2_3_distilled`、`flux_2_klein_9b_q6p` → `flux_2_klein_9b`），
+    无需填写。推断不到的模型会给出明确错误（drawthings-py 预设不支持该模型）。
 - 生成前会在同一连接内校验模型已下载，不存在直接报错（避免 app 退出）。
 - 分辨率：图片 = 调用方（智能体）决定 > 预设，受 `max_side`（最长边）限幅；**视频同样受 `max_side` 限幅**
   （0 = 用预设尺寸。LTX 预设默认 1280×768，很吃显存，实测 25 帧 >10 分钟；建议 `max_side=768` → 768×448，
@@ -391,9 +390,8 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 - **LLM config**: `supports_vision` (image input) = supports image input (multimodal; can reference the previous frame/first image during scripting) / text-only (no reference images).
 - **Draw Things config** (gRPC only; set the app's API server to gRPC):
   **image model / video model** (`model_image` / `model_video`; each may be empty but at least one is required; click
-  "Fetch models" to read the downloaded models from the app) and **image preset / video preset**
-  (`preset_image` / `preset_video`, drawthings-py presets supplying steps / sampler / size etc.; inferred from the model
-  name when empty). Any project/work can use any Draw Things config.
+  "Fetch models" to read the downloaded models from the app). The generation preset (steps / sampler / size) is
+  **inferred from the model name**, no input needed. Any project/work can use any Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
   `max_seconds` (max video duration in seconds; frames = min(preset frames, seconds × fps), default 5) — **0 = unlimited**.
   There is also a **hard 8-second cap** on a single video (frames = fps × 8).
@@ -526,9 +524,10 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
   - **image model / video model** (`model_image` / `model_video`): each may be empty, but **at least one is required**
     (only one set = only that type is supported). Click "Fetch models" to read the **downloaded models** from the app
     (gRPC `get_models`, with names and a video flag).
-  - **image preset / video preset** (`preset_image` / `preset_video`): config templates bundled with `drawthings-py`
-    supplying steps / sampler / guidance / size etc. (the gRPC protocol itself has no "preset" concept and only accepts
-    a full config); if empty, a preset is inferred from the model name (ltx / wan / hunyuan …).
+  - The generation **preset** (steps / sampler / size) is **inferred from the model name** (normalized match against
+    drawthings-py preset models, ignoring quantization/version suffixes, e.g. `ltx_2.3_22b_distilled_1.1_q6p` →
+    `ltx_2_3_distilled`, `flux_2_klein_9b_q6p` → `flux_2_klein_9b`), no input needed. A model with no matching preset
+    gets a clear error.
 - The model is validated (on the same connection) before generation, so a missing model errors out instead of quitting the app.
 - Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
