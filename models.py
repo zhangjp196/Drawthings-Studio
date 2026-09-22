@@ -37,21 +37,26 @@ class LLMConfig(Base):
 
 
 class DrawThingConfig(Base):
-    """Draw Things 配置（Mac 本地出图/出视频）。
+    """Draw Things 配置（Mac 本地出图/出视频，仅 gRPC）。
 
-    使用 app 内置 HTTP API（A1111/SD-WebUI 兼容：/sdapi/v1/txt2img、/sdapi/v1/img2img），
-    base_url 形如 http://127.0.0.1:7860（端口以 app 显示为准）。
-    不使用 gRPC（app 的 gRPC 服务收到生成请求会闪退）。
-    模型只能跟随 app 当前选择（API 不支持指定）；其余为个性化参数，0/空 = 跟随 app 当前值。
+    app 的 API server 设为 **gRPC**（默认端口 7859），base_url 形如 127.0.0.1:7859。
+    请求必须自带完整生成配置，故需指定 **图像模型 / 视频模型**
+    （`model_image` / `model_video`，可只填其一 = 只支持该类型）与各自的
+    **预设**（`preset_image` / `preset_video`，提供 steps/sampler 等；留空则按模型名自动推断）。
+    其余为个性化参数，0/空 = 跟随预设。
     """
 
     __tablename__ = "drawthing_configs"
 
     id = Column(String(12), primary_key=True)
     name = Column(String(100), nullable=False)
-    base_url = Column(String(500), nullable=False)       # HTTP 端点 URL（http://host:port）
-    max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随 app）
-    max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限/跟随 app；单视频另有 8 秒时长硬上限）
+    base_url = Column(String(500), nullable=False)       # gRPC 端点 host:port（如 127.0.0.1:7859）
+    model_image = Column(String(200), default="")        # 图像模型文件名（可空）
+    model_video = Column(String(200), default="")        # 视频模型文件名（可空）
+    preset_image = Column(String(64), default="")        # 图像生成预设（可空 = 按模型名推断）
+    preset_video = Column(String(64), default="")        # 视频生成预设（可空 = 按模型名推断）
+    max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随预设）
+    max_frames = Column(Integer, default=0)              # 视频最大帧数上限（0=不限；单视频另有 8 秒时长硬上限）
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 
@@ -195,6 +200,7 @@ class MicroMessage(Base):
     duration = Column(Float, default=0)                    # 助手消息耗时（秒：开始输出 → 完成）
     content = Column(Text, nullable=False)                 # 文本内容
     images = Column(Text, nullable=True)                  # 用户附带的图片（JSON 列表，/media/xxx；仅视觉模型）
-    media_url = Column(String(500), default="")            # 助手消息附带的生成媒体（/media/xxx）
-    prompt = Column(Text, default="")                      # 生成时用的提示词
+    media_url = Column(String(500), default="")            # 助手消息附带的生成媒体（/media/xxx，兼容旧逻辑：取最后一次）
+    prompt = Column(Text, default="")                      # 生成时用的提示词（兼容旧逻辑：取最后一次）
+    parts = Column(Text, nullable=True)                   # 助手回复的有序内容块（JSON：[{type:text|tool|error,...}]，保序）
     session = relationship("MicroSession", back_populates="messages")

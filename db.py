@@ -71,6 +71,10 @@ def _migrate():
         "drawthing_configs": {
             "max_side": "INTEGER DEFAULT 0",
             "max_frames": "INTEGER DEFAULT 0",
+            "model_image": "VARCHAR(200) DEFAULT ''",
+            "model_video": "VARCHAR(200) DEFAULT ''",
+            "preset_image": "VARCHAR(64) DEFAULT ''",
+            "preset_video": "VARCHAR(64) DEFAULT ''",
         },
         "chapters": {
             "width": "INTEGER DEFAULT 0",
@@ -100,6 +104,7 @@ def _migrate():
             "images": "TEXT",
             "created_at": "VARCHAR(40) DEFAULT ''",
             "duration": "REAL DEFAULT 0",
+            "parts": "TEXT",
         },
     }
     with engine.connect() as conn:
@@ -108,11 +113,29 @@ def _migrate():
             for name, ddl in cols.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+        # DrawThings 单模型/单预设 → 图像模型 + 视频模型（旧值迁移；旧预设归到视频预设）
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(drawthing_configs)"))}
+        if "model" in cols and "model_image" in cols:
+            try:
+                conn.execute(text(
+                    "UPDATE drawthing_configs SET model_image = model "
+                    "WHERE (model_image IS NULL OR model_image = '') AND model IS NOT NULL AND model != ''"))
+            except Exception:
+                pass
+        if "preset" in cols and "preset_video" in cols:
+            try:
+                conn.execute(text(
+                    "UPDATE drawthing_configs SET preset_video = preset "
+                    "WHERE (preset_video IS NULL OR preset_video = '') AND preset IS NOT NULL AND preset != ''"))
+            except Exception:
+                pass
         # 移除已废弃的列（SQLite >= 3.35 支持 DROP COLUMN）
         deprecated = {
             "llm_configs": ("mode",),
             "projects": ("cover_as_first_ref",),  # 已移除：封面不再作为第 1 章参考
             "drawthing_configs": ("mode", "protocol", "shared_secret", "model_name", "media_type",
+                                  "transport",  # 已移除：只保留 gRPC
+                                  "model", "preset",  # 已拆分为 model_image/model_video 与 preset_image/preset_video
                                   "steps", "guidance_scale", "num_frames", "fps",
                                   "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）
             "micro_works": ("media_type",),  # 产出类型改由 app 当前模型自动判断

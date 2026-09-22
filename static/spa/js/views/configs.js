@@ -176,8 +176,36 @@ Views.configs = {
             </el-form-item>
           </template>
           <template v-else>
-            <el-form-item :label="I18N.t('cfg.model')">
-              <div class="hint">{{ I18N.t('cfg.dtModelHint') }}</div>
+            <el-form-item :label="I18N.t('cfg.dtModelImage')">
+              <div style="display: flex; gap: 8px; width: 100%;">
+                <el-select v-model="f.model_image" filterable allow-create clearable style="flex: 1;"
+                           :placeholder="I18N.t('cfg.dtModelPh')">
+                  <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
+                </el-select>
+                <el-button :loading="loadingDtModels" @click="fetchDtModels">{{ I18N.t('cfg.fetchModels') }}</el-button>
+              </div>
+              <div class="hint">{{ I18N.t('cfg.dtModelGrpcHint') }}</div>
+            </el-form-item>
+            <el-form-item :label="I18N.t('cfg.presetImage')">
+              <el-select v-model="f.preset_image" filterable allow-create clearable style="width: 100%"
+                         :placeholder="I18N.t('cfg.presetPh')" @change="onPresetChange('image')">
+                <el-option v-for="p in presets" :key="'pi' + p.name" :value="p.name"
+                           :label="p.name + (p.video ? ' · video' : '')" />
+              </el-select>
+              <div class="hint">{{ I18N.t('cfg.presetHint') }}</div>
+            </el-form-item>
+            <el-form-item :label="I18N.t('cfg.dtModelVideo')">
+              <el-select v-model="f.model_video" filterable allow-create clearable style="width: 100%"
+                         :placeholder="I18N.t('cfg.dtModelPh')">
+                <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="I18N.t('cfg.presetVideo')">
+              <el-select v-model="f.preset_video" filterable allow-create clearable style="width: 100%"
+                         :placeholder="I18N.t('cfg.presetPh')" @change="onPresetChange('video')">
+                <el-option v-for="p in presets" :key="'pv' + p.name" :value="p.name"
+                           :label="p.name + (p.video ? ' · video' : '')" />
+              </el-select>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxSideOpt')">
               <el-select v-model="f.max_side" style="width: 220px;">
@@ -218,8 +246,61 @@ Views.configs = {
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
       supports_vision: 'yes', thinking: 'default', thinking_param: 'auto',
-      max_side: 0, max_frames: 0,
+      preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_frames: 0,
+    });    const presets = ref([]);        // gRPC 预设（/api/dt-presets）
+    const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
+    const loadingDtModels = ref(false);
+    const presetModels = computed(() => {
+      const out = [];
+      for (const p of presets.value) {
+        if (p.model && !out.includes(p.model)) out.push(p.model);
+      }
+      return out;
     });
+    // 模型下拉候选：app 实际已下载的模型（优先）+ 预设默认模型（兜底）
+    const modelChoices = computed(() => {
+      const seen = new Set();
+      const out = [];
+      for (const m of dtModels.value) {
+        if (m.file && !seen.has(m.file)) {
+          seen.add(m.file);
+          out.push({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') });
+        }
+      }
+      for (const f of presetModels.value) {
+        if (f && !seen.has(f)) { seen.add(f); out.push({ file: f, label: f }); }
+      }
+      return out;
+    });
+    async function loadPresets() {
+      try {
+        const data = await API.get('/api/dt-presets');
+        presets.value = data.presets || [];
+      } catch (e) { /* 未安装 drawthings-py 时为空 */ }
+    }
+    async function fetchDtModels() {
+      if (!f.base_url) {
+        ElementPlus.ElMessage.warning(I18N.t('cfg.urlRequired'));
+        return;
+      }
+      loadingDtModels.value = true;
+      try {
+        const data = await API.get('/api/dt-models?base_url=' + encodeURIComponent(f.base_url));
+        dtModels.value = data.models || [];
+        if (!dtModels.value.length) ElementPlus.ElMessage.warning(I18N.t('cfg.noDtModels'));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        loadingDtModels.value = false;
+      }
+    }
+    function onPresetChange(kind) {
+      const name = kind === 'video' ? f.preset_video : f.preset_image;
+      const p = presets.value.find(x => x.name === name);
+      if (!p || !p.model) return;
+      if (kind === 'video') { if (!f.model_video) f.model_video = p.model; }
+      else if (!f.model_image) f.model_image = p.model;
+    }
 
     async function load() {
       try {
@@ -278,18 +359,19 @@ Views.configs = {
 
     const urlPh = computed(() => {
       if (f.config_type === 'llm') return 'http://127.0.0.1:11434/v1';
-      return 'http://127.0.0.1:7860';
+      return '127.0.0.1:7859';
     });
     const urlHint = computed(() => {
       if (f.config_type === 'llm') return I18N.t('cfg.urlHintLlm');
-      return I18N.t('cfg.urlHintDt');
+      return I18N.t('cfg.urlHintGrpc');
     });
 
     function openNew(type) {
       editId.value = '';
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
-        thinking: 'default', thinking_param: 'auto', max_side: 0, max_frames: 0,
+        thinking: 'default', thinking_param: 'auto',
+        preset_image: '', preset_video: '', model_image: '', model_video: '', max_side: 0, max_frames: 0,
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -300,9 +382,12 @@ Views.configs = {
       if (type === 'drawthings') {
         Object.assign(f, {
           config_type: 'drawthings', name: row.name, base_url: row.base_url,
+          preset_image: row.preset_image || '', preset_video: row.preset_video || '',
+          model_image: row.model_image || '', model_video: row.model_video || '',
           max_side: row.max_side || 0,
           max_frames: row.max_frames || 0,
         });
+        if (row.base_url) fetchDtModels();  // 预取已下载模型
       } else {
         Object.assign(f, {
           config_type: 'llm', name: row.name, base_url: row.base_url,
@@ -366,13 +451,17 @@ Views.configs = {
     const fmt = (s) => (s || '').slice(0, 19).replace('T', ' ');
     function dtMeta(r) {
       const p = [];
+      if (r.model_image) p.push(I18N.t('cfg.dtMetaImage', r.model_image));
+      if (r.model_video) p.push(I18N.t('cfg.dtMetaVideo', r.model_video));
       p.push(I18N.t(r.max_side ? 'cfg.maxSide' : 'cfg.maxSideNone', r.max_side ? r.max_side : ''));
       if (r.max_frames) p.push(I18N.t('cfg.frames', r.max_frames));
       return p.join(' · ');
     }
-    onMounted(() => { load(); loadBasic(); scrollByQuery(); });
+    onMounted(() => { load(); loadBasic(); loadPresets(); scrollByQuery(); });
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
+      presets, presetModels, onPresetChange,
+      dtModels, loadingDtModels, modelChoices, fetchDtModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
       urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,
     };

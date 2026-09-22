@@ -95,8 +95,13 @@ This repository ships a **Chinese** document and an **English** document (identi
     各会话历史与上下文相互独立。
 - **对话历史落库**：用户消息、助手回复（含生成媒体与提示词）均存入 SQLite
   （`micro_works` / `micro_sessions` / `micro_messages`），刷新不丢；多轮上下文从数据库取最近 20 条。
+  助手回复按**有序内容块**（`micro_messages.parts`：文本 / 生成 / 错误）落库，
+  文本与生成结果严格保持发生顺序，一次回复可含多张图/视频；刷新后与流式过程完全一致。
   空标题的会话/作品自动取首条用户消息命名；旧库（配置随会话的旧结构）启动时自动迁移。
 - **统一对话 + 流式输出（SSE）**：与所选 LLM 多轮对话（构思/编剧/提示词），回复逐字流式显示。
+  生成块按事件 id 从「生成中（转圈）」收束为「✓ 已生成 / ⚠ 生成失败」，提示词默认折叠（点「提示词」展开），不再重复展示。
+- **对话区交互**：消息区高度自适应视口（不再写死偏移）；打开会话 / 图片陆续加载时自动贴底，
+  用户上翻后停止跟随并出现「↓ 回到底部」；会话侧栏可折叠（按作品记忆），切换会话即中断进行中的生成。
 - **function call 自动生成**：需要出图/出视频时，由模型**自动调用 `generate_media` 工具**
   （结合上下文提炼详细英文提示词），再调 DrawThings 产出单张图/单个视频，
   结果直接嵌进对话气泡（含提示词）。
@@ -105,6 +110,9 @@ This repository ships a **Chinese** document and an **English** document (identi
   非视觉模型不提供该入口。
 - **Markdown 渲染**：助手回复按 Markdown 渲染（标题/嵌套列表/表格/代码块/引用等，
   先转义后转换，防 XSS）；代码块支持一键复制，宽表格横向滚动；打开会话自动定位最新消息。
+- **作品页签（图 / 视频二级 tab + 导出）**：作品页「作品」页签把该作品下**全部会话**生成的媒体用**二级 tab 切换「图片 / 视频」**，
+  各 tab 支持 **单个 / 勾选 / 全部** 导出——图片可导出 **ZIP 或 PDF**（多页），视频导出 **ZIP**
+  （ZIP 按导出顺序命名，分 `images/` 与 `videos/` 子目录）；仍可多选批量删除（连同消息与媒体文件）。
 - **作品选项**：LLM 配置 / DrawThings 配置（可不选 = 纯对话）；随作品保存
   （供其下全部会话共用），作品页可修改。
   产出类型（图像/视频）**无需选择**：每次生成时按 app 当前加载的模型自动判断
@@ -117,14 +125,13 @@ This repository ships a **Chinese** document and an **English** document (identi
 ### 配置字段
 
 - **LLM 配置**：`supports_vision`（图片输入）= 支持图片输入（多模态，剧本阶段可参考上一帧/首图）/ 纯文本（不附带任何参考图）。
-- **DrawThings 配置**：无模型类型（出图/出视频由 app 里当前加载的模型决定，
-  所有项目/作品可选任意 DrawThings 配置）。
-  个性化参数：`max_side`（最大分辨率，仅最长边，具体分辨率由智能体按场景决定、
-  最长边超过上限时等比缩小）、`max_frames`（视频最大帧数上限，
-  实际帧数 = min(app 当前帧数, 上限)）——**0 = 不限/跟随 app 当前值**。
-  **单视频时长硬上限 8 秒**：按 app 当前 fps 换算成帧数（fps × 8）后强制限幅，
-  fps 读不到时回退 24fps；任何入口（智能体 / 流水线）都不可突破。
-  模型不能指定，永远跟随 app 当前选择。
+- **DrawThings 配置**（仅 gRPC，app 里 API server 设为 gRPC）：
+  **图像模型 / 视频模型**（`model_image` / `model_video`，各可空、至少填一个；点「获取模型」从 app 读取已下载模型）
+  与 **图像预设 / 视频预设**（`preset_image` / `preset_video`，drawthings-py 预设，提供 steps / sampler / 尺寸等；
+  可空则按模型名推断）。所有项目/作品可选任意 DrawThings 配置。
+  个性化参数：`max_side`（最大分辨率，仅最长边，图片与视频都限幅）、
+  `max_frames`（视频最大帧数上限，实际帧数 = min(预设/调用方帧数, 上限)）——**0 = 不限**。
+  **单视频时长硬上限 8 秒**：按 fps 换算成帧数（fps × 8）后强制限幅。
 
 ### 目录结构
 
@@ -139,7 +146,7 @@ This repository ships a **Chinese** document and an **English** document (identi
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 统一 Agent 层（模型构造 / 结构化输出 / 消息历史）
-│   ├── drawthings.py    # Draw Things 客户端（可配置；HTTP 协议）
+│   ├── drawthings.py    # Draw Things gRPC 客户端（出图 + 出视频，drawthings-py）+ 共享工具/工厂
 │   └── pipeline.py      # 流水线编排（按项目所选 config 运行时构建 Agent）
 ├── static/
 │   ├── vendor/          # 前端依赖（本地下载，免构建/离线）：vue / vue-router / element-plus（js+css+dark+zh-cn+en）/ icons
@@ -159,7 +166,7 @@ This repository ships a **Chinese** document and an **English** document (identi
   `/micro` 作品列表 · `/micro/:id(/:sid)` 作品对话。未知路径由 FastAPI 兜底返回 SPA 外壳，
   任意深链刷新可用（前端路由再匹配；未匹配重定向首页）。
 - **数据**：所有页面经 `static/spa/js/api.js`（fetch 封装 + SSE 解析）调 `/api/*`；
-  对话页用 fetch 流读 SSE（`POST /api/micro/{id}/{sid}/chat`），逐事件更新气泡/媒体/状态行。
+  对话页用 fetch 流读 SSE（`POST /api/micro/{id}/{sid}/chat`），按事件 id 更新有序内容块（文本/生成/媒体）。
 - **组件**：列表用 `el-table`+筛选+`el-pagination`，弹窗用 `el-dialog`，删除用 `el-popconfirm`，
   步骤用 `el-steps`，首图/章节图用 `el-image`（teleported 预览），图片放大用 `el-image-viewer`，
   表单用 `el-form`/`el-select`/`el-radio-group`；提示统一 `ElMessage`。
@@ -242,44 +249,29 @@ python main.py                # 访问 http://127.0.0.1:8010
 
 ### 接入真实 Draw Things
 
-使用 Draw Things app 内置 **HTTP API**（A1111 / SD-WebUI 兼容，图、视频都走这条），
-协议字段已按 `drawthingsai/Draw-Things-community` 源码逐一对齐（2026-09）。
+只使用 Draw Things app 的 **gRPC API**（app 内「API server」设为 gRPC，默认端口 7859；端点填 `host:port`）。
+HTTP API 已移除：它对视频模型只返回单帧 PNG，无法出视频。
 
-在 Draw Things app 内开启 HTTP 服务器，端口以 app 显示为准（如 `http://127.0.0.1:7860`）。端点：
+#### 配置要点
 
-| 方法 | 路径 | 用途 |
-|------|------|------|
-| POST | `/sdapi/v1/txt2img` | 文生图 |
-| POST | `/sdapi/v1/img2img` | 图生图 / 视频（带 `init_images`） |
-| GET  | `/`、`/sdapi/v1/options` | 返回 app 当前参数集（含 `width`/`height`） |
+- 依赖 `drawthings-py`（`requirements.txt` 已含 `drawthings-py[ffmpeg]`）：构建 FlatBuffer 生成配置、
+  接收**帧序列**，并用 ffmpeg 合成视频（LTX 等还会带回音轨，浏览器可直接播放）。
+- gRPC 请求**必须自带完整生成配置**，因此配置里要指定：
+  - **图像模型 / 视频模型**（`model_image` / `model_video`）：各可留空，**至少填一个**（只填一个 = 只支持该类型）。
+    点「获取模型」即可从 app 读取**已下载的模型**（gRPC `get_models`，带名称与是否视频）。
+  - **图像预设 / 视频预设**（`preset_image` / `preset_video`）：`drawthings-py` 自带的配置模板，
+    提供 steps / sampler / guidance / 尺寸等（gRPC 协议本身没有「预设」概念，只接受一份完整配置）；
+    留空则按模型名自动推断（ltx / wan / hunyuan 等）。
+- 生成前会在同一连接内校验模型已下载，不存在直接报错（避免 app 退出）。
+- 分辨率：图片 = 调用方（智能体）决定 > 预设，受 `max_side`（最长边）限幅；**视频同样受 `max_side` 限幅**
+  （0 = 用预设尺寸。LTX 预设默认 1280×768，很吃显存，实测 25 帧 >10 分钟；建议 `max_side=768` → 768×448，
+  25 帧约 90 秒）。
+- 帧数 = 预设帧数，受 `max_frames` 上限与 **8 秒硬上限**（fps × 8）双重约束（`max_frames=0` = 不限）。
+- 连续性参考：漫画沿用上一张图、短剧沿用上一段视频末帧（客户端自动抽取）。
 
-- 请求只接受以下字段（**未知字段直接 422 拒绝**）：
-  `prompt, negative_prompt, model, width, height, steps, guidance_scale(=cfg_scale),
-  seed, sampler, batch_count(=n_iter), batch_size, strength(=denoising_strength),
-  restore_faces, init_images([base64 原图字节])`，
-  视频另加 `num_frames, motion_scale, guiding_frame_noise, start_frame_guidance,
-  stage_2_steps, stage_2_guidance, stage_2_shift, compression_artifacts(h264/h265/jpeg/disabled)`。
-- `sampler` 取枚举缩写：`"DPM++ 2M Karras"` / `"Euler a"` / `"DDIM"` / `"UniPC"` / `"LCM"` …
-- 响应：`{"images": ["<base64 原始字节>", ...]}`。
-- **注意**：`img2img` 的 `init_images` 尺寸必须与 `width`/`height` **完全一致**，
-  否则 422——本应用会自动读 `/sdapi/v1/options` 的当前宽高并把参考图缩放到该尺寸。
-
-分辨率优先级：章节自身的宽/高 > 大纲里的**默认分辨率** > 智能体在剧本阶段按场景构图决定
- （`ScriptOut.width/height`，64 的倍数）；流水线生成时传给客户端，客户端再按配置 `max_side`
- （最大分辨率，仅最长边）限幅（超长边等比缩小到上限内）。大纲页可设**默认分辨率**，
- 每章卡片里也可**手动调整分辨率**（宽×高，保存后重生成生效）。
- 微创作等无智能体决定的场景只发 `prompt`（+参考图），
- 其余参数留空 = 用 app 当前选中的设置；调用方也可通过 `params` 显式覆盖。
-
-在 **⚙ 配置管理 → 新建配置 → DrawThings** 里填端点地址（`http://host:port`），
-可按需设置：最大分辨率（仅最长边：不限 / 512 / 768 / 1024）、
-最大帧数上限（视频，实际帧数 = min(app 当前帧数, 上限)）
-（**0 = 跟随 app 当前值**）。模型不能指定，永远跟随 app 里当前选中的模型。
-另外，**单视频时长硬上限为 8 秒**：客户端按 app 当前 fps 换算帧数并强制限幅
-（fps 读不到时回退 24fps），不受配置或调用方影响。
-
-> 不使用 gRPC（ImageGenerationService）：app 的 gRPC 服务收到生成请求会闪退，
-> 本应用已移除 gRPC 支持，app 内也请只开启 HTTP 服务器。
+分辨率优先级（项目）：章节自身的宽/高 > 大纲里的**默认分辨率** > 智能体在剧本阶段按场景构图决定
+（`ScriptOut.width/height`，64 的倍数）；生成时再按配置 `max_side`（最长边）限幅。
+大纲页可设**默认分辨率**，每章卡片里也可**手动调整分辨率**。
 
 ---
 
@@ -366,8 +358,14 @@ A lightweight, no-project creation desk (top bar "✨ Quick Create") — **a Qui
     with each session's history and context fully independent.
 - **Chat history persisted**: user messages and assistant replies (including generated media and prompts) are stored in SQLite
   (`micro_works` / `micro_sessions` / `micro_messages`), so they survive refreshes; multi-turn context is pulled from the database (last 20 messages).
+  Assistant replies are stored as **ordered content blocks** (`micro_messages.parts`: text / generation / error), so text and generated
+  results keep their exact chronological order, one reply can contain several images/videos, and a refresh matches the streaming exactly.
   Untitled sessions/works are auto-named from the first user message; old databases (the legacy per-session config structure) are migrated on startup.
 - **Unified chat + streaming output (SSE)**: multi-turn conversation with the chosen LLM (ideation / scripting / prompts), with replies displayed token by token.
+  A generation block settles by event id from "generating (spinner)" to "✓ Generated / ⚠ Failed"; the prompt is collapsed by default (click "Prompt" to expand) and shown only once.
+- **Chat area interaction**: the message area adapts to the viewport height (no more brittle offset); opening a session / images loading
+  auto-pins to the bottom, while scrolling up stops the follow and reveals a "↓ Back to bottom" button; the session sidebar collapses
+  (remembered per work), and switching sessions aborts any in-flight generation.
 - **Auto-generation via function calling**: when an image/video is needed, the model **auto-calls the `generate_media` tool**
   (distilling a detailed English prompt from the context), then calls Draw Things to produce a single image/video;
   the result is embedded directly into the chat bubble (with the prompt).
@@ -376,6 +374,9 @@ A lightweight, no-project creation desk (top bar "✨ Quick Create") — **a Qui
   Non-vision models do not show this entry.
 - **Markdown rendering**: assistant replies are rendered as Markdown (headings / nested lists / tables / code blocks / quotes, etc.,
   escaped first then converted, to prevent XSS); code blocks support one-click copy, wide tables scroll horizontally; opening a session auto-scrolls to the latest message.
+- **Works tab (image / video second-level tabs + export)**: the work page's "Works" tab groups all media generated by **all sessions** of the work
+  under a **second-level tab switch (Images / Videos)**; each tab supports **single / selected / all** export — images as **ZIP or PDF** (multi-page),
+  videos as **ZIP** (the ZIP is named in export order and split into `images/` and `videos/` subfolders); multi-select batch delete is still available (removes the messages and media files too).
 - **Work options**: LLM config / Draw Things config (optional = chat only); saved with the work
   (shared by all its sessions) and editable on the work page.
   The output type (image/video) **needs no selection**: each generation auto-detects from the model currently loaded in the app
@@ -388,12 +389,14 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ### Configuration fields
 
 - **LLM config**: `supports_vision` (image input) = supports image input (multimodal; can reference the previous frame/first image during scripting) / text-only (no reference images).
-- **Draw Things config**: no model type (image/video output is decided by the model currently loaded in the app,
-  and any project/work can use any Draw Things config).
-  Personalized params: `max_side` (max resolution, longest side only; the exact resolution is decided by the agent per scene,
-  downscaled proportionally if the longest side exceeds the cap) and `max_frames` (max video frame cap;
-  actual frames = min(app current frames, cap)) — **0 = unlimited / follow the app's current value**.
-  The model cannot be specified; it always follows the app's current selection.
+- **Draw Things config** (gRPC only; set the app's API server to gRPC):
+  **image model / video model** (`model_image` / `model_video`; each may be empty but at least one is required; click
+  "Fetch models" to read the downloaded models from the app) and **image preset / video preset**
+  (`preset_image` / `preset_video`, drawthings-py presets supplying steps / sampler / size etc.; inferred from the model
+  name when empty). Any project/work can use any Draw Things config.
+  Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
+  `max_frames` (max video frame cap; actual frames = min(preset/caller frames, cap)) — **0 = unlimited**.
+  There is also a **hard 8-second cap** on a single video (frames = fps × 8).
 
 ### Directory structure
 
@@ -408,7 +411,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 unified agent layer (model construction / structured output / message history)
-│   ├── drawthings.py    # Draw Things client (configurable; HTTP protocol)
+│   ├── drawthings.py    # Draw Things gRPC client (images + video, via drawthings-py) + shared helpers/factory
 │   └── pipeline.py      # pipeline orchestration (builds the agent at runtime from the project's config)
 ├── static/
 │   ├── vendor/          # frontend deps (downloaded locally, build-free/offline): vue / vue-router / element-plus (js+css+dark+zh-cn+en) / icons
@@ -428,7 +431,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   `/micro` work list · `/micro/:id(/:sid)` work chat. Unknown paths fall back to the SPA shell from FastAPI,
   so deep-link refreshes work (the frontend router re-matches; unmatched routes redirect home).
 - **Data**: every page calls `/api/*` through `static/spa/js/api.js` (fetch wrapper + SSE parser);
-  the chat page reads SSE via a fetch stream (`POST /api/micro/{id}/{sid}/chat`), updating bubbles/media/status per event.
+  the chat page reads SSE via a fetch stream (`POST /api/micro/{id}/{sid}/chat`), updating ordered content blocks (text / generation / media) by event id.
 - **Components**: lists use `el-table`+filters+`el-pagination`, dialogs use `el-dialog`, deletes use `el-popconfirm`,
   steps use `el-steps`, first/chapter images use `el-image` (teleported preview), image zoom uses `el-image-viewer`,
   forms use `el-form`/`el-select`/`el-radio-group`; toasts use `ElMessage` uniformly.
@@ -511,39 +514,27 @@ fix it and re-run that step; already-generated content is unaffected.
 
 ### Connecting to a real Draw Things
 
-Use the Draw Things app's built-in **HTTP API** (A1111 / SD-WebUI compatible; both images and video go through it).
-The protocol fields are aligned one-to-one with the `drawthingsai/Draw-Things-community` source (2026-09).
+This app uses **only the Draw Things gRPC API** (set "API server" to gRPC in the app; default port 7859; enter the
+endpoint as `host:port`). The HTTP API has been removed: it only returns a single still frame for video models.
 
-Enable the HTTP server inside the Draw Things app; the port is whatever the app shows (e.g. `http://127.0.0.1:7860`). Endpoints:
+#### Configuration notes
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/sdapi/v1/txt2img` | text-to-image |
-| POST | `/sdapi/v1/img2img` | image-to-image / video (with `init_images`) |
-| GET  | `/`, `/sdapi/v1/options` | returns the app's current parameter set (incl. `width`/`height`) |
+- Depends on `drawthings-py` (already in `requirements.txt` as `drawthings-py[ffmpeg]`): it builds the FlatBuffer
+  generation config, receives the **frame sequence**, and assembles video with ffmpeg (LTX etc. also return audio,
+  playable in the browser).
+- A gRPC request **must carry the full generation config**, so the config specifies:
+  - **image model / video model** (`model_image` / `model_video`): each may be empty, but **at least one is required**
+    (only one set = only that type is supported). Click "Fetch models" to read the **downloaded models** from the app
+    (gRPC `get_models`, with names and a video flag).
+  - **image preset / video preset** (`preset_image` / `preset_video`): config templates bundled with `drawthings-py`
+    supplying steps / sampler / guidance / size etc. (the gRPC protocol itself has no "preset" concept and only accepts
+    a full config); if empty, a preset is inferred from the model name (ltx / wan / hunyuan …).
+- The model is validated (on the same connection) before generation, so a missing model errors out instead of quitting the app.
+- Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
+  (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
+  → 768×448, ~90 s for 25 frames).
+- Frames = the preset's frame count, bounded by `max_frames` and the **hard 8-second cap** (fps × 8); `max_frames=0` = unlimited.
+- Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically).
 
-- Requests accept only these fields (**unknown fields are rejected with 422**):
-  `prompt, negative_prompt, model, width, height, steps, guidance_scale(=cfg_scale),
-  seed, sampler, batch_count(=n_iter), batch_size, strength(=denoising_strength),
-  restore_faces, init_images([base64 raw bytes])`,
-  plus for video: `num_frames, motion_scale, guiding_frame_noise, start_frame_guidance,
-  stage_2_steps, stage_2_guidance, stage_2_shift, compression_artifacts(h264/h265/jpeg/disabled)`.
-- `sampler` takes an enum abbreviation: `"DPM++ 2M Karras"` / `"Euler a"` / `"DDIM"` / `"UniPC"` / `"LCM"` …
-- Response: `{"images": ["<base64 raw bytes>", ...]}`.
-- **Note**: `img2img`'s `init_images` size must **exactly match** `width`/`height`,
-  or you get 422 — this app reads the current width/height from `/sdapi/v1/options` and resizes the reference image to that size automatically.
-
-Resolution priority: the chapter's own width/height > the outline's **default resolution** > the agent's per-scene choice during scripting
- (`ScriptOut.width/height`, multiples of 64); the value is passed to the client at generation time, which then caps it by the config's
- `max_side` (max resolution, longest side only, downscaling the over-long side proportionally). The outline page sets the **default
- resolution**, and each chapter card can also **adjust resolution manually** (width×height; take effect after re-generating).
- In scenarios without an agent decision (e.g. Quick Create), only `prompt` (+ reference image) is sent;
- the remaining params are left empty = use the app's current settings; callers can also override via `params`.
-
-In **⚙ Settings → New config → Draw Things**, fill in the endpoint address (`http://host:port`);
-optionally set: max resolution (longest side only: unlimited / 512 / 768 / 1024) and
-max frame cap (video; actual frames = min(app current frames, cap))
-(**0 = follow the app's current value**). The model cannot be specified; it always follows the model currently selected in the app.
-
-> gRPC (ImageGenerationService) is not used: the app's gRPC service crashes when it receives a generation request;
-> this app has removed gRPC support, so enable only the HTTP server in the app.
+Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's
+per-scene choice during scripting (`ScriptOut.width/height`, multiples of 64); then capped by `max_side`.

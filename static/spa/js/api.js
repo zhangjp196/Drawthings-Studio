@@ -101,4 +101,28 @@ window.API = {
       }
     }
   },
+
+  // 文件下载：GET -> Blob，按 Content-Disposition 命名并触发保存；非 2xx 抛本地化错误
+  download: async (url) => {
+    const resp = await fetch(url, { headers: { 'Accept-Language': API._lang() } });
+    if (!resp.ok) {
+      let detail = API._t('common.httpError', resp.status);
+      try {
+        const j = await resp.json();
+        if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+      } catch (e) { /* 非 JSON 错误体 */ }
+      throw new Error(detail);
+    }
+    const blob = await resp.blob();
+    const cd = resp.headers.get('content-disposition') || '';
+    let name = 'download';
+    let m = /filename\*=utf-8''([^;]+)/i.exec(cd);
+    if (m) { try { name = decodeURIComponent(m[1].trim()); } catch (e) {} }
+    else if ((m = /filename="?([^";]+)"?/i.exec(cd))) { name = m[1].trim(); }
+    const a = document.createElement('a');
+    const obj = URL.createObjectURL(blob);
+    a.href = obj; a.download = name; a.style.display = 'none';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(obj), 1000);
+  },
 };

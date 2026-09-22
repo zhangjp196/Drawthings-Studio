@@ -41,7 +41,7 @@ from .agent import (
     image_data_uri,
     make_agent,
 )
-from .drawthings import DrawThingsClient, extract_last_frame
+from .drawthings import build_drawthings_client, extract_last_frame
 
 
 # 封面自动模式叠加作品名称用的中文字体：按系统取第一个存在的（结果缓存，避免反复探盘）
@@ -153,9 +153,9 @@ class Pipeline:
         return llm_cfg, dt_cfg
 
     def _clients(self, db, project, lang: str = "zh"):
-        """DrawThings 客户端（出图/出视频用）。"""
+        """DrawThings 客户端（出图/出视频用；仅 gRPC）。"""
         _, dt_cfg = self._configs(db, project, lang)
-        return DrawThingsClient(dt_cfg, data_dir=self.data_dir)
+        return build_drawthings_client(dt_cfg, self.data_dir)
 
     def _llm_cfg(self, db, project, lang: str = "zh") -> LLMConfig:
         llm_cfg, _ = self._configs(db, project, lang)
@@ -946,7 +946,10 @@ class Pipeline:
         return ("你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
                 "写本章详细剧本描述（description）和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
                 f"{shot}\n"
-                "分辨率统一由项目总体设定决定，无需决定 width/height（不要在提示词里写具体分辨率）。")
+                "分辨率统一由项目总体设定决定，无需决定 width/height（不要在提示词里写具体分辨率）。\n"
+                "只输出一个 JSON 对象，字段固定为 description 与 prompt（都是字符串）："
+                "description 用一段文字概括本章（即使包含多个分镜，也合成一段文字，不要拆成数组）；"
+                "prompt 为单个英文提示词。不要输出数组、Markdown 代码块或任何额外文字。")
 
     async def _gen_one_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
                                chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:

@@ -13,10 +13,13 @@
 """
 import asyncio
 import base64
+import itertools
 import json
 import logging
+import re
 import time
 import uuid
+import zipfile
 from functools import partial
 from pathlib import Path
 
@@ -25,6 +28,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic_ai import Agent, RunContext
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -36,7 +40,7 @@ from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessa
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
 from services.pipeline import Pipeline, _now, chars_from_raw, hex_to_rgb, run_sync
-from services.drawthings import DrawThingsClient, MAX_VIDEO_FRAMES
+from services.drawthings import build_drawthings_client, MAX_VIDEO_FRAMES
 
 BASE_DIR = Path(__file__).resolve().parent
 MEDIA_DIR = Path(data_dir) / "media"
@@ -149,6 +153,10 @@ def _llm_view(c) -> dict:
 def _dt_view(c) -> dict:
     return {
         "id": c.id, "name": c.name, "base_url": c.base_url,
+        "model_image": getattr(c, "model_image", "") or "",
+        "model_video": getattr(c, "model_video", "") or "",
+        "preset_image": getattr(c, "preset_image", "") or "",
+        "preset_video": getattr(c, "preset_video", "") or "",
         "max_side": c.max_side or 0,
         "max_frames": c.max_frames or 0,
         "created_at": c.created_at,
@@ -171,12 +179,20 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
                                 detail=L(lang, f"{key} 超出范围（0~{max_v}，0=跟随 app）",
                                          f"{key} out of range (0~{max_v}, 0 = follow app)"))
         return v
+    model_image = str(body.get("model_image") or "").strip()
+    model_video = str(body.get("model_video") or "").strip()
+    if not (model_image or model_video):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "至少需要指定一个模型（图像或视频）",
+                                     "At least one model (image or video) is required"))
     return {
+        "model_image": model_image,
+        "model_video": model_video,
+        "preset_image": str(body.get("preset_image") or "").strip(),
+        "preset_video": str(body.get("preset_video") or "").strip(),
         "max_side": int(num("max_side", int, 2048)),
         "max_frames": int(num("max_frames", int, MAX_VIDEO_FRAMES)),
     }
-
-
 def _project_view(p: Project, chapter_count: int = 0) -> dict:
     scope = p.scope or {}
     return {
@@ -212,7 +228,7 @@ def _clamp_page(page: int, size: int) -> tuple[int, int]:
 
 
 # ---------------- 配置管理（JSON API） ----------------
-CFG_LIMITS = {"llm": 3, "drawthings": 3}  # 配置数量上限：LLM 最多 3 个，DrawThings 最多 3 个
+CFG_LIMITS = {"llm": 3, "drawthings": 9}  # 配置数量上限：LLM 最多 3 个，DrawThings 最多 9 个
 
 
 @app.get("/api/choices")
@@ -235,6 +251,52 @@ def configs_list(db: Session = Depends(get_db)):
         "llm_count": len(llms), "drawthing_count": len(dts),
         "llm_max": CFG_LIMITS["llm"], "dt_max": CFG_LIMITS["drawthings"],
     }
+
+
+_DT_PRESETS_CACHE: list[dict] | None = None
+
+
+@app.get("/api/dt-presets")
+def dt_presets():
+    """gRPC 可选预设（drawthings-py）：名称 + 默认模型 + 是否视频模型。未安装返回空列表。"""
+    global _DT_PRESETS_CACHE
+    if _DT_PRESETS_CACHE is not None:
+        return {"presets": _DT_PRESETS_CACHE, "available": True}
+    try:
+        from drawthings_py import Configs
+        from drawthings_py.configs.presets import Presets
+        from services.drawthings import is_video_model
+    except Exception:
+        return {"presets": [], "available": False}
+    items: list[dict] = []
+    for p in Presets:
+        name = str(p.value)
+        model = ""
+        try:
+            model = str(Configs.from_preset(name)["model"] or "")
+        except Exception:
+            pass
+        items.append({"name": name, "model": model, "video": is_video_model(model or name)})
+    _DT_PRESETS_CACHE = items
+    return {"presets": items, "available": True}
+
+
+@app.get("/api/dt-models")
+def dt_models(request: Request, base_url: str = "", refresh: int = 1):
+    """连接 Draw Things gRPC 返回已下载的基座模型清单（供配置页下拉选择）。"""
+    lang = _lang(request)
+    if not base_url.strip():
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请先填写 gRPC 端点（host:port）",
+                                     "Enter the gRPC endpoint (host:port) first"))
+    try:
+        from services.drawthings import parse_endpoint, fetch_models
+        host, port = parse_endpoint(base_url)
+        models = fetch_models(host, port, refresh=bool(refresh))
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"获取模型列表失败：{e}", f"Failed to fetch models: {e}"))
+    return {"models": models}
 
 
 async def _json_body(request: Request) -> dict:
@@ -636,6 +698,59 @@ async def micro_works_delete(request: Request, work_id: str, db: Session = Depen
     return {"ok": True, "deleted": len(msgs)}
 
 
+@app.get("/api/micro/{work_id}/works/export")
+def micro_works_export(request: Request, work_id: str, ids: str = "", format: str = "zip",
+                       db: Session = Depends(get_db)):
+    """导出所选作品媒体（按 ids 顺序）：format=zip（图 + 视频）/ pdf（仅图片）。
+    前端按「图片 / 视频」分区各自支持 单个 / 勾选 / 全部 导出。"""
+    lang = _lang(request)
+    work = db.get(MicroWork, work_id)
+    if not work:
+        raise HTTPException(status_code=404, detail=L(lang, "作品不存在", "Work not found"))
+    id_list: list[int] = []
+    for x in (ids or "").split(","):
+        x = x.strip()
+        if x.isdigit() and int(x) not in id_list:
+            id_list.append(int(x))
+    if not id_list:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请选择要导出的作品", "Please select works to export"))
+    msgs = (db.query(MicroMessage)
+            .join(MicroSession, MicroMessage.session_id == MicroSession.id)
+            .filter(MicroSession.micro_id == work_id, MicroMessage.id.in_(id_list)).all())
+    by_id = {m.id: m for m in msgs}
+    files: list[tuple[Path, bool]] = []
+    for mid in id_list:                       # 保持前端选择顺序
+        m = by_id.get(mid)
+        if not m:
+            continue
+        p = _media_path_from_url(m.media_url)
+        if p is not None:
+            files.append((p, _is_video_url(m.media_url)))
+    if not files:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "没有可导出的媒体", "No media to export"))
+    if format == "pdf":
+        if any(is_video for _, is_video in files):
+            raise HTTPException(status_code=400,
+                                detail=L(lang, "PDF 仅支持图片，视频请导出 ZIP",
+                                         "PDF supports images only — export videos as ZIP"))
+        try:
+            path, fname = _micro_export_pdf(work, files)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=L(lang, f"导出 PDF 失败：{e}", f"Export PDF failed: {e}"))
+        return FileResponse(path, filename=fname, media_type="application/pdf")
+    try:
+        path, fname = _micro_export_zip(work, files)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"导出 ZIP 失败：{e}", f"Export ZIP failed: {e}"))
+    return FileResponse(path, filename=fname, media_type="application/zip")
+
+
 @app.get("/api/micro/{work_id}/{session_id}")
 def micro_session_page(request: Request, work_id: str, session_id: str, db: Session = Depends(get_db)):
     """作品 + 选中会话的消息历史。"""
@@ -653,10 +768,19 @@ def micro_session_page(request: Request, work_id: str, session_id: str, db: Sess
                 imgs = [str(u) for u in json.loads(m.images) if u]
             except (ValueError, TypeError):
                 pass
+        parts = []
+        if m.parts:
+            try:
+                parsed = json.loads(m.parts)
+                if isinstance(parsed, list):
+                    parts = parsed
+            except (ValueError, TypeError):
+                parts = []
         msgs.append({"index": m.index, "role": m.role, "content": m.content,
                      "created_at": m.created_at or "",
                      "duration": m.duration or 0,
-                     "images": imgs, "media_url": m.media_url or "", "prompt": m.prompt or ""})
+                     "images": imgs, "media_url": m.media_url or "", "prompt": m.prompt or "",
+                     "parts": parts})
     view["session_id"] = session.id
     view["messages"] = msgs
     return view
@@ -762,6 +886,76 @@ def _cleanup_message_media(msgs) -> None:
                 pass
 
 
+def _is_video_url(url: str) -> bool:
+    """按扩展名判断媒体是否为视频（媒体落盘时按实际内容定扩展名）。"""
+    return bool(re.search(r"\.(mp4|mov|webm|gif)(?:\?|$)", url or "", re.I))
+
+
+def _media_path_from_url(url: str) -> Path | None:
+    """媒体 URL（/media/xxx）-> 磁盘路径；越界或不存在返回 None。"""
+    name = (url or "").rsplit("/", 1)[-1].split("?")[0]
+    if not name:
+        return None
+    p = MEDIA_DIR / name
+    try:
+        if p.is_file() and p.resolve().is_relative_to(MEDIA_DIR.resolve()):
+            return p
+    except OSError:
+        return None
+    return None
+
+
+def _export_dir() -> Path:
+    d = Path(data_dir) / "exports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _safe_file_base(text: str, fallback: str) -> str:
+    """标题 -> 安全文件名（去掉路径/非法字符，限长）。"""
+    s = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", (text or "").strip())[:40].strip(" ._")
+    return s or fallback
+
+
+def _micro_export_zip(work: MicroWork, files: list[tuple[Path, bool]]) -> tuple[str, str]:
+    """把所选媒体（图/视频）打包为 ZIP：按导出顺序命名，分 images/ 与 videos/ 两个子目录。"""
+    base = _safe_file_base(work.title or work.id, work.id)
+    fname = f"{base}_media.zip"
+    zpath = _export_dir() / fname
+    n_img = sum(1 for _, v in files if not v)
+    n_vid = len(files) - n_img
+    readme = (f"作品：{work.title or work.id}\n"
+              f"图片：{n_img} 张 · 视频：{n_vid} 个\n")
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("README.txt", readme.encode("utf-8"))
+        for i, (p, is_video) in enumerate(files):
+            sub = "videos" if is_video else "images"
+            z.write(str(p), f"{sub}/{i:02d}_{p.name}")
+    return str(zpath), fname
+
+
+def _micro_export_pdf(work: MicroWork, files: list[tuple[Path, bool]]) -> tuple[str, str]:
+    """把所选图片按顺序拼成多页 PDF（仅图片；视频需先导出 ZIP）。"""
+    base = _safe_file_base(work.title or work.id, work.id)
+    fname = f"{base}_images.pdf"
+    ppath = _export_dir() / fname
+    imgs: list[Image.Image] = []
+    for p, _ in files:
+        try:
+            with Image.open(p) as im:      # 及时关闭文件句柄；convert 产生独立图像
+                imgs.append(im.convert("RGB"))
+        except Exception:
+            continue
+    if not imgs:
+        raise ValueError("没有可导出的图片")
+    try:
+        imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)
+    finally:
+        for im in imgs:
+            im.close()
+    return str(ppath), fname
+
+
 def _save_user_images(items: list) -> list[str]:
     """把请求里的图片（data URI 列表）存到 MEDIA_DIR，返回媒体 URL 列表（最多 4 张）。"""
     urls: list[str] = []
@@ -805,14 +999,6 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(work.llm_config_id or "")
     dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
-    # 产出类型不再手动选择：按 app 当前加载的模型自动判断（视频模型 → 视频）
-    media = "image"
-    if dt_cfg:
-        try:
-            # 探测是同步 HTTP 调用：放线程池，避免阻塞事件循环
-            media = await run_sync(DrawThingsClient(dt_cfg, data_dir).detect_media_type)
-        except Exception:
-            media = "image"
 
     # 用户附图：仅所选 LLM 支持视觉时可用（存 MEDIA_DIR，随消息落库）
     image_urls = []
@@ -860,20 +1046,23 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
                 pass
         history.append({"role": r.role, "content": r.content, "images": imgs})
     return StreamingResponse(
-        _micro_stream(db, session, llm_cfg, dt_cfg, media, image_paths,
+        _micro_stream(db, session, llm_cfg, dt_cfg, image_paths,
                       message, history, user_idx + 1, lang),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
-                        media: str, img_paths: list[str],
+                        img_paths: list[str],
                         user_message: str, history: list[dict], assistant_idx: int,
                         lang: str = "zh"):
-    """SSE 事件：token(文本增量) / tool(开始生成) / media(生成结果) /
+    """SSE 事件（有序内容块）：token(文本增量) / tool(开始生成) / media(生成结果) /
     tool_error(生成失败) / error(错误) / done(结束)。
 
-    对话成功后把助手消息（文本 + 媒体）持久化到会话。lang = 请求语言（zh|en），本地化用户可见文案。
+    tool / media / tool_error 携带同一 id：前端按 id 把「生成中 → 已生成 / 失败」归到同一块，
+    不会出现「提示词/媒体重复、spinner 永不停」的错乱。助手回复按「文本 / 生成」实际发生的
+    先后顺序持久化为 parts（JSON 内容块数组），刷新后顺序与流式过程完全一致。
+    lang = 请求语言（zh|en），本地化用户可见文案。
     """
     t0 = time.monotonic()  # 本条回复耗时起点（流式开始 → 落库完成）
     if not llm_cfg:
@@ -881,80 +1070,122 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
         yield _sse("done", {})
         return
 
-    # 未选 DrawThings 配置 = 纯对话模式：不注册生成工具，并明确告知模型
-    if dt_cfg:
-        limit = int(getattr(dt_cfg, "max_side", 0) or 0) or 1024
+    # DrawThings 客户端（gRPC）：按配置的「图像模型 / 视频模型」决定可用产出类型
+    dt = build_drawthings_client(dt_cfg, data_dir) if dt_cfg else None
+    can_image = bool(dt and dt.supports_image())
+    can_video = bool(dt and dt.supports_video())
+
+    if dt and (can_image or can_video):
+        kinds = []
+        if can_image:
+            kinds.append("图片")
+        if can_video:
+            kinds.append("视频")
+        avail = "、".join(kinds)
+        ratio = ""
+        if can_image:
+            limit = int(getattr(dt_cfg, "max_side", 0) or 0) or 1024
+            ratio = (f"生成图片时：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
+                     f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
+                     f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
+                     f"用户未指定时 width/height 传 0。")
+        default_media = "video" if can_video else "image"
         instructions = MC_SYSTEM + (
-            f"图像比例：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
-            f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
-            f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
-            f"用户未指定时 width/height 传 0，跟随 app 当前分辨率。")
+            f"当前只能生成：{avail}。调用 generate_media 时必须用 media 参数指明类型"
+            f"（图片传 media=\"image\"，视频传 media=\"video\"）；用户未明确时默认用 {default_media}。" + ratio)
     else:
         instructions = MC_SYSTEM + "当前未配置生成服务，无法出图/出视频：用户要求生成时，请说明暂时无法生成，" \
                                    "但可以代为撰写详细的英文提示词供其后续使用。"
     model = build_model(llm_cfg)
     agent = Agent(model, instructions=instructions)
 
-    text_parts: list[str] = []
-    media_info: dict = {}
+    # 有序内容块：text / tool（含生成结果与提示词）/ error，按发生顺序保存
+    parts: list[dict] = []
+    tool_ids = itertools.count(1)
+    last_media: dict = {}
+
+    def _add_text(delta: str) -> None:
+        """追加文本增量：与上一块同为文本则合并，否则新起一个文本块（保证与生成块的相对顺序）。"""
+        if parts and parts[-1].get("type") == "text":
+            parts[-1]["text"] = parts[-1].get("text", "") + delta
+        else:
+            parts.append({"type": "text", "text": delta})
 
     async def _run(out: asyncio.Queue):
         try:
             async with agent:
-                if dt_cfg:
-                    dt = DrawThingsClient(dt_cfg, data_dir)
-
+                if dt:
                     @agent.tool
-                    async def generate_media(ctx: RunContext, prompt: str,
+                    async def generate_media(ctx: RunContext, prompt: str, media: str = "",
                                              width: int = 0, height: int = 0) -> str:
-                        """生成图片/视频：根据详细英文提示词产出单张图或单个视频。
+                        """生成图片或视频：根据详细英文提示词产出单张图或单个视频。
 
                         Args:
                             prompt: 详细英文提示词（主体、场景、构图、光线、风格；视频补充运镜与动态）
-                            width: 图像宽（64 的倍数；用户未指定比例时传 0 = 跟随 app 当前分辨率）
-                            height: 图像高（64 的倍数；用户未指定比例时传 0 = 跟随 app 当前分辨率）
+                            media: 产出类型："image" 生成图片 / "video" 生成视频（用户未明确时可留空）
+                            width: 图片宽（64 的倍数；用户未指定比例时传 0）
+                            height: 图片高（64 的倍数；用户未指定比例时传 0）
                         """
-                        # 提示词随工具事件立即下发：生成期间（可达数十秒）气泡内先展示提示词，图片就绪后同气泡出现
-                        if media == "image":
-                            label = L(lang, "正在生成图像…", "Generating image…")
-                        else:
-                            label = L(lang, "正在生成视频…", "Generating video…")
-                        await out.put(("tool", {"label": label, "prompt": prompt}))
+                        kind = (media or "").strip().lower()
+                        if kind not in ("image", "video"):
+                            kind = "video" if can_video else "image"
+                        if (kind == "video" and not can_video) or (kind == "image" and not can_image):
+                            name = "视频" if kind == "video" else "图像"
+                            msg = L(lang, f"未配置{name}模型：请在 DrawThings 配置里填写{name}模型。",
+                                    f"No {'video' if kind == 'video' else 'image'} model configured — set one in the DrawThings config.")
+                            await out.put(("tool_error", {"id": f"t{next(tool_ids)}",
+                                                          "message": msg, "prompt": prompt}))
+                            return f"生成失败：{msg}"
+                        # 提示词随工具事件立即下发：生成期间（可达数十秒）气泡内先展示提示词，媒体就绪后同块出现
+                        tid = f"t{next(tool_ids)}"
+                        label = L(lang, "正在生成图像…", "Generating image…") if kind == "image" \
+                            else L(lang, "正在生成视频…", "Generating video…")
+                        block = {"type": "tool", "id": tid, "label": label, "prompt": prompt,
+                                 "status": "running", "media": kind, "url": "", "message": ""}
+                        parts.append(block)
+                        await out.put(("tool", {"id": tid, "label": label, "prompt": prompt, "media": kind}))
                         params = {}
                         if width and height:
                             params = {"width": int(width), "height": int(height)}
                         try:
-                            if media == "image":
+                            if kind == "image":
                                 path = await run_sync(partial(dt.generate_image, prompt, params=params))
                             else:
                                 path = await run_sync(partial(dt.generate_video, prompt, params=params))
                         except Exception as e:
-                            await out.put(("tool_error", {"message": str(e), "prompt": prompt}))
+                            block["status"] = "error"
+                            block["message"] = str(e)
+                            await out.put(("tool_error", {"id": tid, "message": str(e), "prompt": prompt}))
                             return f"生成失败：{e}。请向用户说明原因并建议如何调整。"
                         url = _media_url(path)
-                        media_info["url"] = url
-                        media_info["prompt"] = prompt
-                        await out.put(("media", {"media": media, "url": url, "prompt": prompt}))
+                        block["status"] = "ok"
+                        block["url"] = url
+                        last_media["url"] = url
+                        last_media["prompt"] = prompt
+                        await out.put(("media", {"id": tid, "media": kind, "url": url, "prompt": prompt}))
                         return f"生成成功，媒体地址：{url}"
 
                 async with agent.run_stream(user_prompt(user_message, img_paths),
                                            message_history=to_message_history(history)) as result:
                     async for text in result.stream_text(delta=True, debounce_by=None):
-                        text_parts.append(text)
+                        _add_text(text)
                         await out.put(("token", {"text": text}))
                     await result.get_output()
-            text = "".join(text_parts).strip()
-            if text or media_info.get("url"):
+            text = "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+            if text or last_media.get("url"):
                 db.add(MicroMessage(session_id=session.id, index=assistant_idx,
                                     role="assistant", content=text, created_at=_now(),
                                     duration=round(time.monotonic() - t0, 1),
-                                    media_url=media_info.get("url", ""),
-                                    prompt=media_info.get("prompt", "")))
+                                    media_url=last_media.get("url", ""),
+                                    prompt=last_media.get("prompt", ""),
+                                    parts=json.dumps(parts, ensure_ascii=False) if parts else None))
                 session.updated_at = _now()
                 db.commit()
             await out.put(("done", {}))
         except Exception as e:
-            await out.put(("error", {"message": L(lang, f"对话失败：{e}", f"Chat failed: {e}")}))
+            msg = L(lang, f"对话失败：{e}", f"Chat failed: {e}")
+            parts.append({"type": "error", "message": msg})
+            await out.put(("error", {"message": msg}))
             await out.put(("done", {}))
         finally:
             await out.put(("__eof__", None))
