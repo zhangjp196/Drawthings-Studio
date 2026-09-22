@@ -9,5 +9,6 @@ tools/flatc
 dist/
 build/
 *.spec
+*.dmg
 assets/icon_1024.png
 assets/Drawthings.icns

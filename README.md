@@ -147,6 +147,7 @@ This repository ships a **Chinese** document and an **English** document (identi
 ├── config_store.py      # 配置增删查（含删除前的“被项目/微创作作品引用”保护）
 ├── i18n.py              # 后端中英文本地化（Accept-Language → zh|en + L() 文案助手）
 ├── build_app.sh         # 一键打包 .app（PyInstaller）
+├── build_dmg.sh         # 一键打包可发布 DMG（.app + 应用程序替身，可选签名/公证）
 ├── tools/make_icon.py   # 生成应用图标（紫色渐变圆角方块 + 四角星）
 ├── requirements.txt
 ├── services/
@@ -266,6 +267,25 @@ python client.py             # 自动拉起本地服务 + 打开原生窗口（m
 - **资源 / 数据分离**：`static/` 打进 bundle（只读）；数据（SQLite + 媒体）在
   `~/Library/Application Support/Drawthings Studio/data`（源码模式仍为 `<项目根>/data`，两者互不影响）。
 - **ffmpeg** 未打包：视频末帧抽取依赖系统 `ffmpeg`（`brew install ffmpeg`），缺失时自动降级、不影响其余功能。
+
+### 打包为 DMG（发布）
+
+在 `.app` 基础上生成**可直接分发**的 DMG（内含 `.app` 与「应用程序」替身，挂载后拖入即安装）：
+
+```bash
+./build_dmg.sh          # 生成 dist/Drawthings Studio.dmg
+```
+
+- **一键**：`build_dmg.sh` 会先跑 `build_app.sh` 打包 `.app`，再制作压缩 DMG 并校验；
+  `SKIP_BUILD=1 ./build_dmg.sh` 可复用**现有** `.app` 仅重做 DMG；
+  `DMG_LAYOUT=1 ./build_dmg.sh` 额外用 Finder 摆好图标位置（首次会请求「自动化」权限，失败自动跳过）。
+- **签名（分发到别的 Mac 强烈建议）**：设置 `CODESIGN_IDENTITY` 即用 Developer ID 对 `.app` 做 hardened-runtime 签名：
+  `CODESIGN_IDENTITY="Developer ID Application: 你的名字 (TEAMID)" ./build_dmg.sh`
+- **公证（消除「无法验证开发者」）**：先 `xcrun notarytool store-credentials <profile>` 存好凭据，再设 `NOTARY_PROFILE`：
+  `NOTARY_PROFILE=<profile> ./build_dmg.sh` —— 自动 `notarytool submit --wait` + `stapler staple`。
+- **未签名时**：接收方首次打开需**右键 → 打开**，或执行
+  `xattr -dr com.apple.quarantine "/Applications/Drawthings Studio.app"`。
+- 校验：`hdiutil verify "dist/Drawthings Studio.dmg"`。
 
 ### 环境变量（见 .env.example）
 
@@ -457,6 +477,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── config_store.py      # config CRUD (with "referenced by a project/work" protection before delete)
 ├── i18n.py              # backend zh/en localization (Accept-Language → zh|en + L() text helper)
 ├── build_app.sh         # one-step .app packaging (PyInstaller)
+├── build_dmg.sh         # one-step distributable DMG (.app + Applications alias, optional sign/notarize)
 ├── tools/make_icon.py   # app icon generator (purple gradient rounded square + four-point star)
 ├── requirements.txt
 ├── services/
@@ -576,6 +597,25 @@ The client + server can be packaged as a standard macOS app (with icon, double-c
 - **Resources / data separation**: `static/` is baked into the bundle (read-only); data (SQLite + media) lives in
   `~/Library/Application Support/Drawthings Studio/data` (source mode stays `<project root>/data`; the two don't affect each other).
 - **ffmpeg** is not bundled: last-frame extraction relies on the system `ffmpeg` (`brew install ffmpeg`); it degrades gracefully when missing.
+
+### Packaging as a DMG (release)
+
+Build a **directly distributable** DMG on top of the `.app` (contains the `.app` and an "Applications" alias — mount and drag to install):
+
+```bash
+./build_dmg.sh          # produces dist/Drawthings Studio.dmg
+```
+
+- **One step**: `build_dmg.sh` runs `build_app.sh` first, then creates and verifies a compressed DMG.
+  `SKIP_BUILD=1 ./build_dmg.sh` reuses the **existing** `.app` and only re-makes the DMG;
+  `DMG_LAYOUT=1 ./build_dmg.sh` additionally lets Finder position the icons (asks for Automation permission on first run; skipped if it fails).
+- **Signing (strongly recommended for other Macs)**: set `CODESIGN_IDENTITY` to sign the `.app` with a Developer ID and hardened runtime:
+  `CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build_dmg.sh`
+- **Notarization (removes "unidentified developer")**: first store credentials with `xcrun notarytool store-credentials <profile>`, then set `NOTARY_PROFILE`:
+  `NOTARY_PROFILE=<profile> ./build_dmg.sh` — runs `notarytool submit --wait` + `stapler staple` automatically.
+- **Without signing**: the recipient must **right-click → Open** the first time, or run
+  `xattr -dr com.apple.quarantine "/Applications/Drawthings Studio.app"`.
+- Verify: `hdiutil verify "dist/Drawthings Studio.dmg"`.
 
 ### Environment variables (see .env.example)
 
