@@ -520,7 +520,6 @@ window.I18N = (function () {
 
       'common.cancel': '取消',
       'common.save': '保存',
-      'common.quitApp': '退出应用',
       'common.create': '创建',
       'common.unnamed': '（未命名）',
       'common.copy': '复制',
@@ -1046,7 +1045,6 @@ window.I18N = (function () {
 
       'common.cancel': 'Cancel',
       'common.save': 'Save',
-      'common.quitApp': 'Quit app',
       'common.create': 'Create',
       'common.unnamed': '(Untitled)',
       'common.copy': 'Copy',

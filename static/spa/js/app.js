@@ -30,10 +30,6 @@
               <button v-for="l in langs" :key="l.v" type="button" class="tbtn icon" :title="l.label" :class="{ on: I18N.current() === l.v }" @click="I18N.set(l.v)">{{ l.flag }}</button>
               <span class="tsep"></span>
               <button v-for="t in themes" :key="t.v" type="button" class="tbtn icon" :title="I18N.t(t.key)" :class="{ on: theme === t.v }" @click="Theme.set(t.v)">{{ t.sym }}</button>
-              <template v-if="isDesktop">
-                <span class="tsep"></span>
-                <button type="button" class="tbtn icon" :title="I18N.t('common.quitApp')" @click="quitApp">⏻</button>
-              </template>
             </div>
           </header>
           <main class="app-content">
@@ -75,21 +71,6 @@
         return 'Drawthings Studio';
       });
 
-      // CS 桌面客户端：工具栏显示「退出应用」；浏览器里不显示。
-      // pywebview 的桥在页面加载后异步注入，故监听 pywebviewready + 短轮询兜底（最多 ~5s）。
-      const isDesktop = ref(API.isDesktop());
-      const syncDesktop = () => { if (API.isDesktop()) isDesktop.value = true; };
-      window.addEventListener('pywebviewready', syncDesktop);
-      let probe = 0;
-      const probeTimer = setInterval(() => {
-        syncDesktop();
-        if (isDesktop.value || ++probe > 50) clearInterval(probeTimer);
-      }, 100);
-      function quitApp() {
-        const n = API.native();
-        if (n && n.quitApp) { try { n.quitApp(); } catch (e) { /* 非桌面环境忽略 */ } }
-      }
-
       // 语言用响应式 ref 承载：切换时仅更新 ElConfigProvider 的 locale，
       // 组件文案由 I18N.t() 自身的响应式依赖原地刷新（不再重建整个应用实例）。
       const lang = ref(I18N.current());
@@ -102,8 +83,6 @@
         toggleSidebar,
         navs,
         pageTitle,
-        isDesktop,
-        quitApp,
         elLocale: computed(() => (lang.value === 'en'
           ? window.ElementPlusLocaleEn : window.ElementPlusLocaleZhCn)),
         langs: [

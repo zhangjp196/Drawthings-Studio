@@ -9,7 +9,6 @@
    - notify(title, message)     → 系统通知
    - openExternal(url)          → 系统默认浏览器打开
    - serverStatus()             → 本地服务状态
-   - quitApp()                  → 退出客户端（并停掉本客户端拉起的服务）
 4. 单实例锁：防止重复打开多个窗口（锁文件记录 PID，失效自动清理）。
 
 开发运行：
@@ -104,7 +103,7 @@ class NativeApi:
 
     # ---- 文件导出：系统「另存为」 ----
     # 注意：pywebview 按「方法原名」注入 window.pywebview.api（不做 snake_case→camelCase 转换），
-    # 因此前端 JS 能调到的名字必须与此处一致（saveBlob / openExternal / serverStatus / quitApp）。
+    # 因此前端 JS 能调到的名字必须与此处一致（saveBlob / notify / openExternal / serverStatus）。
     def saveBlob(self, filename: str, b64: str) -> dict:
         """保存前端传回的 base64 文件：弹系统「另存为」。用户取消返回 canceled；
         对话框失败时兜底写入 ~/Downloads（保证导出不丢失）。"""
@@ -161,26 +160,12 @@ class NativeApi:
                 "base_url": BASE_URL,
                 "started_by_client": self._c.we_started_server}
 
-    # ---- 退出：关闭主窗口（窗口关闭后 main 退出并停服务） ----
-    def quitApp(self) -> dict:
-        w = self._c.win
-        if w is not None:
-            try:
-                w.close()
-                return {"ok": True}
-            except Exception:
-                pass
-        self._c.request_quit()
-        return {"ok": True}
-
 
 # ---------------- 客户端主体 ----------------
 class DesktopClient:
     def __init__(self):
         self.server_proc: subprocess.Popen | None = None
         self.we_started_server = False
-        self.win = None  # pywebview window (set after create_window; quitApp closes it)
-        self._quit = False
 
     # ---- 服务探测 / 生命周期 ----
     def server_healthy(self) -> bool:
@@ -228,10 +213,6 @@ class DesktopClient:
                 self.server_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.server_proc.kill()
-
-    def request_quit(self) -> None:
-        """前端/关窗路径请求退出（标记位；窗口关闭后 main 返回并 cleanup）。"""
-        self._quit = True
 
     def cleanup(self) -> None:
         """退出兜底：停掉本客户端拉起的服务 + 释放单实例锁（幂等，可重复调用）。"""
@@ -286,9 +267,8 @@ def main() -> int:
             release_lock()
             return 1
 
-    window = webview.create_window(APP_TITLE, BASE_URL, js_api=NativeApi(client),
-                                   width=1280, height=860, min_size=(960, 640))
-    client.win = window  # When the frontend calls quit_app, close via this
+    webview.create_window(APP_TITLE, BASE_URL, js_api=NativeApi(client),
+                          width=1280, height=860, min_size=(960, 640))
 
     webview.start()  # Blocks until the window is closed
     client.cleanup()

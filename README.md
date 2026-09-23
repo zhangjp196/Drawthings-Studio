@@ -241,7 +241,7 @@ What the client does:
 - **Native window**: loads the same SPA (features / bilingual / theme fully consistent with the browser version);
 - **Native OS features**:
   - ZIP/PDF export goes through the **system "Save As" dialog** (the frontend detects `window.pywebview` and switches automatically; in a browser it stays a regular download);
-  - system notifications, external links open in the system browser, `quitApp` to exit (gracefully stops the server this client started);
+  - system notifications, external links open in the system browser;
 - **Single instance**: a PID lock prevents duplicate windows (cleaned up on exit).
 
 Env vars: `HOST` (default `127.0.0.1` — local only, not exposed) / `PORT` (default `8010`) / `RELOAD` (default `0`; use `RELOAD=1` for dev hot-reload).
