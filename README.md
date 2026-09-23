@@ -18,7 +18,7 @@ Start from **one sentence** and run it through a single pipeline to produce a **
 The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
 Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent.
 
-The UI **supports both Chinese and English**; toggle with one click in the top bar (frontend `I18N` switch + the backend localizes error messages via `Accept-Language`).
+The UI **supports both Chinese and English**; toggle with one click in the toolbar (frontend `I18N` switch + the backend localizes error messages via `Accept-Language`).
 
 ## The two features
 
@@ -27,11 +27,10 @@ The UI **supports both Chinese and English**; toggle with one click in the top b
 | Comic | Continuous image generation | one image per chapter | ch.1 = first image; the rest = the previous image |
 | Short drama | Continuous video generation | one clip per chapter | ch.1 = first image (first frame); the rest = the last frame of the previous clip |
 
-## Home (/)
+## Workspace (home /)
 
-- **Brand area**: platform name (Drawthings Studio) + a one-line value proposition + the primary CTAs (Enter Studio / ✨ Quick Create).
-- **Two feature entries**: the comic path (continuous images) and the drama path (continuous video), each explaining its continuity strategy.
-- **Pipeline explainer**: idea → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP/PDF); the project page is three tabs (Outline / Chapters / Complete).
+- **Quick actions**: New project / Quick Create / Settings.
+- **Recent creations**: the 6 most recently active projects as cards (first-image thumbnail + type + chapter count + last active); click to open the project, or "All →" for Studio.
 
 ## My Creations (list page /projects)
 
@@ -73,7 +72,7 @@ The project page is organized into **three tabs — Outline / Chapters / Complet
 
 ## Quick Create (/micro, work → independent sessions)
 
-A lightweight, no-project creation desk (top bar "✨ Quick Create") — **a Quick Create work contains multiple independent sessions**, with persisted history:
+A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick Create work contains multiple independent sessions**, with persisted history:
 
 - **Three-level structure** (same idea as Studio's project→chapters):
   - `/micro` **work list page**: card grid (open/delete), paginated 10 per page, sorted by most recently active;
@@ -150,7 +149,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── static/
 │   ├── vendor/          # frontend deps (downloaded locally, build-free/offline): vue / vue-router / element-plus (js+css+dark+zh-cn+en) / icons
 │   └── spa/             # single-page frontend (UMD, no bundler)
-│       ├── index.html   #   shell: top bar + <router-view> + pre-paint theme/lang
+│       ├── index.html   #   shell: left sidebar + toolbar + <router-view> + pre-paint theme/lang
 │       ├── css/app.css  #   app styles (Element Plus theme variable mapping + layout + chat area)
 │       └── js/          #   app.js (entry/router) api.js (fetch+SSE) theme.js i18n.js (zh/en dict) md.js (Markdown) views/ (7 routed views + sub-components like first-image / chapter-card)
 └── data/                # app.db (SQLite) media/ (images/videos)
@@ -161,6 +160,9 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 - **Stack**: Vue 3 (Composition API, UMD global build) + vue-router (history mode) + Element Plus 2.x
   (components / dark theme variables / zh & en locales / icon package), all loaded locally from `static/vendor/` via `<script>`/`<link>`,
   **no Node / build tooling required** — editing files under `static/spa/` takes effect immediately.
+- **Desktop shell (CS style)**: a collapsible left **sidebar** (Workspace / Studio / Quick Create / Settings) + a compact top **toolbar**
+  (current page title + language / theme / quit); the content area fills the window and scrolls internally; panels are **solid, native-style**
+  (no glass, small radii, high density); on narrow windows the sidebar collapses to icons.
 - **Routes**: `/` home · `/projects` list · `/new` create · `/project/:id` detail · `/configs` settings ·
   `/micro` work list · `/micro/:id(/:sid)` work chat. Unknown paths fall back to the SPA shell from FastAPI,
   so deep-link refreshes work (the frontend router re-matches; unmatched routes redirect home).
@@ -186,12 +188,12 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 
 ## Appearance & language (light / dark / system · Chinese / EN)
 
-- **Theme**: three buttons in the top bar: **☀ Light / ⚙ System / ☾ Dark**; the choice is stored in `localStorage`
+- **Theme**: three buttons in the toolbar: **☀ Light / ⚙ System / ☾ Dark**; the choice is stored in `localStorage`
   and persists across refreshes/restarts. `system` follows the OS `prefers-color-scheme` (and reacts live to changes).
   Before first paint, an inline script sets `data-theme` and `html.dark` first, **with no white flash**; the theme drives both
   the Element Plus dark mode (`static/vendor/element-plus/dark.css` variables) and the app's custom CSS variables,
   so components (tables/dialogs/tags/inputs) and layout colors all change together.
-- **Language**: **中文 / EN** toggle in the top bar; the choice is stored in `localStorage` and persists across refreshes.
+- **Language**: **中文 / EN** toggle in the toolbar; the choice is stored in `localStorage` and persists across refreshes.
   An inline script sets `<html lang>` before first paint to avoid a language flash. On switch, the whole Vue app is rebuilt and Element Plus component text updates with it.
 
 ## Performance

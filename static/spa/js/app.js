@@ -1,43 +1,81 @@
-// 应用入口：根组件（顶栏 + 路由出口）+ Element Plus / 图标 / 路由挂载
-// 品牌：Drawthings Studio；语言 / 主题在「配置 → 基础配置」或顶栏切换。
+// 应用入口：CS 桌面外壳（左栏侧边导航 + 紧凑工具栏 + 内容区）+ Element Plus / 图标 / 路由挂载
+// 品牌：Drawthings Studio；语言 / 主题在顶部工具栏切换。
 // 语言/主题均由响应式状态驱动原地刷新（ElConfigProvider 提供 EP locale），无需重建应用。
 (function () {
   const root = {
     template: `
       <el-config-provider :locale="elLocale">
-      <header class="topbar">
-        <div class="topbar-inner">
-          <router-link to="/" class="brand">
-            <span class="brand-mark">✦</span>
-            <span class="brand-name">Drawthings Studio</span>
-          </router-link>
-          <nav class="topnav">
-            <router-link to="/projects" class="tnav" :class="{ active: isProjects }">{{ I18N.t('nav.studio') }}</router-link>
-            <router-link to="/micro" class="tnav" :class="{ active: isMicro }">{{ I18N.t('nav.quick') }}</router-link>
-            <router-link to="/configs" class="tnav" :class="{ active: isConfigs }">{{ I18N.t('nav.settings') }}</router-link>
-          </nav>
-          <div class="theme-group">
-            <button v-for="l in langs" :key="l.v" type="button" class="tbtn icon" :title="l.label" :class="{ on: I18N.current() === l.v }" @click="I18N.set(l.v)">{{ l.flag }}</button>
-            <span class="tsep"></span>
-            <button v-for="t in themes" :key="t.v" type="button" class="tbtn icon" :title="I18N.t(t.key)" :class="{ on: theme === t.v }" @click="Theme.set(t.v)">{{ t.sym }}</button>
-            <template v-if="isDesktop">
-              <span class="tsep"></span>
-              <button type="button" class="tbtn icon" :title="I18N.t('common.quitApp')" @click="quitApp">⏻</button>
-            </template>
+      <div class="app-shell">
+        <aside class="sidebar" :class="{ collapsed: sbCollapsed }">
+          <div class="sb-head">
+            <router-link to="/" class="brand">
+              <span class="brand-mark">✦</span>
+              <span class="brand-name" v-show="!sbCollapsed">Drawthings Studio</span>
+            </router-link>
           </div>
+          <nav class="sb-nav">
+            <router-link v-for="n in navs" :key="n.to" :to="n.to" class="sb-item" :class="{ active: n.match() }" :title="I18N.t(n.key)">
+              <span class="sb-ico">{{ n.ico }}</span>
+              <span class="sb-txt">{{ I18N.t(n.key) }}</span>
+            </router-link>
+          </nav>
+          <div class="sb-foot">
+            <button type="button" class="sb-collapse" :title="I18N.t('nav.collapse')" @click="toggleSidebar">{{ sbCollapsed ? '»' : '«' }}</button>
+          </div>
+        </aside>
+        <div class="app-main">
+          <header class="toolbar">
+            <div class="tb-title">{{ pageTitle }}</div>
+            <div class="tb-actions">
+              <button v-for="l in langs" :key="l.v" type="button" class="tbtn icon" :title="l.label" :class="{ on: I18N.current() === l.v }" @click="I18N.set(l.v)">{{ l.flag }}</button>
+              <span class="tsep"></span>
+              <button v-for="t in themes" :key="t.v" type="button" class="tbtn icon" :title="I18N.t(t.key)" :class="{ on: theme === t.v }" @click="Theme.set(t.v)">{{ t.sym }}</button>
+              <template v-if="isDesktop">
+                <span class="tsep"></span>
+                <button type="button" class="tbtn icon" :title="I18N.t('common.quitApp')" @click="quitApp">⏻</button>
+              </template>
+            </div>
+          </header>
+          <main class="app-content">
+            <router-view v-slot="{ Component }">
+              <component :is="Component" />
+            </router-view>
+          </main>
         </div>
-      </header>
-      <main>
-        <router-view v-slot="{ Component }">
-          <component :is="Component" />
-        </router-view>
-      </main>
+      </div>
       </el-config-provider>
     `,
     setup() {
       const theme = ref(Theme.current());
       Theme.onChange(v => { theme.value = v; });
-      // CS 桌面客户端：顶栏显示「退出应用」；浏览器里不显示。
+
+      // 侧边栏折叠（按浏览器 / 应用持久化）
+      const sbCollapsed = ref(false);
+      try { sbCollapsed.value = localStorage.getItem('sbCollapsed') === '1'; } catch (e) {}
+      function toggleSidebar() {
+        sbCollapsed.value = !sbCollapsed.value;
+        try { localStorage.setItem('sbCollapsed', sbCollapsed.value ? '1' : '0'); } catch (e) {}
+      }
+
+      // 导航项（图标 + 文案 + 高亮匹配）
+      const path = () => router.currentRoute.value.path;
+      const navs = [
+        { to: '/',         ico: '⌂', key: 'nav.workspace', match: () => path() === '/' },
+        { to: '/projects', ico: '🎬', key: 'nav.studio',    match: () => path().startsWith('/projects') || path().startsWith('/project/') },
+        { to: '/micro',    ico: '✨', key: 'nav.quick',     match: () => path().startsWith('/micro') },
+        { to: '/configs',  ico: '⚙', key: 'nav.settings',  match: () => path().startsWith('/configs') },
+      ];
+      const pageTitle = computed(() => {
+        const p = path();
+        if (p === '/') return I18N.t('nav.workspace');
+        if (p.startsWith('/project') || p.startsWith('/projects')) return I18N.t('nav.studio');
+        if (p.startsWith('/new')) return I18N.t('nav.newProject');
+        if (p.startsWith('/micro')) return I18N.t('nav.quick');
+        if (p.startsWith('/configs')) return I18N.t('nav.settings');
+        return 'Drawthings Studio';
+      });
+
+      // CS 桌面客户端：工具栏显示「退出应用」；浏览器里不显示。
       // pywebview 的桥在页面加载后异步注入，故监听 pywebviewready + 短轮询兜底（最多 ~5s）。
       const isDesktop = ref(API.isDesktop());
       const syncDesktop = () => { if (API.isDesktop()) isDesktop.value = true; };
@@ -51,6 +89,7 @@
         const n = API.native();
         if (n && n.quitApp) { try { n.quitApp(); } catch (e) { /* 非桌面环境忽略 */ } }
       }
+
       // 语言用响应式 ref 承载：切换时仅更新 ElConfigProvider 的 locale，
       // 组件文案由 I18N.t() 自身的响应式依赖原地刷新（不再重建整个应用实例）。
       const lang = ref(I18N.current());
@@ -59,6 +98,10 @@
         I18N,
         Theme,
         theme,
+        sbCollapsed,
+        toggleSidebar,
+        navs,
+        pageTitle,
         isDesktop,
         quitApp,
         elLocale: computed(() => (lang.value === 'en'
@@ -72,12 +115,6 @@
           { v: 'system', key: 'theme.system', sym: '⚙' },
           { v: 'dark', key: 'theme.dark', sym: '☾' },
         ],
-        isProjects: computed(() => {
-          const p = router.currentRoute.value.path;
-          return p.startsWith('/projects') || p.startsWith('/project/');
-        }),
-        isMicro: computed(() => router.currentRoute.value.path.startsWith('/micro')),
-        isConfigs: computed(() => router.currentRoute.value.path.startsWith('/configs')),
       };
     },
   };

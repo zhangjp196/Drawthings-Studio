@@ -1,50 +1,62 @@
-// 首页：软件介绍（Drawthings Studio）
+// 首页：工作台（快捷入口 + 最近创作）—— CS 桌面风格，去掉营销式 hero / 功能 / 流水线介绍
 window.Views = window.Views || {};
 Views.home = {
   template: `
     <div class="page">
-      <section class="hero">
-        <h1>{{ I18N.t('home.title1') }}<span class="grad">{{ I18N.t('home.title2') }}</span>{{ I18N.t('home.title3') }}</h1>
-        <p class="sub">{{ I18N.t('home.sub1') }}<br>
-          {{ I18N.t('home.sub2') }}</p>
-        <div class="hero-actions">
-          <router-link to="/projects" class="btn-hero">{{ I18N.t('home.cta1') }}</router-link>
-          <router-link to="/micro" class="btn-hero ghost">{{ I18N.t('home.cta2') }}</router-link>
-        </div>
-      </section>
+      <div class="wb-head">
+        <h1>{{ I18N.t('nav.workspace') }}</h1>
+        <p class="muted small">{{ I18N.t('wb.sub') }}</p>
+      </div>
 
-      <section class="sec">
-        <h2>{{ I18N.t('home.paths') }}</h2>
-        <div class="feat-grid">
-          <div class="feat">
-            <div class="feat-ico">🎬</div>
-            <h3>{{ I18N.t('home.feat1t') }}</h3>
-            <p>{{ I18N.t('home.feat1d') }}</p>
-          </div>
-          <div class="feat">
-            <div class="feat-ico">📽</div>
-            <h3>{{ I18N.t('home.feat2t') }}</h3>
-            <p>{{ I18N.t('home.feat2d') }}</p>
-          </div>
-          <div class="feat">
-            <div class="feat-ico">⚙️</div>
-            <h3>{{ I18N.t('home.feat3t') }}</h3>
-            <p>{{ I18N.t('home.feat3d') }}</p>
-          </div>
-        </div>
-      </section>
+      <div class="wb-actions">
+        <router-link to="/new" class="wb-action primary">{{ I18N.t('wb.newProject') }}</router-link>
+        <router-link to="/micro" class="wb-action">{{ I18N.t('wb.newMicro') }}</router-link>
+        <router-link to="/configs" class="wb-action">{{ I18N.t('wb.settings') }}</router-link>
+      </div>
 
-      <section class="sec">
-        <h2>{{ I18N.t('home.flow') }}</h2>
-        <div class="flow">
-          <div class="flow-step"><span class="n">1</span>{{ I18N.t('home.flow1') }}</div>
-          <div class="flow-step"><span class="n">2</span>{{ I18N.t('home.flow2') }}</div>
-          <div class="flow-step"><span class="n">3</span>{{ I18N.t('home.flow3') }}</div>
-          <div class="flow-step"><span class="n">4</span>{{ I18N.t('home.flow4') }}</div>
-          <div class="flow-step"><span class="n">5</span>{{ I18N.t('home.flow5') }}</div>
-          <div class="flow-step"><span class="n">6</span>{{ I18N.t('home.flow6') }}</div>
+      <section class="wb-sec">
+        <div class="wb-sec-head">
+          <h2>{{ I18N.t('wb.recent') }}</h2>
+          <router-link to="/projects" class="wb-more">{{ I18N.t('wb.all') }}</router-link>
         </div>
+        <div v-if="loading" class="loading"><el-skeleton :rows="2" animated /></div>
+        <div v-else-if="projects.length" class="wb-grid">
+          <div v-for="p in projects" :key="p.id" class="wb-card" @click="open(p)">
+            <div class="wb-thumb">
+              <img v-if="p.first_image_url" :src="p.first_image_url" :alt="p.title || p.origin" loading="lazy">
+              <span v-else class="wb-ph">{{ p.kind === 'comic' ? '🎬' : '📽' }}</span>
+            </div>
+            <div class="wb-card-body">
+              <div class="wb-card-title">{{ p.title || p.origin }}</div>
+              <div class="wb-card-meta">
+                <el-tag size="small" :type="p.kind === 'comic' ? 'primary' : 'success'" effect="light">
+                  {{ p.kind === 'comic' ? I18N.t('proj.comic') : I18N.t('proj.drama') }}
+                </el-tag>
+                <span class="muted small">{{ p.chapter_count }} · {{ (p.updated_at || '').slice(0, 10) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <el-empty v-else :description="I18N.t('wb.empty')" :image-size="80" />
       </section>
     </div>
   `,
+  setup() {
+    const projects = ref([]);
+    const loading = ref(true);
+    async function load() {
+      loading.value = true;
+      try {
+        const data = await API.get('/api/projects?' + new URLSearchParams({ page: 1, size: 6, sort: 'active' }));
+        projects.value = data.projects || [];
+      } catch (e) {
+        /* 工作台加载失败不打断使用（可去「创作中心」重试） */
+      } finally {
+        loading.value = false;
+      }
+    }
+    function open(p) { router.push('/project/' + p.id); }
+    onMounted(load);
+    return { projects, loading, open };
+  },
 };
