@@ -144,6 +144,8 @@ def _chapter_view(ch) -> dict:
         "media_url": _media_url(ch.media_path),
         "status": ch.status,
         "error": ch.error,
+        "score": ch.score or 0,
+        "score_note": ch.score_note or "",
     }
 
 
@@ -1411,6 +1413,8 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
                             for c in chars_from_raw(project.characters)],
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
+            "auto_score": project.auto_score or 0, "score_min": project.score_min or 80,
+            "auto_redo": project.auto_redo or 0,
             "count_mode": project.count_mode or "range",
             "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
@@ -1626,7 +1630,16 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                                      "prompt": ch.prompt or "",
                                      "width": ch.width or 0, "height": ch.height or 0,
                                      "media_url": _media_url(ch.media_path or ""),
-                                     "status": ch.status, "error": ch.error or ""}))
+                                     "status": ch.status, "error": ch.error or "",
+                                     "score": ch.score or 0, "score_note": ch.score_note or ""}))
+
+    async def score_cb(ch, score, note, rd):
+        # 自动评分事件：score 为 None 时 note 携带阶段（scoring/redo），为数字时是评分结果
+        phase = "result" if score is not None else str(note or "")
+        await queue.put(("score", {"index": ch.index, "title": ch.title or "",
+                                    "score": score,
+                                    "note": (note or "") if score is not None else "",
+                                    "phase": phase, "redo": rd}))
 
     async def plan_cb(ch):
         # 章节规划：单章规划完成 → 回传标题/摘要/状态，前端逐个补入
@@ -1648,7 +1661,8 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 raw = body.get("indices")
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
                 await pipeline.step_generate(db, project, season, indices=indices, lang=lang,
-                                             progress_cb=progress_cb, chapter_done_cb=chapter_cb)
+                                             progress_cb=progress_cb, chapter_done_cb=chapter_cb,
+                                             score_cb=score_cb)
             fresh = db.get(Project, project.id)
             await queue.put(("done", {"status": fresh.status if fresh else ""}))
         except Exception as e:
@@ -1701,6 +1715,32 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
         raise HTTPException(status_code=400,
                              detail=L(lang, f"【生成第{index+1}章】失败：{e}",
                                       f"[Generate chapter {index+1}] failed: {e}"))
+    return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/chapters/{index}/score")
+async def project_chapter_score(request: Request, project_id: str, index: int,
+                                db: Session = Depends(get_db)):
+    """手动评分：为指定章节（季内）记录 0-100 分；body 需 season_id + score。评分不涉及生成，已完结作品也允许。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = pipeline.get(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    sid = str(body.get("season_id") or "")
+    season = pipeline._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline._season_chapters(db, project, season)
+    if not (0 <= index < len(chapters)):
+        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+    try:
+        score = int(body.get("score") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "分值必须是整数", "Score must be an integer"))
+    project = pipeline.score_chapter(db, project, season, index, max(0, min(100, score)))
     return {"ok": True}
 
 
@@ -2043,7 +2083,9 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
             global_prompt=body.get("global_prompt"),
             res_width=body.get("res_width"), res_height=body.get("res_height"),
             count_mode=body.get("count_mode"), count_min=body.get("count_min"),
-            count_max=body.get("count_max"))
+            count_max=body.get("count_max"),
+            auto_score=body.get("auto_score"), score_min=body.get("score_min"),
+            auto_redo=body.get("auto_redo"))
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"保存大纲失败：{e}", f"Save outline failed: {e}"))

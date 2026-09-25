@@ -38,12 +38,14 @@ from .agent import (
     ChapterOut,
     SeasonArcOut,
     ScriptOut,
+    ScoreOut,
     build_model,
     image_data_uri,
     make_agent,
 )
 from .drawthings import build_drawthings_client, extract_last_frame
 from .pipeline_common import (
+    MAX_SCORE_REDO,
     _cjk_font_path,
     _now,
     chars_from_raw,
@@ -520,7 +522,9 @@ class ComicPipeline:
                       characters: list[dict] | None = None, style: str | None = None,
                       global_prompt: str | None = None,
                       res_width: int | None = 0, res_height: int | None = 0,
-                      count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None) -> Project:
+                      count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
+                      auto_score: int | None = None, score_min: int | None = None,
+                      auto_redo: int | None = None) -> Project:
         """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定。
         仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_season），
         也不触碰已生成的剧本/媒体（保存不触发生成）。"""
@@ -563,6 +567,12 @@ class ComicPipeline:
             project.count_mode = "range"          # 仅范围模式（遗留的项目级字段）
         if count_min is not None or count_max is not None:
             project.count_min, project.count_max = count_range(count_min, count_max)
+        if auto_score is not None:
+            project.auto_score = 1 if auto_score else 0
+        if score_min is not None:
+            project.score_min = max(0, min(100, int(score_min or 0)))
+        if auto_redo is not None:
+            project.auto_redo = 1 if auto_redo else 0
         db.commit()
         self._save(db, project)
         return project
@@ -920,11 +930,52 @@ class ComicPipeline:
         return ch
 
     # ---------------- 阶段 5：逐章生成画面（出图提示词 + 生图，两步连贯） ----------------
+    # ---------------- 自动评分 / 手动评分 ----------------
+    def _score_system(self, project: Project) -> str:
+        """自动评分系统提示词（漫画）：对单章生成图按百分制打分。"""
+        return ("你是漫画制作的美术总监。对当前章节生成的画面按 100 分制评估，"
+                "只输出一个 JSON 对象，字段：score（0-100 整数）与 note（一句话中文评语，不超过 30 字）。\n"
+                "评分标准（按权重）：1) 与本章场景描述 / 出图提示词的内容是否相符；"
+                "2) 角色一致性（角色外形与既有设定一致）；3) 风格一致性（与整体风格 / 全局提示词一致）；"
+                "4) 画面质量（清晰度、构图、无明显畸变 / 伪影）；5) 漫画分镜结构与画面内文字是否清晰。"
+                "除 JSON 外不要输出任何文字。")
+
+    async def _score_chapter(self, db, project: Project, season: Season, ch: Chapter,
+                             model) -> tuple[int, str]:
+        """自动评分：对本章已生成的媒体打 0-100 分，返回 (分数, 评语)。"""
+        style = ((project.scope or {}).get("style") or "").strip()
+        gprompt = (project.global_prompt or "").strip()
+        user = (f"章节标题：{ch.title}\n"
+                f"场景描述：{ch.description or ch.summary or ''}\n"
+                f"出图提示词：{ch.prompt}\n"
+                f"整体风格：{style}\n"
+                f"全局提示词：{gprompt}")
+        media = (ch.media_path or "").strip()
+        prompt: str | list = user + "\n生成图缺失，请打 0 分并在 note 说明原因。"
+        if media and Path(media).is_file():
+            prompt = [ImageUrl(url=image_data_uri(media)),
+                      user + "\n请对附带的生成图评分（标准见系统提示词）。输出 JSON：score（0-100 整数）与 note（一句话评语）。"]
+        agent = make_agent(model, self._score_system(project), output_type=ScoreOut)
+        async with agent:
+            data = (await agent.run(prompt)).output
+        score = max(0, min(100, int(data.score or 0)))
+        return score, (data.note or "").strip()[:300]
+
+    def score_chapter(self, db, project: Project, season: Season, index: int, score: int) -> Project:
+        """手动评分：记录季内第 index 章的评分（0-100）。"""
+        ch = self._season_chapters(db, project, season)[index]
+        ch.score = max(0, min(100, int(score or 0)))
+        ch.score_note = "手动评分"
+        db.commit()
+        self._save(db, project)
+        return project
+
     async def step_generate(self, db, project: Project, season: Season,
                              indices: list[int] | None = None,
                              lang: str = "zh", progress_cb=None,
-                             chapter_done_cb=None) -> Project:
+                             chapter_done_cb=None, score_cb=None) -> Project:
         """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
+        开启「自动评分」时追加第 3 步：0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）。
         indices: 季内章节序号列表（0 起）；None=该季全部章节。
         季内第 1 章参考：开启「本季封面作为第 1 章参考」→ 本季封面；否则非第一季→上一季末章，第一季→无参考（文生图）。
         其余章沿用上一章媒体。"""
@@ -939,36 +990,63 @@ class ComicPipeline:
             for pos, (i, ch) in enumerate(targets, start=1):
                 if progress_cb:
                     await progress_cb(pos, len(targets), ch.title)
-                await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
-                # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章）
-                if i == 0:
-                    season_cover = (season.first_image or "").strip()
-                    if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
-                        ref = season_cover
-                    elif season.number > 1:
-                        prev_last = self._prev_season_last_chapter(db, project, season)
-                        ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
+                # 自动评分：生成画面后按 0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）
+                auto_score = bool(project.auto_score)
+                auto_redo = bool(project.auto_redo)
+                rounds = 1 + MAX_SCORE_REDO if (auto_score and auto_redo) else 1
+                score_min = int(project.score_min or 80)
+                for rd in range(rounds):
+                    if rd:
+                        # 上一轮评分低于阈值 → 重做（重新生成提示词 + 画面）
+                        if score_cb:
+                            await score_cb(ch, None, "redo", rd)
+                    await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
+                    # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章）
+                    if i == 0:
+                        season_cover = (season.first_image or "").strip()
+                        if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
+                            ref = season_cover
+                        elif season.number > 1:
+                            prev_last = self._prev_season_last_chapter(db, project, season)
+                            ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
+                        else:
+                            ref = ""
                     else:
-                        ref = ""
-                else:
-                    prev = chapters[i - 1]
-                    ref = prev.media_path if (prev and prev.media_path) else ""
-                try:
-                    # 分辨率统一跟随总体设定（不再按章覆盖）
-                    w = int(project.res_width or 0)
-                    h = int(project.res_height or 0)
-                    params = {}
-                    if w and h:
-                        params = {"width": w, "height": h}
-                    ch.media_path = await run_sync(
-                        partial(dt.generate_image, ch.prompt, ref_path=ref, params=params))
-                    ch.status = "done"
-                    ch.error = ""
-                    ch.width = w
-                    ch.height = h
-                except Exception as e:
-                    ch.status = "error"
-                    ch.error = str(e)
+                        prev = chapters[i - 1]
+                        ref = prev.media_path if (prev and prev.media_path) else ""
+                    try:
+                        # 分辨率统一跟随总体设定（不再按章覆盖）
+                        w = int(project.res_width or 0)
+                        h = int(project.res_height or 0)
+                        params = {}
+                        if w and h:
+                            params = {"width": w, "height": h}
+                        ch.media_path = await run_sync(
+                            partial(dt.generate_image, ch.prompt, ref_path=ref, params=params))
+                        ch.status = "done"
+                        ch.error = ""
+                        ch.width = w
+                        ch.height = h
+                    except Exception as e:
+                        ch.status = "error"
+                        ch.error = str(e)
+                        break  # 生成失败：不评分、不重做
+                    if not auto_score:
+                        break  # 未开启自动评分：只生成一次
+                    if score_cb:
+                        await score_cb(ch, None, "scoring", rd)
+                    try:
+                        score, note = await self._score_chapter(db, project, season, ch, model)
+                        ch.score, ch.score_note = score, note
+                    except Exception:
+                        ch.score, ch.score_note = 0, ""  # 评分失败不阻塞流程
+                        db.commit()
+                        break  # 评分失败：不重做（避免拿不到分时反复重生成）
+                    db.commit()
+                    if score_cb:
+                        await score_cb(ch, (ch.score or 0), (ch.score_note or ""), rd)
+                    if (ch.score or 0) >= score_min or rd == rounds - 1:
+                        break  # 达到阈值，或重做次数用尽：本章完成
                 if chapter_done_cb:
                     await chapter_done_cb(ch)
                 db.commit()  # 逐章提交：停止/中断时已完成章节不丢失

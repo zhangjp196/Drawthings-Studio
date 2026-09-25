@@ -200,6 +200,12 @@ class ScriptOut(BaseModel):
     prompt: str
 
 
+class ScoreOut(BaseModel):
+    """自动评分：单章生成画面按 0–100 打分（分数 + 一句话评语）。"""
+    score: int = 0
+    note: str = ""
+
+
 def make_agent(model: Model, system: str, output_type: type = str) -> Agent:
     """构造单用途 Agent（系统提示词 + 输出类型）。"""
     return Agent(model, instructions=system, output_type=output_type)

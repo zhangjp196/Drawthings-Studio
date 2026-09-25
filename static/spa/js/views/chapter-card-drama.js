@@ -15,6 +15,7 @@ Views.chapterCardDrama = {
     isLast: { type: Boolean, default: false },
     defW: { type: Number, default: 0 },             // 总体默认分辨率（仅显示，不可在此修改）
     defH: { type: Number, default: 0 },
+    scoreMin: { type: Number, default: 80 },        // 评分阈值（分值标签配色用）
   },
   emits: ['preview', 'reloaded', 'toggle', 'saveplan'],
   template: `
@@ -29,6 +30,8 @@ Views.chapterCardDrama = {
         </div>
         <span class="ch-tags">
           <el-tag size="small" :type="statusType" effect="light">{{ statusLabel }}</el-tag>
+          <el-tag v-if="chapter.score > 0" size="small" effect="light"
+                 :type="chapter.score >= scoreMin ? 'success' : 'warning'">{{ chapter.score }}{{ I18N.t('p.scoreUnit') }}</el-tag>
         </span>
         <span v-if="!noToggle" class="ch-chev">{{ expanded ? '⌄' : '›' }}</span>
       </div>
@@ -65,6 +68,12 @@ Views.chapterCardDrama = {
             <span>{{ defW }}×{{ defH }}</span>
             <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.planResHint') }}</span>
           </div>
+          <div class="res-row">
+            <span class="muted small">{{ I18N.t('p.chScore') }}</span>
+            <el-input-number v-model="mscore" :min="0" :max="100" size="small" :disabled="locked" style="width:90px" />
+            <el-button size="small" :loading="busy === 'score'" :disabled="locked" @click="doScore">{{ I18N.t('p.chScoreSave') }}</el-button>
+            <span v-if="chapter.score_note" class="muted small" style="margin-left:6px;">{{ chapter.score_note }}</span>
+          </div>
           <div class="actions">
             <el-popconfirm :title="I18N.t('p.chGenConfirm')" @confirm="doGen">
               <template #reference>
@@ -96,6 +105,7 @@ Views.chapterCardDrama = {
     const title = ref(props.chapter.title || '');
     const summary = ref(props.chapter.summary || '');
     const prompt = ref(props.chapter.prompt || '');
+    const mscore = ref(props.chapter.score || 0);    // 手动评分输入（0-100）
     const done = computed(() => props.chapter.status === 'done');
     const statusLabel = computed(() => I18N.t('p.chStatus.' + props.chapter.status) || props.chapter.status);
     const statusType = computed(() =>
@@ -125,6 +135,17 @@ Views.chapterCardDrama = {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
     }
+    async function doScore() {
+      busy.value = 'score';
+      try {
+        await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/score`,
+                       { season_id: props.seasonId, score: mscore.value });
+        props.chapter.score = mscore.value;
+        props.chapter.score_note = I18N.t('p.manualScoreNote');
+        emit('reloaded');
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { busy.value = ''; }
+    }
     async function doMove(dir) {
       try {
         await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/move`, { season_id: props.seasonId, direction: dir });
@@ -138,7 +159,7 @@ Views.chapterCardDrama = {
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
-    return { busy, dTab, title, summary, prompt, done, statusLabel, statusType,
-             doGen, doSave, doMove, doDelete };
+    return { busy, dTab, title, summary, prompt, mscore, done, statusLabel, statusType,
+             doGen, doSave, doScore, doMove, doDelete };
   },
 };

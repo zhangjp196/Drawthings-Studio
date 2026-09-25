@@ -102,15 +102,18 @@ class Pipeline:
                                                       count_max, indices, progress_cb, chapter_done_cb)
 
     def step_generate(self, db, project, season, indices: list | None = None,
-                      lang: str = "zh", progress_cb=None, chapter_done_cb=None):
+                      lang: str = "zh", progress_cb=None, chapter_done_cb=None, score_cb=None):
         return self._of(project).step_generate(db, project, season, indices, lang,
-                                               progress_cb, chapter_done_cb)
+                                               progress_cb, chapter_done_cb, score_cb)
 
     def _season_chapters(self, db, project, season):
         return self._of(project)._season_chapters(db, project, season)
 
     def save_chapter_fields(self, db, project, season, index: int, prompt: str):
         return self._of(project).save_chapter_fields(db, project, season, index, prompt)
+
+    def score_chapter(self, db, project, season, index: int, score: int):
+        return self._of(project).score_chapter(db, project, season, index, score)
 
     def add_chapter(self, db, project, season):
         return self._of(project).add_chapter(db, project, season)

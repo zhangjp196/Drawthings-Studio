@@ -11,6 +11,9 @@ from pathlib import Path
 
 import anyio
 
+# 自动评分：单章评分低于阈值时自动重做的最大次数（首次生成 + N 次重做 = 共 N+1 次生成）
+MAX_SCORE_REDO = 2
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()

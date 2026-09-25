@@ -108,6 +108,14 @@ Views.projectDrama = {
                         <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
                       </div>
                     </el-form-item>
+                    <el-form-item :label="I18N.t('p.scoreAuto')">
+                      <div class="res-row">
+                        <el-checkbox v-model="oScore">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
+                        <el-checkbox v-model="oRedo" :disabled="!oScore">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
+                        <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
+                        <el-input-number v-model="oScoreMin" :min="0" :max="100" size="small" :disabled="!oScore" />
+                      </div>
+                    </el-form-item>
                   </el-form>
                 </el-card>
                 <el-card v-else-if="oSub === 'chars'" shadow="never">
@@ -344,6 +352,7 @@ Views.projectDrama = {
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :project-id="data.project.id"
                             :season-id="seasonId" :season-index="cur"
                             :def-w="oW" :def-h="oH"
+                            :score-min="(data.project.score_min || 80)"
                             :expanded="true" :no-toggle="true" :locked="locked"
                             :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
                             @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
@@ -614,6 +623,10 @@ Views.projectDrama = {
     const oGlobal = ref('');     // 全局提示词（要点/约束，注入每次章节 LLM 调用）
     const oW = ref(0);
     const oH = ref(0);
+    // 自动评分：生成画面后按 0-100 评分；低于阈值自动重做（最多 2 次）
+    const oScore = ref(true);
+    const oScoreMin = ref(80);
+    const oRedo = ref(true);
     // 分辨率：先选比例、再选固定分辨率（均为 64 的倍数；0×0 = 跟随出图端/智能体）
     const RES_RATIOS = [
       { key: '1:1',  label: 'p.ratio11',  sizes: ['512×512', '768×768', '1024×1024'] },
@@ -723,6 +736,9 @@ Views.projectDrama = {
       oGlobal.value = p.global_prompt || '';
       oW.value = p.res_width || 0;
       oH.value = p.res_height || 0;
+      oScore.value = !!p.auto_score;
+      oScoreMin.value = p.score_min || 80;
+      oRedo.value = !!p.auto_redo;
       // 由已存 W×H 反推比例与分辨率选项（0×0=自动；不在固定列表的旧值=自定义）
       const cur = `${oW.value}×${oH.value}`;
       const r = RES_RATIOS.find(x => x.sizes.includes(cur));
@@ -1104,6 +1120,7 @@ Views.projectDrama = {
           await API.post(`/api/projects/${props.id}/outline`, {
             arc: arcText.value, style: oStyle.value, global_prompt: oGlobal.value,
             res_width: oW.value, res_height: oH.value,
+            auto_score: oScore.value, score_min: oScoreMin.value, auto_redo: oRedo.value,
           });
           ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
           await load();
@@ -1173,6 +1190,12 @@ Views.projectDrama = {
 
     // 批量（SSE 进度）
     // 批量生成时单章两步完成：实时把该章提示词/媒体/状态写回本地并跟随定位，页面逐个刷新（后续章节仍会参考它）
+    // 自动评分事件：刷新进度文案（评分中 / 低于阈值重做中 / 评分结果）
+    function applyScoreLive(d) {
+      if (d.phase === 'scoring') progress.text = I18N.t('p.scoreDoing', d.title);
+      else if (d.phase === 'redo') progress.text = I18N.t('p.scoreRedoDo', d.title, d.redo, 2);
+      else progress.text = I18N.t('p.scoreResult', d.title, d.score) + (d.note ? ' · ' + d.note : '');
+    }
     function applyChapterLive(d) {
       const arr = data.value?.chapters || [];
       const pos = arr.findIndex(c => c.index === d.index && c.season_id === seasonId.value);
@@ -1184,6 +1207,7 @@ Views.projectDrama = {
       if (d.prompt !== undefined) ch.prompt = d.prompt;
       if (d.description !== undefined) ch.description = d.description;
       if (d.width) { ch.width = d.width; ch.height = d.height; }
+      if (d.score !== undefined) { ch.score = d.score; ch.score_note = d.score_note || ''; }
       const sPos = seasonChapters.value.findIndex(c => c.index === d.index);
       if (sPos >= 0) cur.value = sPos;
     }
@@ -1218,6 +1242,7 @@ Views.projectDrama = {
       try {
         await API.sse(`/api/projects/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
           if (ev === 'progress') progress.text = I18N.t('p.genProgress', d.current, d.total, d.title);
+          else if (ev === 'score') applyScoreLive(d);
           else if (ev === 'chapter') applyChapterLive(d);
           else if (ev === 'error') throw new Error(d.message);
         }, ctrl.signal);

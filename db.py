@@ -79,6 +79,8 @@ def _migrate():
             "height": "INTEGER DEFAULT 0",
             "summary": "TEXT DEFAULT ''",
             "season_id": "VARCHAR(12)",
+            "score": "INTEGER DEFAULT 0",
+            "score_note": "VARCHAR(300) DEFAULT ''",
         },
         "seasons": {
             "first_image": "VARCHAR(500) DEFAULT ''",
@@ -97,6 +99,9 @@ def _migrate():
             "count_mode": "VARCHAR(10) DEFAULT 'auto'",
             "count_min": "INTEGER DEFAULT 0",
             "count_max": "INTEGER DEFAULT 0",
+            "auto_score": "INTEGER DEFAULT 1",
+            "score_min": "INTEGER DEFAULT 80",
+            "auto_redo": "INTEGER DEFAULT 1",
         },
         "micro_messages": {
             "images": "TEXT",

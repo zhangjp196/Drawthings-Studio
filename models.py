@@ -89,6 +89,9 @@ class Project(Base):
     count_mode = Column(String(10), default="range")       # 章节数量模式（遗留字段，仅范围；现按季存于 Season）
     count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
     count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
+    auto_score = Column(Integer, default=1)                # 自动评分：每章画面生成后按 0–100 评分（1=开启）
+    score_min = Column(Integer, default=80)                # 评分阈值：低于该分且开启自动重做 → 重新生成
+    auto_redo = Column(Integer, default=1)                 # 低分自动重做：1=开启（最多重做 2 次）
     first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面）
     first_image_base = Column(String(500), default="")     # 封面原图（无叠字）：叠字每次从原图重绘，反复调整不叠加
     created_at = Column(String(40), default=_now)
@@ -146,6 +149,8 @@ class Chapter(Base):
     media_path = Column(String(500), default="")           # 生成的图/视频路径
     status = Column(String(10), default="pending")         # pending|done|error
     error = Column(Text, default="")
+    score = Column(Integer, default=0)                     # 评分 0–100（0=未评分）
+    score_note = Column(String(300), default="")           # 评分评语（自动评分说明 / 手动评分标记）
     project = relationship("Project", back_populates="chapters")
     season = relationship("Season", back_populates="chapters")
 
