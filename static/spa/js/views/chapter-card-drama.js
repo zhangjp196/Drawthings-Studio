@@ -15,7 +15,7 @@ Views.chapterCardDrama = {
     isLast: { type: Boolean, default: false },
     defW: { type: Number, default: 0 },             // 总体默认分辨率（仅显示，不可在此修改）
     defH: { type: Number, default: 0 },
-    scoreMin: { type: Number, default: 80 },        // 评分阈值（分值标签配色用）
+    scoreMin: { type: Number, default: 60 },        // 评分阈值（分值标签配色用）
   },
   emits: ['preview', 'reloaded', 'toggle', 'saveplan'],
   template: `

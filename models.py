@@ -90,7 +90,7 @@ class Project(Base):
     count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
     count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
     auto_score = Column(Integer, default=1)                # 自动评分：每章画面生成后按 0–100 评分（1=开启）
-    score_min = Column(Integer, default=80)                # 评分阈值：低于该分且开启自动重做 → 重新生成
+    score_min = Column(Integer, default=60)                # 评分阈值：低于该分且开启自动重做 → 重新生成
     auto_redo = Column(Integer, default=1)                 # 低分自动重做：1=开启（最多重做 2 次）
     first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面）
     first_image_base = Column(String(500), default="")     # 封面原图（无叠字）：叠字每次从原图重绘，反复调整不叠加

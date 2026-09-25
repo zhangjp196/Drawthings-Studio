@@ -1413,7 +1413,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
                             for c in chars_from_raw(project.characters)],
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
-            "auto_score": project.auto_score or 0, "score_min": project.score_min or 80,
+            "auto_score": project.auto_score or 0, "score_min": project.score_min or 60,
             "auto_redo": project.auto_redo or 0,
             "count_mode": project.count_mode or "range",
             "count_min": project.count_min or 0, "count_max": project.count_max or 0,

@@ -1005,7 +1005,7 @@ class ComicPipeline:
                 auto_score = bool(project.auto_score)
                 auto_redo = bool(project.auto_redo)
                 rounds = 1 + MAX_SCORE_REDO if (auto_score and auto_redo) else 1
-                score_min = int(project.score_min or 80)
+                score_min = int(project.score_min or 60)
                 for rd in range(rounds):
                     if rd:
                         # 上一轮评分低于阈值 → 重做（重新生成提示词 + 画面）

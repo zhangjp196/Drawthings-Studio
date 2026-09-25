@@ -100,7 +100,7 @@ def _migrate():
             "count_min": "INTEGER DEFAULT 0",
             "count_max": "INTEGER DEFAULT 0",
             "auto_score": "INTEGER DEFAULT 1",
-            "score_min": "INTEGER DEFAULT 80",
+            "score_min": "INTEGER DEFAULT 60",
             "auto_redo": "INTEGER DEFAULT 1",
         },
         "micro_messages": {

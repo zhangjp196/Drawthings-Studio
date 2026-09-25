@@ -355,7 +355,7 @@ Views.projectComic = {
                     {{ I18N.t('p.chStatus.' + c.status) || c.status }}
                   </el-tag>
                   <el-tag v-if="c.score > 0" size="small" effect="light"
-                          :type="c.score >= (data.project.score_min || 80) ? 'success' : 'warning'">
+                          :type="c.score >= (data.project.score_min || 60) ? 'success' : 'warning'">
                     {{ c.score }}{{ I18N.t('p.scoreUnit') }}
                   </el-tag>
                 </div>
@@ -369,7 +369,7 @@ Views.projectComic = {
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :project-id="data.project.id"
                             :season-id="seasonId" :season-index="cur"
                             :def-w="oW" :def-h="oH"
-                            :score-min="(data.project.score_min || 80)"
+                            :score-min="(data.project.score_min || 60)"
                             :expanded="true" :no-toggle="true" :locked="locked"
                             :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
                             @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
@@ -610,7 +610,7 @@ Views.projectComic = {
       const a = seasonChapters.value;
       const f = scoreFilter.value;
       if (!f) return a;
-      const th = data.value?.project?.score_min || 80;
+      const th = data.value?.project?.score_min || 60;
       if (f === 'none') return a.filter(c => !(c.score > 0));
       if (f === 'low') return a.filter(c => c.score > 0 && c.score < th);
       return a.filter(c => c.score >= th);
@@ -682,7 +682,7 @@ Views.projectComic = {
     const oH = ref(0);
     // 自动评分：生成画面后按 0-100 评分；低于阈值自动重做（最多 2 次）
     const oScore = ref(true);
-    const oScoreMin = ref(80);
+    const oScoreMin = ref(60);
     const oRedo = ref(true);
     // 分辨率：先选比例、再选固定分辨率（均为 64 的倍数；0×0 = 跟随出图端/智能体）
     const RES_RATIOS = [
@@ -796,7 +796,7 @@ Views.projectComic = {
       oW.value = p.res_width || 0;
       oH.value = p.res_height || 0;
       oScore.value = !!p.auto_score;
-      oScoreMin.value = p.score_min || 80;
+      oScoreMin.value = p.score_min || 60;
       oRedo.value = !!p.auto_redo;
       // 由已存 W×H 反推比例与分辨率选项（0×0=自动；不在固定列表的旧值=自定义）
       const cur = `${oW.value}×${oH.value}`;
