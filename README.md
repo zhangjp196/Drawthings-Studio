@@ -317,7 +317,13 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 
 - Depends on `drawthings-py` (already in `requirements.txt` as `drawthings-py[ffmpeg]`): it builds the FlatBuffer
   generation config, receives the **frame sequence**, and assembles video with ffmpeg (LTX etc. also return audio,
-  playable in the browser).
+  playable in the browser). Video models here are **integrated audio+video** (LTX 2.3 generates both in one pass), so the
+  model's audio is muxed as-is — never generated separately. The mp4 frame rate is the model's **native fps**, inferred
+  per family (LTX 25 / Hunyuan 30 / SkyReels 24 / Wan 16) unless the preset sets `fps` explicitly: `drawthings-py`
+  backfills `fps` with an unrelated schema default (5) for presets that omit it, and stamping 25 fps frames as 5 fps
+  stretches the video 5× and leaves the audio covering only the start. After muxing, the file is verified with `ffprobe`
+  (when available): if the audio ends well before the video, the fps is re-derived from the audio duration (`frames ÷
+  audio`) and the file is re-muxed once — logged, never silent. (`tools/check_video_fps.py` covers this end to end.)
 - A gRPC request **must carry the full generation config**, so the config specifies:
   - **image model / video model** (`model_image` / `model_video`): each may be empty, but **at least one is required**
     (only one set = only that type is supported). Click "Fetch models" to read the **downloaded models** from the app
@@ -330,7 +336,7 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 - Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
   → 768×448, ~90 s for 25 frames).
-- Duration: the config's `max_seconds` (**default 8 = built-in cap**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), then bounded by the preset frame count and the **built-in 8s cap**. (E.g. with the LTX preset at fps=5: 5s = 25 frames, 6.6s = 33 frames; 8s actually yields 33 frames due to the 8n+1 constraint.)
+- Duration: the config's `max_seconds` (**default 8 = built-in cap**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), then bounded by the preset frame count and the **built-in 8s cap**. (E.g. with the LTX preset at fps=25: 2s = 49 frames, 4s = 97 frames ≈ 3.9s; longer requests are capped by the preset's 121 frames ≈ 4.84s.)
 - Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically).
 
 Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's

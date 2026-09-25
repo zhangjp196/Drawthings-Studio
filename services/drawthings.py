@@ -10,10 +10,13 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
 - 模型清单可从 app 读取（`get_models`，需 refresh_cache），生成前会校验模型已下载。
 
 图像分辨率：调用方 params > 预设，受 max_side（最长边）限幅。
+视频帧率：预设显式 fps > 按模型族推断（LTX 25 / Hunyuan 30 / SkyReels 24 / Wan 16）。
 视频帧数：调用方 params > 预设，受 max_seconds（秒）上限与「8 秒硬上限」（fps × 8）双重约束。
+音画同步自检：合成后用 ffprobe 校验音轨与视频是否等长，明显不等长（= 帧率取错）则按音轨反推帧率重封装。
 `drawthings-py` 为懒加载：未安装时只有实际生成会报错。
 """
 import asyncio
+import logging
 import re
 import shutil
 import subprocess
@@ -22,6 +25,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from PIL import Image
+
+logger = logging.getLogger("drawthings")
 
 DEFAULT_GRPC_PORT = 7859
 
@@ -35,7 +40,7 @@ _VIDEO_SUBSTR = (
 )
 _VIDEO_TOKENS = {"wan", "ltx", "animate", "animation", "motion", "animatediff", "framepack"}
 
-# 单视频时长硬上限（秒）：上限帧数 = fps × 8（fps 取预设值；预设没有时回退 25）。
+# 单视频时长硬上限（秒）：上限帧数 = fps × 8（fps 由 video_fps(model) / 预设显式值确定）。
 MAX_VIDEO_SECONDS = 8
 
 
@@ -70,6 +75,54 @@ def frame_step_for(model: str) -> int:
                             "mochi", "framepack", "animatediff", "dynamicrafter")):
         return 4
     return 1
+
+
+# 视频模型原生帧率：drawthings-py 预设未声明 fps 时，GenConfig 会回填 schema 默认值 5（并非真实帧率），
+# 因此按模型族推断真实帧率。用于「秒数 → 帧数」换算与 mp4 封装帧率（错了会拉长视频、音画不同步）。
+_VIDEO_FPS = (("ltx", 25), ("hunyuan", 30), ("skyreels", 24), ("wan", 16))
+
+
+def video_fps(model: str) -> int:
+    """视频模型帧率（fps）：按模型族推断（LTX 25 / Hunyuan 30 / SkyReels 24 / Wan 16），未知按 25。"""
+    n = (model or "").lower()
+    for key, fps in _VIDEO_FPS:
+        if key in n:
+            return fps
+    return 25
+
+
+# 合理帧率区间：按音轨时长反推帧率时的合法性校验（超出即视为推测不可靠，不改动原文件）。
+_FPS_MIN, _FPS_MAX = 6, 60
+# 音画同步容差：音轨/视频时长比在 0.8~1.25 内视为正常（一体化模型的音轨应与视频等长）。
+_AV_SYNC_RATIO = 0.8
+
+
+def probe_video_audio_durations(path: str | Path) -> tuple[float, float]:
+    """用 ffprobe 读取媒体文件的（视频时长, 音频时长）秒；无 ffprobe / 无对应轨道返回 (0, 0)。"""
+    if not shutil.which("ffprobe"):
+        return 0.0, 0.0
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30).stdout
+    except Exception:
+        return 0.0, 0.0
+    v = a = 0.0
+    for line in out.splitlines():
+        parts = [p for p in line.strip().split(",") if p]
+        if len(parts) != 2:
+            continue
+        kind, raw = parts
+        try:
+            dur = float(raw)
+        except ValueError:
+            continue  # duration 可能为 N/A
+        if kind == "video" and not v:
+            v = dur
+        elif kind == "audio" and not a:
+            a = dur
+    return v, a
 
 
 def snap_frames(frames: int, step: int, mode: str = "nearest") -> int:
@@ -275,6 +328,37 @@ class DrawThingsClient:
         ref_frame = extract_last_frame(ref_video_path, self.media_dir) if ref_video_path else None
         return asyncio.run(self._generate(prompt, video=True, ref_path=ref_frame, params=params or {}))
 
+    # ---------------- 音画同步自检 ----------------
+    def _remux_if_av_desynced(self, result, out: Path, fps: int, model: str) -> int:
+        """一体化音视频模型（如 LTX）自带的音轨应与视频基本等长；明显不等长说明帧率取错了，按音轨反推并重封装。
+
+        返回最终封装用的帧率。无 ffprobe / 无音轨 / 时长正常时原样返回；重封装失败保留原文件（不阻塞生成）。
+        """
+        v_dur, a_dur = probe_video_audio_durations(out)
+        frames = len(result)
+        if not (v_dur > 0 and a_dur > 0 and frames > 0):
+            return fps
+        if v_dur * _AV_SYNC_RATIO <= a_dur <= v_dur / _AV_SYNC_RATIO:
+            return fps  # 音画基本等长（容差内），无需干预
+        # 视频时长 = 帧数 / 帧率，音轨时长 ≈ 帧数 / 真实帧率 → 真实帧率 ≈ 帧数 / 音轨时长
+        corrected = int(round(frames / a_dur))
+        if corrected == fps or not (_FPS_MIN <= corrected <= _FPS_MAX):
+            logger.warning(
+                "视频音画不同步：模型 %s 视频 %.2fs / 音轨 %.2fs（反推帧率 %s，不可靠时不改文件）。"
+                "请为该模型补充帧率。", model, v_dur, a_dur, corrected)
+            return fps
+        logger.warning("视频音画不同步：模型 %s 视频 %.2fs / 音轨 %.2fs，帧率 %s → %s 重新封装",
+                       model, v_dur, a_dur, fps, corrected)
+        try:
+            result.to_video(str(out), fps=corrected)
+        except Exception as e:
+            logger.warning("重新封装失败，保留原文件：%s", e)
+            return fps
+        v2, a2 = probe_video_audio_durations(out)
+        if v2 > 0 and a2 > 0 and not (v2 * _AV_SYNC_RATIO <= a2 <= v2 / _AV_SYNC_RATIO):
+            logger.warning("重新封装后仍不同步：视频 %.2fs / 音轨 %.2fs（模型 %s）", v2, a2, model)
+        return corrected
+
     # ---------------- 内部 ----------------
     def _gen_config(self, model: str):
         try:
@@ -307,10 +391,14 @@ class DrawThingsClient:
                 f" / No {kind} model configured.")
         cfg = self._gen_config(model)
         # 尺寸：图片 = 调用方 params > 预设，再受 max_side 限幅；视频尺寸由预设/模型决定
+        # 帧率：预设**显式声明**优先，否则按模型族推断。
+        # 不能直接读 cfg["fps"]：GenConfig 会给未声明的键回填 schema 默认值 5，
+        # 把 25fps 的 LTX 当 5fps → 视频被拉长 5 倍、帧数换算错误、音轨只覆盖开头（音画不同步）。
         try:
-            fps = int(cfg["fps"] or 0) or 25
+            explicit = int(cfg["fps"]) if "fps" in list(cfg) else 0
         except Exception:
-            fps = 25
+            explicit = 0
+        fps = explicit or video_fps(model)
         if not video:
             w = int(params.get("width") or 0)
             h = int(params.get("height") or 0)
@@ -403,6 +491,8 @@ class DrawThingsClient:
                 raise RuntimeError(f"视频合成失败：{e} / Failed to assemble video: {e}")
             if not out.is_file():
                 raise RuntimeError("Draw Things 未返回可合成的视频帧 / No frames returned for video")
+            # 音画同步自检：一体化模型的音轨应与视频等长，明显不等长 = 帧率取错 → 按音轨反推后重封装
+            self._remux_if_av_desynced(result, out, fps, model)
             return str(out)
 
         if not len(result):
