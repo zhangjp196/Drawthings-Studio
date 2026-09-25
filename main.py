@@ -586,6 +586,10 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
     """新建微创作作品（含首个会话）。"""
     lang = _lang(request)
     body = await _json_body(request)
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "名称不能为空", "Name is required"))
     cs = ConfigStore(db)
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
@@ -593,7 +597,7 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
                             detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config"))
     w = MicroWork(
         id=uuid.uuid4().hex[:12],
-        title=str(body.get("title") or "").strip()[:200],
+        title=title[:200],
         llm_config_id=llm_config_id,
         drawthings_config_id=str(body.get("drawthings_config_id") or "").strip(),
         created_at=_now(), updated_at=_now(),

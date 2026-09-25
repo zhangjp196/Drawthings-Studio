@@ -60,7 +60,7 @@ Views.micro = {
 
       <el-dialog v-model="dlg" :title="I18N.t('mc.dlg')" width="540px">
         <el-form label-position="top">
-          <el-form-item :label="I18N.t('mc.fTitle')">
+          <el-form-item :label="I18N.t('mc.fTitle')" required>
             <el-input v-model="f.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
           </el-form-item>
           <el-form-item :label="I18N.t('mc.llm')" required>
@@ -136,6 +136,7 @@ Views.micro = {
     }
 
     async function create() {
+      if (!f.title.trim()) { ElementPlus.ElMessage.warning(I18N.t('mc.titleRequired')); return; }
       if (!f.llm) { ElementPlus.ElMessage.warning(I18N.t('mc.llmRequired')); return; }
       saving.value = true;
       try {
