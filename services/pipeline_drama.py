@@ -486,11 +486,10 @@ class DramaPipeline:
         if arc:
             user_text += f"\n整体故事大纲：{arc}"
         user_text += "\n请写出这个角色的形象 / 性格 / 核心动机。"
-        # 参考图：角色有图且 LLM 支持视觉才附带（多模态入图）
+        # 参考图：角色有图即附带（VLM 一律支持图片输入，多模态入图）
         img = (char.get("image") or "").strip()
-        supports_vision = (getattr(llm_cfg, "supports_vision", None) or "yes").lower() == "yes"
         prompt: str | list = user_text
-        if img and Path(img).is_file() and supports_vision:
+        if img and Path(img).is_file():
             prompt = [ImageUrl(url=image_data_uri(img)), user_text]
         async with agent:
             data = (await agent.run(prompt)).output
@@ -847,10 +846,9 @@ class DramaPipeline:
 
     # ---------------- 阶段 4：剧本编写（按章 / 批量） ----------------
     def _script_agent_context(self, db, project: Project, lang: str):
-        """剧本生成所需的上下文：LLM 配置 / 是否支持视觉 / 风格。"""
+        """剧本生成所需的上下文：LLM 配置 / 风格。"""
         llm_cfg, _ = self._configs(db, project, lang)
-        supports_vision = (getattr(llm_cfg, "supports_vision", None) or "yes").lower() == "yes"
-        return llm_cfg, supports_vision, (project.scope or {})
+        return llm_cfg, (project.scope or {})
 
     def _script_system(self, project: Project) -> str:
         """剧本/提示词写作的系统提示词（短剧）。"""
@@ -867,7 +865,7 @@ class DramaPipeline:
                                chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:
         """为第 i 章（季内序号）单独写剧本/提示词（供「按章生成」与「批量生成」复用）。
         chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。"""
-        llm_cfg, supports_vision, scope = self._script_agent_context(db, project, lang)
+        llm_cfg, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
         agent = make_agent(model or build_model(llm_cfg), self._script_system(project),
@@ -890,8 +888,7 @@ class DramaPipeline:
             season_cover = (season.first_image or "").strip()
             if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
                 context = "附本季封面（本季第 1 章视觉基准）：它是本季的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
-                if supports_vision:
-                    ref_img = season_cover
+                ref_img = season_cover
             elif season.number > 1:
                 prev_last = self._prev_season_last_chapter(db, project, season)
                 if prev_last and prev_last.media_path:
@@ -902,8 +899,6 @@ class DramaPipeline:
                         ref_img = await run_sync(extract_last_frame, pm, media_dir)
                     else:
                         ref_img = pm
-        if not supports_vision:
-            ref_img = None
         chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
         base = (ch.summary or ch.description or "").strip() or "（按大纲与上一章自然续写）"

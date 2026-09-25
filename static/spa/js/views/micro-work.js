@@ -223,7 +223,7 @@ Views.microWork = {
             <el-form-item :label="I18N.t('mc.llm')">
               <el-select v-model="cfg.llm" style="width: 100%">
                 <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
-                           :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / ' + I18N.t('cfg.textOnly') : '') + '）'" />
+                           :label="c.name + '（' + c.model + '）'" />
               </el-select>
             </el-form-item>
             <el-form-item :label="I18N.t('mc.dt')">

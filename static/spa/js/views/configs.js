@@ -82,7 +82,7 @@ Views.configs = {
             <div class="cfg-card" v-for="row in llmItems" :key="row.id">
               <div class="wc-top"><span class="cfg-name">{{ row.name }}</span></div>
               <div class="cfg-meta muted">
-                {{ I18N.t('cfg.model', row.model) }} · {{ row.supports_vision === 'yes' ? I18N.t('cfg.vision') : I18N.t('cfg.textOnly') }}<template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
+                {{ I18N.t('cfg.model', row.model) }} · {{ I18N.t('cfg.vision') }}<template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
               </div>
               <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
               <div class="wc-meta muted">{{ I18N.t('cfg.created', fmt(row.created_at)) }}</div>
@@ -94,7 +94,7 @@ Views.configs = {
               </div>
             </div>
           </div>
-          <el-empty v-else :image-size="56" :description="I18N.t('cfg.empty', 'LLM')" />
+          <el-empty v-else :image-size="56" :description="I18N.t('cfg.empty', 'VLM')" />
         </div>
       </section>
 
@@ -151,12 +151,6 @@ Views.configs = {
                 <el-button :loading="loadingModels" @click="fetchModels">{{ I18N.t('cfg.fetchModels') }}</el-button>
               </div>
               <div class="hint">{{ I18N.t('cfg.modelHint') }}</div>
-            </el-form-item>
-            <el-form-item :label="I18N.t('cfg.visionOpt')">
-              <el-select v-model="f.supports_vision" style="width: 100%">
-                <el-option value="yes" :label="I18N.t('cfg.visionYes')" />
-                <el-option value="no" :label="I18N.t('cfg.visionNo')" />
-              </el-select>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.thinking')">
               <el-select v-model="f.thinking" style="width: 100%">
@@ -230,7 +224,7 @@ Views.configs = {
     const loadingModels = ref(false);
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
-      supports_vision: 'yes', thinking: 'default', thinking_param: 'auto',
+      thinking: 'default', thinking_param: 'auto',
       model_image: '', model_video: '', max_side: 0, max_seconds: 8,
     });
     const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
@@ -323,7 +317,7 @@ Views.configs = {
     function openNew(type) {
       editId.value = '';
       Object.assign(f, {
-        config_type: type, name: '', base_url: '', api_key: '', model: '', supports_vision: 'yes',
+        config_type: type, name: '', base_url: '', api_key: '', model: '',
         thinking: 'default', thinking_param: 'auto',
         model_image: '', model_video: '', max_side: 0, max_seconds: 8,
       });
@@ -344,7 +338,7 @@ Views.configs = {
       } else {
         Object.assign(f, {
           config_type: 'llm', name: row.name, base_url: row.base_url,
-          api_key: '', model: row.model, supports_vision: row.supports_vision,
+          api_key: '', model: row.model,
           thinking: row.thinking || 'default',
           thinking_param: row.thinking_param || 'auto',
         });

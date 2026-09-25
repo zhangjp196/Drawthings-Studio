@@ -150,7 +150,7 @@ def _chapter_view(ch) -> dict:
 def _llm_view(c) -> dict:
     return {
         "id": c.id, "name": c.name, "base_url": c.base_url, "model": c.model,
-        "supports_vision": c.supports_vision or "yes",
+        "supports_vision": "yes",
         "thinking": getattr(c, "thinking", None) or "default",
         "thinking_param": getattr(c, "thinking_param", None) or "auto",
         "created_at": c.created_at,
@@ -323,10 +323,6 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
     if not name or not base_url:
         raise HTTPException(status_code=400,
                             detail=L(lang, "名称和端点地址不能为空", "Name and endpoint URL are required"))
-    supports_vision = str(body.get("supports_vision") or "yes").lower()
-    if supports_vision not in ("yes", "no"):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "图片输入选项无效", "Invalid image-input option"))
     thinking = str(body.get("thinking") or "default").lower()
     if thinking not in ("default", "yes", "no"):
         raise HTTPException(status_code=400,
@@ -341,8 +337,8 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
         cur = len(cs.list_llm()) if config_type == "llm" else len(cs.list_drawthing())
         if cur >= limit:
             if config_type == "llm":
-                msg = L(lang, f"LLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
-                        f"LLM config limit reached ({limit} max) — delete an unused one first")
+                msg = L(lang, f"VLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
+                        f"VLM config limit reached ({limit} max) — delete an unused one first")
             else:
                 msg = L(lang, f"DrawThings 配置最多 {limit} 个，请先删除现有配置",
                         f"Only {limit} DrawThings config allowed — delete the existing one first")
@@ -352,10 +348,9 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
             model = str(body.get("model") or "").strip()
             if not model:
                 raise HTTPException(status_code=400,
-                                    detail=L(lang, "LLM 配置需要模型名", "LLM config requires a model name"))
+                                    detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name"))
             cs.create_llm(name, base_url, str(body.get("api_key") or ""), model,
-                          supports_vision=supports_vision, thinking=thinking,
-                          thinking_param=thinking_param)
+                          thinking=thinking, thinking_param=thinking_param)
         elif config_type == "drawthings":
             cs.create_drawthing(name, base_url, **_dt_gen_fields(body, lang))
         else:
@@ -385,11 +380,7 @@ async def config_update(request: Request, config_type: str, config_id: str, db: 
             model = str(body.get("model") or "").strip()
             if not model:
                 raise HTTPException(status_code=400,
-                                    detail=L(lang, "LLM 配置需要模型名", "LLM config requires a model name"))
-            supports_vision = str(body.get("supports_vision") or "yes").lower()
-            if supports_vision not in ("yes", "no"):
-                raise HTTPException(status_code=400,
-                                    detail=L(lang, "图片输入选项无效", "Invalid image-input option"))
+                                    detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name"))
             thinking = str(body.get("thinking") or "default").lower()
             if thinking not in ("default", "yes", "no"):
                 raise HTTPException(status_code=400,
@@ -401,7 +392,7 @@ async def config_update(request: Request, config_type: str, config_id: str, db: 
             raw_key = body.get("api_key")
             updated = cs.update_llm(config_id, name=name, base_url=base_url,
                                     api_key=None if raw_key in (None, "") else str(raw_key),
-                                    model=model, supports_vision=supports_vision,
+                                    model=model,
                                     thinking=thinking, thinking_param=thinking_param)
         elif config_type == "drawthings":
             updated = cs.update_drawthing(config_id, name=name, base_url=base_url,
@@ -504,7 +495,7 @@ async def settings_update(request: Request, db: Session = Depends(get_db)):
     dt_id = str(body.get("default_dt_config_id") or "").strip()
     if llm_id and not cs.get_llm(llm_id):
         raise HTTPException(status_code=400,
-                            detail=L(lang, "默认 LLM 配置不存在", "Default LLM config not found"))
+                            detail=L(lang, "默认 VLM 配置不存在", "Default VLM config not found"))
     if dt_id and not cs.get_drawthing(dt_id):
         raise HTTPException(status_code=400,
                             detail=L(lang, "默认 DrawThings 配置不存在", "Default DrawThings config not found"))
@@ -609,7 +600,7 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config"))
+                            detail=L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config"))
     w = MicroWork(
         id=uuid.uuid4().hex[:12],
         title=title[:200],
@@ -642,7 +633,7 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "",
             "dt_name": dt_cfg.name if dt_cfg else "",
-            "vision": bool(llm_cfg and llm_cfg.supports_vision == "yes"),
+            "vision": bool(llm_cfg),
         },
         "sessions": [
             {"id": s.id, "title": s.title, "created_at": s.created_at,
@@ -820,7 +811,7 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config"))
+                            detail=L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config"))
     work.title = str(body.get("title") or "").strip()[:200]
     work.llm_config_id = llm_config_id
     work.drawthings_config_id = str(body.get("drawthings_config_id") or "").strip()
@@ -1022,15 +1013,11 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     llm_cfg = cs.get_llm(work.llm_config_id or "")
     dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
 
-    # 用户附图：仅所选 LLM 支持视觉时可用（存 MEDIA_DIR，随消息落库）
+    # 用户附图：VLM 一律支持图片输入（存 MEDIA_DIR，随消息落库）
     image_urls = []
     image_paths: list[str] = []
     raw_images = body.get("images") or []
     if raw_images:
-        if not (llm_cfg and llm_cfg.supports_vision == "yes"):
-            raise HTTPException(status_code=400,
-                                detail=L(lang, "当前 LLM 配置不支持图片",
-                                         "The selected LLM config does not support images"))
         image_urls = _save_user_images(raw_images)
         image_paths = [str(MEDIA_DIR / u.rsplit("/", 1)[-1].split("?")[0]) for u in image_urls]
     if not message and not image_urls:
@@ -1088,7 +1075,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
     """
     t0 = time.monotonic()  # 本条回复耗时起点（流式开始 → 落库完成）
     if not llm_cfg:
-        yield _sse("error", {"message": L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config")})
+        yield _sse("error", {"message": L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config")})
         yield _sse("done", {})
         return
 
@@ -1308,8 +1295,8 @@ async def project_create(request: Request, db: Session = Depends(get_db)):
     dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
     if not llm_cfg or not dt_cfg:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择有效的 LLM 与 DrawThings 配置",
-                                     "Please select valid LLM and DrawThings configs"))
+                            detail=L(lang, "请选择有效的 VLM 与 DrawThings 配置",
+                                     "Please select valid VLM and DrawThings configs"))
     project = pipeline.create(db, kind, origin, llm_cfg.id, dt_cfg.id,
                                style=style, title=str(body.get("title") or "").strip()[:200])
     return {"id": project.id}
@@ -1468,8 +1455,8 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
     if not llm_cfg or not dt_cfg:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择有效的 LLM 与 DrawThings 配置",
-                                     "Please select valid LLM and DrawThings configs"))
+                            detail=L(lang, "请选择有效的 VLM 与 DrawThings 配置",
+                                     "Please select valid VLM and DrawThings configs"))
     project.llm_config_id = llm_cfg.id
     project.drawthings_config_id = dt_cfg.id
     project.updated_at = _now()
@@ -2018,7 +2005,7 @@ def project_char_image_delete(request: Request, project_id: str, char_id: str,
 @app.post("/api/projects/{project_id}/characters/{char_id}/gen-desc")
 async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
                                 db: Session = Depends(get_db)):
-    """AI 生成单个角色的形象/性格描述（该角色有参考图且 LLM 支持视觉时以图为准）。"""
+    """AI 生成单个角色的形象/性格描述（该角色有参考图时以图为准，VLM 一律支持图片输入）。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:

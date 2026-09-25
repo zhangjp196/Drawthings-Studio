@@ -16,7 +16,7 @@ Views.createForm = {
       <el-form-item :label="I18N.t('cf.llm')" required>
         <el-select v-model="f.llm" :placeholder="I18N.t('cf.llmPh')" style="width: 100%">
           <el-option v-for="c in llms" :key="c.id" :value="c.id"
-                     :label="c.name + '（' + c.model + (c.supports_vision === 'no' ? ' / ' + I18N.t('cfg.textOnly') : '') + '）'" />
+                     :label="c.name + '（' + c.model + '）'" />
           <el-option v-if="!llms.length" value="" :label="I18N.t('cf.llmNone')" />
         </el-select>
         <div class="hint">{{ I18N.t('cf.llmHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newLlm') }}</el-link></div>
