@@ -1596,7 +1596,7 @@ async def project_action_stream(request: Request, project_id: str, db: Session =
     lang = _lang(request)
     body = await _json_body(request)
     step = str(body.get("step") or "generate")
-    if step not in ("generate", "chapters"):
+    if step not in ("generate", "chapters", "score"):
         raise HTTPException(status_code=400,
                              detail=L(lang, f"该步骤不支持流式进度：{step}",
                                       f"Streaming progress not supported for step: {step}"))
@@ -1657,6 +1657,24 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                     count_max=int(body.get("count_max") or 0),
                     indices=indices,
                     progress_cb=progress_cb, chapter_done_cb=plan_cb)
+            elif step == "score":
+                # VLM 批量评分：逐章评分（季内），单章失败不阻塞后续章节（error 阶段事件单独提示）
+                raw = body.get("indices")
+                indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全季
+                chapters = pipeline._season_chapters(db, project, season)
+                targets = list(enumerate(chapters)) if indices is None \
+                    else [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
+                for pos, (i, ch) in enumerate(targets, start=1):
+                    await progress_cb(pos, len(targets), ch.title)
+                    await score_cb(ch, None, "scoring", 0)
+                    try:
+                        score, note = await pipeline.vlm_score_chapter(db, project, season, i, lang)
+                    except ValueError as e:
+                        await queue.put(("score", {"index": ch.index, "title": ch.title or "",
+                                                    "score": None, "note": str(e), "phase": "error", "redo": 0}))
+                        continue
+                    await score_cb(ch, score, note, 0)
+                    await chapter_cb(ch)
             else:
                 raw = body.get("indices")
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
@@ -1666,8 +1684,12 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
             fresh = db.get(Project, project.id)
             await queue.put(("done", {"status": fresh.status if fresh else ""}))
         except Exception as e:
-            msg = "规划章节失败：" if step == "chapters" else "生成画面失败："
-            msg_en = "Planning chapters failed: " if step == "chapters" else "Generation failed: "
+            if step == "chapters":
+                msg, msg_en = "规划章节失败：", "Planning chapters failed: "
+            elif step == "score":
+                msg, msg_en = "批量评分失败：", "Batch scoring failed: "
+            else:
+                msg, msg_en = "生成画面失败：", "Generation failed: "
             await queue.put(("error", {"message": L(lang, msg + str(e), msg_en + str(e))}))
         finally:
             await queue.put(("__eof__", None))

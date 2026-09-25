@@ -321,7 +321,16 @@ Views.projectComic = {
                   </el-button>
                 </template>
               </el-popconfirm>
-              <el-button v-if="busyGenAll" size="small" type="danger" plain @click="stopGen">{{ I18N.t('p.genStop') }}</el-button>
+              <el-popconfirm :title="I18N.t('p.scoreAllConfirm')" @confirm="scoreAll">
+                <template #reference>
+                  <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!seasonChapters.length || locked">
+                    {{ selected.length ? I18N.t('p.scoreAllSel', selected.length) : I18N.t('p.scoreAll') }}
+                  </el-button>
+                </template>
+              </el-popconfirm>
+              <el-button v-if="busyGenAll || busyScoreAll" size="small" type="danger" plain @click="stopGen">
+                {{ busyScoreAll ? I18N.t('p.scoreStop') : I18N.t('p.genStop') }}
+              </el-button>
               <span class="muted small" v-if="seasonChapters.length">{{ I18N.t('p.progress', seasonDoneCount, seasonChapters.length) }}</span>
               <span class="muted small" v-if="progress.text">{{ progress.text }}</span>
               <span class="ch-tb-sep"></span>
@@ -543,6 +552,7 @@ Views.projectComic = {
     const actBusy = ref(false);
     const busySave = ref(false);
     const busyGenAll = ref(false);
+    const busyScoreAll = ref(false);
     const exporting = ref(false);  // 导出 ZIP/PDF 进行中（CS 走系统「另存为」，耗时期间禁用按钮）
     const busyFirst = ref(false);
     const busySeasonFirst = ref(false);
@@ -1209,6 +1219,10 @@ Views.projectComic = {
     function applyScoreLive(d) {
       if (d.phase === 'scoring') progress.text = I18N.t('p.scoreDoing', d.title);
       else if (d.phase === 'redo') progress.text = I18N.t('p.scoreRedoDo', d.title, d.redo, 2);
+      else if (d.phase === 'error') {
+        progress.text = I18N.t('p.scoreFailMsg', d.title, d.note);
+        ElementPlus.ElMessage.warning(I18N.t('p.scoreFailMsg', d.title, d.note));
+      }
       else progress.text = I18N.t('p.scoreResult', d.title, d.score) + (d.note ? ' · ' + d.note : '');
     }
     function applyChapterLive(d) {
@@ -1269,6 +1283,28 @@ Views.projectComic = {
         else { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { busyGenAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+    }
+    // VLM 批量评分：勾选章节则只评它们，未勾选则评全部（逐章进行；单章失败不阻塞后续）
+    async function scoreAll() {
+      if (!seasonId.value) return;
+      busyScoreAll.value = true; progress.text = '';
+      const indices = selected.value.length ? selected.value : null;
+      const ctrl = new AbortController(); sseCtrl = ctrl;
+      try {
+        await API.sse(`/api/projects/${props.id}/action-stream`, { step: 'score', season_id: seasonId.value, indices }, (ev, d) => {
+          if (ev === 'progress') progress.text = I18N.t('p.scoreProgress', d.current, d.total, d.title);
+          else if (ev === 'score') applyScoreLive(d);
+          else if (ev === 'chapter') applyChapterLive(d);
+          else if (ev === 'error') throw new Error(d.message);
+        }, ctrl.signal);
+        ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
+        selected.value = [];
+        await load();
+      } catch (e) {
+        if (ctrl.signal.aborted) { await load(); }  // 用户停止：后端已提交进度，同步刷新
+        else { ElementPlus.ElMessage.error(e.message); await load(); }
+      }
+      finally { busyScoreAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
 
     // 导出作用域为当前所选季（「完成」页签仅在选定季时可用）
@@ -1392,11 +1428,11 @@ Views.projectComic = {
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
-      actBusy, busySave, busyGenAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
+      actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
