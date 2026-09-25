@@ -32,9 +32,8 @@ Views.chapterCardComic = {
         </div>
         <span class="ch-tags">
           <el-tag size="small" :type="statusType" effect="light">{{ statusLabel }}</el-tag>
-          <el-tag v-if="chapter.score > 0" size="small" effect="light"
-                 :type="chapter.score >= scoreMin ? 'success' : 'warning'">{{ chapter.score }}{{ I18N.t('p.scoreUnit') }}</el-tag>
         </span>
+        <span class="ch-score" :class="scoreTone">{{ chapter.score > 0 ? (chapter.score + I18N.t('p.scoreUnit')) : I18N.t('p.scoreNone') }}</span>
         <span v-if="!noToggle" class="ch-chev">{{ expanded ? '⌄' : '›' }}</span>
       </div>
 
@@ -111,6 +110,12 @@ Views.chapterCardComic = {
     const statusLabel = computed(() => I18N.t('p.chStatus.' + props.chapter.status) || props.chapter.status);
     const statusType = computed(() =>
       props.chapter.status === 'done' ? 'success' : (props.chapter.status === 'error' ? 'danger' : 'info'));
+    // 头部独立评分徽标：达标绿 / 低于阈值橙 / 未评分灰
+    const scoreTone = computed(() => {
+      const s = props.chapter.score;
+      if (!(s > 0)) return 'none';
+      return s >= props.scoreMin ? 'ok' : 'low';
+    });
 
     async function doGen() {
       busy.value = 'gen';
@@ -162,7 +167,7 @@ Views.chapterCardComic = {
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
-    return { busy, dTab, title, summary, prompt, done, statusLabel, statusType,
+    return { busy, dTab, title, summary, prompt, done, statusLabel, statusType, scoreTone,
              doGen, doSave, doScore, doMove, doDelete };
   },
 };

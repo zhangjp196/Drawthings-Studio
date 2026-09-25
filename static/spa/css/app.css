@@ -334,6 +334,16 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .ch-headtitle { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ch-headtitle .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ch-tags { display: flex; gap: 6px; flex-shrink: 0; }
+/* 头部独立评分徽标：达标绿 / 低于阈值橙 / 未评分灰 */
+.ch-score { flex-shrink: 0; display: inline-flex; align-items: center; min-width: 46px;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  border: 1px solid transparent; }
+.ch-score.ok { color: var(--el-color-success); background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-5); }
+.ch-score.low { color: var(--el-color-warning); background: var(--el-color-warning-light-9);
+  border-color: var(--el-color-warning-light-5); }
+.ch-score.none { color: var(--el-text-color-placeholder); background: var(--el-fill-color-light);
+  border-color: var(--el-border-color-lighter); }
 .ch-chev { flex-shrink: 0; opacity: .5; font-size: 13px; }
 .ch-detail { display: flex; gap: 16px; padding-top: 14px; }
 .ch-media { width: 300px; flex-shrink: 0; }
