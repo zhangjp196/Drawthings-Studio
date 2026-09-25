@@ -2135,10 +2135,10 @@ def project_export_pdf(request: Request, project_id: str, season_id: str | None 
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"导出 PDF 失败：{e}", f"Export PDF failed: {e}"))
-    if preview:
-        return FileResponse(path, media_type="application/pdf",
-                            headers={"Content-Disposition": f"inline; filename={fname}"})
-    return FileResponse(path, filename=fname, media_type="application/pdf")
+    # preview=1 用 inline（浏览器直接渲染）；统一走 Starlette 的 filename 处理
+    #（非 ASCII 自动 UTF-8 百分号编码 filename*=utf-8''，中文文件名不会 500）
+    return FileResponse(path, media_type="application/pdf", filename=fname,
+                        content_disposition_type="inline" if preview else "attachment")
 
 
 # ---------------- 应用健康检查（CS 桌面客户端探测用） ----------------
