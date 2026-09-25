@@ -1,8 +1,8 @@
 // 项目详情 · 漫画版：头部/封面 + 季选择器（仅各季）+ 固定的「总体」入口（与各季用竖线分隔）
 // 总体：独立入口，直接显示写作子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面/完结），无二级页签
-// 季：二级页签（企划 / 章节 / 预览 / 完成）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
+// 季：二级页签（企划 / 章节 / 预览 / 导出）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步，漫画版 chapter-card-comic）+ 返回企划
-// 完成：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP/PDF（漫画支持 PDF）
+// 导出：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP/PDF（漫画支持 PDF）+ PDF 预览（新标签直接查看）
 // 与短剧版（project-drama.js）完全独立：章节固定为图片预览、PDF 导出恒可用，不含任何视频逻辑
 window.Views = window.Views || {};
 Views.projectComic = {
@@ -389,9 +389,9 @@ Views.projectComic = {
           </div>
         </el-tab-pane>
 
-        <el-tab-pane :label="I18N.t('p.tabDone')" name="done">
+        <el-tab-pane :label="I18N.t('p.tabExport')" name="done">
           <el-card shadow="never">
-            <template #header><b>{{ I18N.t('p.tabDone') }}</b></template>
+            <template #header><b>{{ I18N.t('p.tabExport') }}</b></template>
             <template v-if="seasonChapters.length">
               <p class="muted small mb8">{{ I18N.t('p.seasonDoneProgress', seasonDoneCount, seasonChapters.length) }}</p>
               <el-alert v-if="seasonCompleted" type="success" :closable="false"
@@ -401,6 +401,7 @@ Views.projectComic = {
             <div class="actions">
               <el-button type="primary" :loading="exporting" :disabled="!seasonDoneCount" @click="exportZip">{{ I18N.t('p.exportZip') }}</el-button>
               <el-button type="primary" :loading="exporting" :disabled="!seasonDoneCount" @click="exportPdf">{{ I18N.t('p.exportPdf') }}</el-button>
+              <el-button type="primary" plain :loading="exporting" :disabled="!seasonDoneCount" @click="previewPdf">{{ I18N.t('p.previewPdf') }}</el-button>
             </div>
           </el-card>
         </el-tab-pane>
@@ -1275,6 +1276,10 @@ Views.projectComic = {
     }
     function exportZip() { return exportMedia('zip'); }
     function exportPdf() { return exportMedia('pdf'); }
+    // PDF 预览：新标签打开导出地址（preview=1 → inline 返回，浏览器直接渲染，不下载）
+    function previewPdf() {
+      window.open(`/api/projects/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}&preview=1`, '_blank');
+    }
 
     async function addChapter() {
       if (!seasonId.value) return;
@@ -1381,7 +1386,7 @@ Views.projectComic = {
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
-      exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
+      exportZip, exportPdf, previewPdf, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
     };
   },

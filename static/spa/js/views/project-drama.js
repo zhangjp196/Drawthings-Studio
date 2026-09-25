@@ -1,8 +1,8 @@
 // 项目详情 · 短剧（视频）版：头部/封面 + 季选择器（仅各季）+ 固定的「总体」入口（与各季用竖线分隔）
 // 总体：独立入口，直接显示写作子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面/完结），无二级页签
-// 季：二级页签（企划 / 章节 / 预览 / 完成）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
+// 季：二级页签（企划 / 章节 / 预览 / 导出）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步，短剧版 chapter-card-drama）+ 返回企划
-// 完成：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP（视频不支持 PDF）
+// 导出：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP（视频不支持 PDF）
 // 与漫画版（project-comic.js）完全独立：章节/预览固定为视频（video），不含任何图片放大逻辑
 window.Views = window.Views || {};
 Views.projectDrama = {
@@ -384,9 +384,9 @@ Views.projectDrama = {
           </div>
         </el-tab-pane>
 
-        <el-tab-pane :label="I18N.t('p.tabDone')" name="done">
+        <el-tab-pane :label="I18N.t('p.tabExport')" name="done">
           <el-card shadow="never">
-            <template #header><b>{{ I18N.t('p.tabDone') }}</b></template>
+            <template #header><b>{{ I18N.t('p.tabExport') }}</b></template>
             <template v-if="seasonChapters.length">
               <p class="muted small mb8">{{ I18N.t('p.seasonDoneProgress', seasonDoneCount, seasonChapters.length) }}</p>
               <el-alert v-if="seasonCompleted" type="success" :closable="false"

@@ -2116,8 +2116,9 @@ def project_export_zip(request: Request, project_id: str, season_id: str | None 
 
 @app.get("/api/projects/{project_id}/export/pdf")
 def project_export_pdf(request: Request, project_id: str, season_id: str | None = None,
-                        db: Session = Depends(get_db)):
-    """导出 PDF（漫画：各章图片按序拼成多页；短剧/无图 → 400）；season_id 非空时仅导出该季章节。"""
+                        preview: int = 0, db: Session = Depends(get_db)):
+    """导出 PDF（漫画：各章图片按序拼成多页；短剧/无图 → 400）；season_id 非空时仅导出该季章节。
+    preview=1：以 inline 返回（浏览器新标签直接预览，不触发下载）。"""
     lang = _lang(request)
     project = pipeline.get(db, project_id)
     if project is None:
@@ -2134,6 +2135,9 @@ def project_export_pdf(request: Request, project_id: str, season_id: str | None 
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"导出 PDF 失败：{e}", f"Export PDF failed: {e}"))
+    if preview:
+        return FileResponse(path, media_type="application/pdf",
+                            headers={"Content-Disposition": f"inline; filename={fname}"})
     return FileResponse(path, filename=fname, media_type="application/pdf")
 
 
