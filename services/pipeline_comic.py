@@ -885,7 +885,7 @@ class ComicPipeline:
         context = ""
         ref_img = None
         if prev:
-            context = f"上一章：{prev.description}"
+            context = f"上一章：{prev.description}{self._ref_score_line(prev)}"
             prev_media = (prev.media_path or "").strip()
             if prev_media:
                 ext = Path(prev_media).suffix.lower()
@@ -895,7 +895,8 @@ class ComicPipeline:
                 else:
                     ref_img = prev_media
         else:
-            # 季内第 1 章：优先本季封面（若开启）；否则非第一季参考上一季末章（第一季无参考图）
+            # 季内第 1 章：优先本季封面（若开启）；否则非第一季参考上一季末章；
+            # 再否则（第一季且无封面）参考下一章（第 2 章，若已生成）
             season_cover = (season.first_image or "").strip()
             if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
                 context = "附本季封面（本季第 1 章视觉基准）：它是本季的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
@@ -903,13 +904,23 @@ class ComicPipeline:
             elif season.number > 1:
                 prev_last = self._prev_season_last_chapter(db, project, season)
                 if prev_last and prev_last.media_path:
-                    context = f"上一季末章：{prev_last.description}"
+                    context = f"上一季末章：{prev_last.description}{self._ref_score_line(prev_last)}"
                     pm = (prev_last.media_path or "").strip()
                     ext = Path(pm).suffix.lower()
                     if ext in (".mp4", ".mov", ".webm", ".gif"):
                         ref_img = await run_sync(extract_last_frame, pm, media_dir)
                     else:
                         ref_img = pm
+            elif i + 1 < len(chapters):
+                nxt = chapters[i + 1]
+                if (nxt.media_path or "").strip():
+                    context = f"下一章：{nxt.description}{self._ref_score_line(nxt)}"
+                    nm = nxt.media_path.strip()
+                    ext = Path(nm).suffix.lower()
+                    if ext in (".mp4", ".mov", ".webm", ".gif"):
+                        ref_img = await run_sync(extract_last_frame, nm, media_dir)
+                    else:
+                        ref_img = nm
         chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
         base = (ch.summary or ch.description or "").strip() or "（按大纲与上一章自然续写）"
@@ -928,6 +939,14 @@ class ComicPipeline:
         ch.description = data.description
         ch.prompt = data.prompt
         return ch
+
+    def _ref_score_line(self, ch: Chapter) -> str:
+        """参考章节评分内容：参考章已评分时，把 VLM 分值+评语附进参考上下文，
+        让 LLM 知晓参考基准的评分水平（未评分则不附）。"""
+        if ch is None or (ch.score or 0) <= 0:
+            return ""
+        note = (ch.score_note or "").strip()
+        return f"（参考评分 {ch.score} 分" + (f"：{note}" if note else "") + "）"
 
     # ---------------- 阶段 5：逐章生成画面（出图提示词 + 生图，两步连贯） ----------------
     # ---------------- 自动评分 / VLM 评分 ----------------
