@@ -90,7 +90,7 @@ Views.createForm = {
           style: f.style === 'custom' ? '' : f.style,
           style_custom: f.style === 'custom' ? f.styleCustom.trim() : '',
         });
-        emit('created', data.id);
+        emit('created', data.id, f.kind);
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       } finally {

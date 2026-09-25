@@ -397,6 +397,12 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
   background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in;
 }
 .pv-gallery .pv-cell img { aspect-ratio: auto; max-height: 72vh; object-fit: contain; }
+/* 短剧（视频）预览网格：与图片同一套尺寸约束 */
+.pv-cell video.pv-video {
+  display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover; background: #000;
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.pv-gallery .pv-cell video.pv-video { aspect-ratio: auto; max-height: 72vh; }
 .pv-ph {
   width: 100%; aspect-ratio: 2 / 3; background: #fff; border: 1px dashed var(--line);
   border-radius: 8px; display: flex; align-items: center; justify-content: center;

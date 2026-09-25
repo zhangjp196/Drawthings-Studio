@@ -6,7 +6,7 @@ Views.projects = {
     <div class="page">
       <div class="list-toolbar">
         <div class="list-head">
-          <h1>{{ I18N.t('proj.title') }}</h1>
+          <h1>{{ kindTitle }}</h1>
           <span class="muted">{{ I18N.t('proj.total', total) }}</span>
         </div>
         <el-button type="primary" @click="newDlg = true">{{ I18N.t('proj.new') }}</el-button>
@@ -85,7 +85,7 @@ Views.projects = {
                      :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
       <el-dialog v-model="newDlg" :title="I18N.t('proj.newDlg')" width="580px">
-        <create-form @created="created" />
+        <create-form :preset="newPreset" @created="created" />
       </el-dialog>
 
       <el-dialog v-model="renameDlg" :title="I18N.t('proj.renameDlg')" width="440px">
@@ -105,7 +105,14 @@ Views.projects = {
         chaptered: t('proj.status.chaptered'), done: t('proj.status.done'),
       };
     });
-    const f = reactive({ page: 1, size: 10, q: '', kind: '', status: '', sort: 'desc' });
+    const f = reactive({ page: 1, size: 10, q: '', kind: (router.currentRoute.value.query.kind || ''), status: '', sort: 'desc' });
+    // 页标题随类型筛选变化：漫画创作 / 视频创作 / 创作中心（全部）
+    const kindTitle = computed(() =>
+      f.kind === 'comic' ? I18N.t('nav.studioComic')
+        : f.kind === 'drama' ? I18N.t('nav.studioDrama')
+        : I18N.t('proj.title'));
+    // 新建弹框：从「漫画创作 / 视频创作」菜单进入时，类型预选对应项
+    const newPreset = computed(() => (f.kind === 'comic' || f.kind === 'drama') ? { kind: f.kind } : null);
     const rows = ref([]);
     const total = ref(0);
     const totalPages = ref(1);
@@ -127,15 +134,28 @@ Views.projects = {
         ElementPlus.ElMessage.error(e.message);
       }
     }
-    function apply() { f.page = 1; load(); }
+    function apply() { f.page = 1; syncKindQuery(); load(); }
+    // 类型筛选同步到 URL（?kind=）：侧边栏「漫画/视频创作」高亮与刷新后恢复依赖它
+    function syncKindQuery() {
+      const cur = router.currentRoute.value.query.kind || '';
+      if (cur !== (f.kind || '')) {
+        router.replace({ path: '/projects', query: f.kind ? { kind: f.kind } : {} });
+      }
+    }
+    // 同页点击侧边栏「漫画/视频创作」：URL 变化时同步筛选（不重建组件）
+    watch(() => router.currentRoute.value.query.kind, (k) => {
+      k = k || '';
+      if (k !== f.kind) { f.kind = k; f.page = 1; load(); }
+    });
     const onSearch = debounce(apply, 350);
     function reset() {
       Object.assign(f, { page: 1, size: 10, q: '', kind: '', status: '', sort: 'desc' });
+      syncKindQuery();
       load();
     }
     const statusTag = (s) => (s === 'done' ? 'success' : s === 'planning' ? 'info' : 'primary');
 
-    function open(row) { router.push('/project/' + row.id); }
+    function open(row) { router.push(row.kind === 'comic' ? '/comic/' + row.id : '/drama/' + row.id); }
     function askRename(row) {
       renameId.value = row.id;
       renameTitle.value = row.title || row.origin;
@@ -164,14 +184,14 @@ Views.projects = {
         ElementPlus.ElMessage.error(e.message);
       }
     }
-    function created(id) {
+    function created(id, kind) {
       newDlg.value = false;
-      router.push('/project/' + id);
+      router.push((kind === 'comic' ? '/comic/' : '/drama/') + id);
     }
 
     onMounted(load);
     return {
-      f, rows, total, totalPages, statusLabels, statusTag,
+      f, kindTitle, newPreset, rows, total, totalPages, statusLabels, statusTag,
       newDlg, renameDlg, renameTitle, busy,
       load, apply, onSearch, reset, open, askRename, doRename, del, created,
     };

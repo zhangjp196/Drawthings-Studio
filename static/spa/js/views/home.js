@@ -55,7 +55,7 @@ Views.home = {
         loading.value = false;
       }
     }
-    function open(p) { router.push('/project/' + p.id); }
+    function open(p) { router.push(p.kind === 'comic' ? '/comic/' + p.id : '/drama/' + p.id); }
     onMounted(load);
     return { projects, loading, open };
   },

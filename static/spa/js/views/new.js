@@ -11,6 +11,6 @@ Views.newProject = {
   `,
   components: { 'create-form': Views.createForm },
   setup() {
-    return { go: (id) => router.push('/project/' + id) };
+    return { go: (id, kind) => router.push((kind === 'comic' ? '/comic/' : '/drama/') + id) };
   },
 };

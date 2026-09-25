@@ -7,6 +7,10 @@ window.router = VueRouter.createRouter({
     { path: '/', component: Views.home },
     { path: '/projects', component: Views.projects },
     { path: '/new', component: Views.newProject },
+    // 漫画 / 短剧（视频）：完全独立的两套详情页
+    { path: '/comic/:id', component: Views.projectComic, props: true },
+    { path: '/drama/:id', component: Views.projectDrama, props: true },
+    // 旧链接兼容：取类型后重定向到对应独立页
     { path: '/project/:id', component: Views.project, props: true },
     { path: '/configs', component: Views.configs },
     { path: '/micro', component: Views.micro },

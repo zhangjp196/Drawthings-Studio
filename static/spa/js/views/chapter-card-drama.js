@@ -1,9 +1,9 @@
-// 章节卡片（手风琴）：折叠=只显照片缩略图+标题；展开=剧本/提示词/分辨率 + 多步操作（生成剧本/生成画面/重生成/保存/上下移/删除）
+// 章节卡片（手风琴）· 短剧（视频）版：折叠=只显缩略图占位+标题；展开=剧本/提示词/分辨率 + 多步操作（生成剧本/生成画面/重生成/保存/上下移/删除）
+// 与漫画版（chapter-card-comic.js）完全独立：本卡片媒体固定为视频（video），不含任何图片预览逻辑。
 window.Views = window.Views || {};
-Views.chapterCard = {
+Views.chapterCardDrama = {
   props: {
     chapter: { type: Object, required: true },
-    kind: { type: String, required: true },      // comic | drama
     projectId: { type: String, required: true },
     seasonId: { type: String, default: '' },
     seasonIndex: { type: Number, default: 0 },
@@ -20,9 +20,7 @@ Views.chapterCard = {
     <el-card class="chapter" shadow="never" :class="{ 'is-expanded': expanded }">
       <div class="ch-head" :class="{ 'no-toggle': noToggle }" @click="!noToggle && $emit('toggle')">
         <div class="ch-thumb">
-          <img v-if="done && kind === 'comic' && chapter.media_url" :src="chapter.media_url" :alt="chapter.title"
-               loading="lazy" @click.stop="$emit('preview', chapter.media_url)">
-          <div v-else class="ch-thumbph"><span class="ph-ico">{{ kind === 'drama' ? '🎬' : '🖼' }}</span></div>
+          <div class="ch-thumbph"><span class="ph-ico">🎬</span></div>
         </div>
         <div class="ch-headtitle">
           <b>{{ I18N.t('p.ch', chapter.index + 1) }} · {{ chapter.title }}</b>
@@ -36,9 +34,7 @@ Views.chapterCard = {
 
       <div v-show="expanded" class="ch-detail">
         <div class="ch-media">
-          <img v-if="done && kind === 'comic' && chapter.media_url" :src="chapter.media_url" :alt="chapter.title"
-               @click="$emit('preview', chapter.media_url)">
-          <video v-else-if="done && kind === 'drama' && chapter.media_url" :src="chapter.media_url" controls preload="metadata"></video>
+          <video v-if="done && chapter.media_url" :src="chapter.media_url" controls preload="metadata"></video>
           <el-empty v-else :description="I18N.t('p.chPending')" :image-size="48" />
         </div>
         <div class="ch-detail-body">

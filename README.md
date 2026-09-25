@@ -160,7 +160,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 - **Stack**: Vue 3 (Composition API, UMD global build) + vue-router (history mode) + Element Plus 2.x
   (components / dark theme variables / zh & en locales / icon package), all loaded locally from `static/vendor/` via `<script>`/`<link>`,
   **no Node / build tooling required** — editing files under `static/spa/` takes effect immediately.
-- **Desktop shell (CS style)**: a collapsible left **sidebar** (Workspace / Studio / Quick Create / Settings) + a compact top **toolbar**
+- **Desktop shell (CS style)**: a collapsible left **sidebar** (Workspace / Comic Studio / Video Studio / Quick Create / Settings) + a compact top **toolbar**
   (current page title + language / theme / quit); the content area fills the window and scrolls internally; panels are **solid, native-style**
   (no glass, small radii, high density); on narrow windows the sidebar collapses to icons.
 - **Routes**: `/` home · `/projects` list · `/new` create · `/project/:id` detail · `/configs` settings ·

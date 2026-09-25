@@ -54,16 +54,30 @@
       }
 
       // 导航项（图标 + 文案 + 高亮匹配）
+      // 创作中心拆分为「漫画创作 / 视频创作」两个入口：列表页按 ?kind= 区分，项目详情页按 /comic/、/drama/ 前缀区分
       const path = () => router.currentRoute.value.path;
+      function studioMatch(kind) {
+        if (path() === '/projects') return (router.currentRoute.value.query.kind || '') === kind;
+        return path().startsWith('/' + (kind === 'comic' ? 'comic' : 'drama') + '/');
+      }
       const navs = [
-        { to: '/',         ico: '⌂', key: 'nav.workspace', match: () => path() === '/' },
-        { to: '/projects', ico: '🎬', key: 'nav.studio',    match: () => path().startsWith('/projects') || path().startsWith('/project/') },
+        { to: '/',            ico: '⌂', key: 'nav.workspace',   match: () => path() === '/' },
+        { to: '/projects?kind=comic', ico: '🖼', key: 'nav.studioComic', match: () => studioMatch('comic') },
+        { to: '/projects?kind=drama', ico: '🎬', key: 'nav.studioDrama', match: () => studioMatch('drama') },
         { to: '/micro',    ico: '✨', key: 'nav.quick',     match: () => path().startsWith('/micro') },
         { to: '/configs',  ico: '⚙', key: 'nav.settings',  match: () => path().startsWith('/configs') },
       ];
       const pageTitle = computed(() => {
         const p = path();
         if (p === '/') return I18N.t('nav.workspace');
+        if (p === '/projects') {
+          const k = router.currentRoute.value.query.kind;
+          if (k === 'comic') return I18N.t('nav.studioComic');
+          if (k === 'drama') return I18N.t('nav.studioDrama');
+          return I18N.t('nav.studio');
+        }
+        if (p.startsWith('/comic/')) return I18N.t('nav.studioComic');
+        if (p.startsWith('/drama/')) return I18N.t('nav.studioDrama');
         if (p.startsWith('/project') || p.startsWith('/projects')) return I18N.t('nav.studio');
         if (p.startsWith('/new')) return I18N.t('nav.newProject');
         if (p.startsWith('/micro')) return I18N.t('nav.quick');
