@@ -313,6 +313,9 @@ Views.projectComic = {
             </div>
             <div class="ch-tb-row">
               <span class="ch-tb-cap">{{ I18N.t('p.tabChapters') }}</span>
+              <el-select v-model="scoreFilter" size="small" style="width: 118px">
+                <el-option v-for="o in scoreFilterOptions" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
               <el-checkbox :model-value="allSelected" @change="toggleAllSelect">{{ I18N.t('p.selAll') }}</el-checkbox>
               <el-popconfirm :title="I18N.t('p.genAllConfirm')" @confirm="genAll">
                 <template #reference>
@@ -342,9 +345,9 @@ Views.projectComic = {
             <!-- 左：章节列表（整季滚动、不分页；勾选用于批量生成；点击选中，当前章自动滚到可见） -->
             <div class="md-left">
               <div class="md-list" v-if="seasonChapters.length">
-                <div v-for="(c, i) in seasonChapters" :key="'md' + c.index" class="md-item"
-                     :class="{ active: i === cur }" @click="cur = i">
-                  <el-checkbox :model-value="isSel(i)" @click.stop @change="toggleSelect(i)" />
+                <div v-for="c in visibleChapters" :key="'md' + c.index" class="md-item"
+                     :class="{ active: c.index === cur }" @click="cur = c.index">
+                  <el-checkbox :model-value="isSel(c.index)" @click.stop @change="toggleSelect(c.index)" />
                   <span class="md-idx">{{ c.index + 1 }}</span>
                   <span class="md-title">{{ c.title || I18N.t('p.ch', c.index + 1) }}</span>
                   <el-tag size="small" effect="light"
@@ -356,6 +359,7 @@ Views.projectComic = {
                     {{ c.score }}{{ I18N.t('p.scoreUnit') }}
                   </el-tag>
                 </div>
+                <div v-if="!visibleChapters.length" class="muted small" style="padding: 10px;">{{ I18N.t('p.filterEmpty') }}</div>
               </div>
               <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
             </div>
@@ -593,6 +597,24 @@ Views.projectComic = {
       return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
     });
     const seasonDoneCount = computed(() => seasonChapters.value.filter(c => c.status === 'done').length);
+    // 评分筛选：'' 全部 / none 未评分 / low 低于阈值 / pass 达标（仅过滤左侧列表显示，
+    // 不影响整季进度统计与「生成/评分全部」——它们仍作用于整季）
+    const scoreFilter = ref('');
+    const scoreFilterOptions = computed(() => [
+      { value: '', label: I18N.t('p.filterAll') },
+      { value: 'none', label: I18N.t('p.filterUnscored') },
+      { value: 'low', label: I18N.t('p.filterBelowMin') },
+      { value: 'pass', label: I18N.t('p.filterPass') },
+    ]);
+    const visibleChapters = computed(() => {
+      const a = seasonChapters.value;
+      const f = scoreFilter.value;
+      if (!f) return a;
+      const th = data.value?.project?.score_min || 80;
+      if (f === 'none') return a.filter(c => !(c.score > 0));
+      if (f === 'low') return a.filter(c => c.score > 0 && c.score < th);
+      return a.filter(c => c.score >= th);
+    });
     // 预览页签：平铺 / 画廊；pvItems 带「有图序号 k」（无图章节不进放大列表），缺图白色占位
     const pvMode = ref('tile');
     const pvItems = computed(() => {
@@ -611,7 +633,14 @@ Views.projectComic = {
     const cur = ref(0);
     const curCh = computed(() => {
       const a = seasonChapters.value;
-      return (a.length && cur.value >= 0 && cur.value < a.length) ? a[cur.value] : null;
+      return a.find(c => c.index === cur.value) || null;
+    });
+    // 切换评分筛选后，若当前章节不在可见列表内，跳到第一个可见章节
+    watch(scoreFilter, () => {
+      if (curCh.value && !visibleChapters.value.some(c => c.index === cur.value)) {
+        const v = visibleChapters.value;
+        if (v.length) cur.value = v[0].index;
+      }
     });
     // 预览点图 → 切到对应章节（左列表页码随 cur 自动同步），并滚回章节工作区
     function gotoChapter(i) {
@@ -628,8 +657,9 @@ Views.projectComic = {
     // 批量生成多选：勾选的章节序号（季内 0 起；空 = 生成全部）
     const selected = ref([]);
     const allSelected = computed(() => {
-      const n = seasonChapters.value.length;
-      return n > 0 && selected.value.length === n;
+      const v = visibleChapters.value;
+      return v.length > 0 && v.every(c => selected.value.indexOf(c.index) >= 0)
+        && selected.value.length === v.length;
     });
     function isSel(i) {
       return selected.value.indexOf(i) >= 0;
@@ -640,7 +670,7 @@ Views.projectComic = {
       else selected.value.push(i);
     }
     function toggleAllSelect() {
-      selected.value = allSelected.value ? [] : seasonChapters.value.map((_, i) => i);
+      selected.value = allSelected.value ? [] : visibleChapters.value.map(c => c.index);
     }
 
     // 大纲表单
@@ -1241,8 +1271,7 @@ Views.projectComic = {
       if (d.description !== undefined) ch.description = d.description;
       if (d.width) { ch.width = d.width; ch.height = d.height; }
       if (d.score !== undefined) { ch.score = d.score; ch.score_note = d.score_note || ''; }
-      const sPos = seasonChapters.value.findIndex(c => c.index === d.index);
-      if (sPos >= 0) cur.value = sPos;
+      if (visibleChapters.value.some(c => c.index === d.index)) cur.value = d.index;
     }
     // 章节规划逐章回调：后端先清空旧章节，这里把规划出的章节按序号补入（新增或更新）并跟随定位到最新章节
     function applyChapterPlan(d) {
@@ -1256,8 +1285,7 @@ Views.projectComic = {
                    status: d.status, description: '', prompt: '', media_url: '', error: '', width: 0, height: 0 });
         arr.sort((a, b) => a.index - b.index);
       }
-      const sPos = seasonChapters.value.findIndex(c => c.index === d.index);
-      if (sPos >= 0) cur.value = sPos;
+      if (visibleChapters.value.some(c => c.index === d.index)) cur.value = d.index;
     }
     // 停止批量生成：中断 SSE → 后端停止并提交已完成章节；页面同步刷新
     function stopGen() {
@@ -1428,7 +1456,7 @@ Views.projectComic = {
     watch(() => props.id, () => { tabInit.value = false; load(); });  // 同一路由切换不同项目时重载
     onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
-      data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected,
+      data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, scoreFilterOptions, visibleChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
