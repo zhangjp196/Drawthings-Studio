@@ -216,7 +216,6 @@ Views.projectDrama = {
               <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
               <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.seasonChars') }}</button>
               <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.seasonCover') }}</button>
-              <button type="button" class="subtabs-item" :class="{ active: oSub === 'plan' }" @click="oSub = 'plan'">{{ I18N.t('p.subPlan') }}</button>
             </nav>
             <div class="subtabs-body">
               <el-card v-if="oSub === 'arc'" shadow="never">
@@ -273,129 +272,118 @@ Views.projectDrama = {
                                 @preview="openLb([$event], 0)" @reloaded="load"
                                 @overlay="openOvlDlg('season')" />
                 </template>
-                <el-card v-else-if="oSub === 'plan'" shadow="never">
-                  <div class="actions outline-bar">
-                    <el-popconfirm :title="I18N.t('p.chRegenConfirm')" @confirm="planChapters">
-                      <template #reference><el-button type="primary" :loading="actBusy" :disabled="locked">{{ I18N.t('p.planChapters') }}</el-button></template>
-                    </el-popconfirm>
-                    <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="savePlan">
-                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.planSave') }}</el-button></template>
-                    </el-popconfirm>
-                    <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
-                  </div>
-                  <el-form label-position="top">
-                    <el-form-item :label="I18N.t('p.countMode')">
-                      <div class="res-row">
-                        <el-radio-group v-model="cMode" size="small">
-                          <el-radio-button value="auto">{{ I18N.t('p.countAuto') }}</el-radio-button>
-                          <el-radio-button value="range">{{ I18N.t('p.countRange') }}</el-radio-button>
-                        </el-radio-group>
-                        <template v-if="cMode === 'range'">
-                          <el-input-number v-model="cMin" :min="1" :max="60" size="small" style="width:96px" />
-                          <span>~</span>
-                          <el-input-number v-model="cMax" :min="1" :max="60" size="small" style="width:96px" />
-                        </template>
-                      </div>
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.outRes')">
-                      <div class="res-row">
-                        <span>{{ oW }}×{{ oH }}</span>
-                        <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.planResHint') }}</span>
-                      </div>
-                    </el-form-item>
-                  </el-form>
-                  <div class="row-between" style="margin-bottom:8px;">
-                    <b class="muted small">{{ I18N.t('p.chPlan') }}（{{ seasonChapters.length }}）</b>
-                    <el-button size="small" :disabled="locked" @click="addChapter">{{ I18N.t('p.addChapter') }}</el-button>
-                  </div>
-                  <div v-for="(c, i) in planPageChapters" :key="'pl' + c.index" class="plan-row">
-                    <span class="plan-idx">{{ planPageStart + i + 1 }}</span>
-                    <el-input v-model="c.title" size="small" :placeholder="I18N.t('p.chPlanTitle')" style="width:180px" />
-                    <el-input v-model="c.summary" size="small" type="textarea" :rows="2" :placeholder="I18N.t('p.chPlanSummary')" />
-                    <el-button size="small" type="danger" plain :disabled="locked" @click="delChapter(planPageStart + i)">{{ I18N.t('p.chDelete') }}</el-button>
-                  </div>
-                  <div class="md-pager" style="margin-top:8px;" v-if="totalPages > 1">
-                    <el-button size="small" :disabled="planPage === 1" @click="planPage--">‹</el-button>
-                    <span class="muted small">{{ planPage }} / {{ totalPages }}</span>
-                    <el-button size="small" :disabled="planPage === totalPages" @click="planPage++">›</el-button>
-                  </div>
-                  <el-empty v-if="!seasonChapters.length" :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
-                </el-card>
             </div>
           </div>
         </el-tab-pane>
 
-        <!-- ============ 章节 ============ -->
-        <el-tab-pane :label="I18N.t('p.tabChapters')" name="chapters" :disabled="!seasonChapters.length">
-          <div class="actions mb8">
-            <el-button size="small" @click="tab = 'outline'">{{ I18N.t('p.toOutline') }}</el-button>
-            <el-checkbox :model-value="allSelected" @change="toggleAllSelect">{{ I18N.t('p.selAll') }}</el-checkbox>
-            <el-popconfirm :title="I18N.t('p.genAllConfirm')" @confirm="genAll">
-              <template #reference>
-                <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!seasonChapters.length || locked">
-                  {{ selected.length ? I18N.t('p.genAllSel', selected.length) : I18N.t('p.genAll') }}
-                </el-button>
+        <!-- ============ 章节：章节规划 / 章节详情 / 预览 一体（季作用域，一屏内完成）============ -->
+        <el-tab-pane :label="I18N.t('p.tabChapters')" name="chapters">
+          <div class="ch-toolbar">
+            <div class="ch-tb-row">
+              <span class="ch-tb-cap">{{ I18N.t('p.chPlan') }}</span>
+              <el-popconfirm :title="I18N.t('p.chRegenConfirm')" @confirm="planChapters">
+                <template #reference>
+                  <el-button size="small" type="primary" :loading="actBusy" :disabled="locked">{{ I18N.t('p.planChapters') }}</el-button>
+                </template>
+              </el-popconfirm>
+              <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="savePlan">
+                <template #reference><el-button size="small" :loading="busySave" :disabled="locked">{{ I18N.t('p.planSave') }}</el-button></template>
+              </el-popconfirm>
+              <span class="ch-tb-sep"></span>
+              <span class="muted small">{{ I18N.t('p.countMode') }}</span>
+              <el-radio-group v-model="cMode" size="small">
+                <el-radio-button value="auto">{{ I18N.t('p.countAuto') }}</el-radio-button>
+                <el-radio-button value="range">{{ I18N.t('p.countRange') }}</el-radio-button>
+              </el-radio-group>
+              <template v-if="cMode === 'range'">
+                <el-input-number v-model="cMin" :min="1" :max="60" size="small" style="width:96px" />
+                <span class="muted small">~</span>
+                <el-input-number v-model="cMax" :min="1" :max="60" size="small" style="width:96px" />
               </template>
-            </el-popconfirm>
-            <span class="muted small" v-if="progress.text">{{ progress.text }}</span>
-            <el-button v-if="busyGenAll" size="small" type="danger" plain @click="stopGen">
-              {{ I18N.t('p.genStop') }}
-            </el-button>
+              <span class="ch-tb-sep"></span>
+              <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}（{{ I18N.t('p.planResHint') }}）</span>
+              <span class="ch-tb-sep"></span>
+              <el-button size="small" :disabled="locked" @click="addChapter">{{ I18N.t('p.addChapter') }}</el-button>
+              <span class="muted small" v-if="actBusy || busySave">{{ progress.text || I18N.t('p.busy') }}</span>
+            </div>
+            <div class="ch-tb-row">
+              <span class="ch-tb-cap">{{ I18N.t('p.tabChapters') }}</span>
+              <el-checkbox :model-value="allSelected" @change="toggleAllSelect">{{ I18N.t('p.selAll') }}</el-checkbox>
+              <el-popconfirm :title="I18N.t('p.genAllConfirm')" @confirm="genAll">
+                <template #reference>
+                  <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!seasonChapters.length || locked">
+                    {{ selected.length ? I18N.t('p.genAllSel', selected.length) : I18N.t('p.genAll') }}
+                  </el-button>
+                </template>
+              </el-popconfirm>
+              <el-button v-if="busyGenAll" size="small" type="danger" plain @click="stopGen">{{ I18N.t('p.genStop') }}</el-button>
+              <span class="muted small" v-if="seasonChapters.length">{{ I18N.t('p.progress', seasonDoneCount, seasonChapters.length) }}</span>
+              <span class="muted small" v-if="progress.text">{{ progress.text }}</span>
+              <span class="ch-tb-sep"></span>
+              <el-button size="small" @click="tab = 'outline'">{{ I18N.t('p.toOutline') }}</el-button>
+            </div>
           </div>
-          <div class="muted small mb8" v-if="seasonChapters.length">
-            {{ I18N.t('p.progress', seasonDoneCount, seasonChapters.length) }}
-            <span style="margin: 0 6px; opacity: .45;">|</span>
-            {{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}
-          </div>
-          <div class="md-layout">
+
+          <div class="md-layout ch-work">
+            <!-- 左：章节列表（导航：勾选用于批量生成 / 序号 / 标题 / 状态；点击选中） -->
             <div class="md-left">
-              <div class="md-list">
+              <div class="md-list" v-if="seasonChapters.length">
                 <div v-for="(c, pi) in pageChapters" :key="'md' + c.index" class="md-item"
                      :class="{ active: (pageStart + pi) === cur }" @click="cur = pageStart + pi">
-                  <el-checkbox :model-value="isSel(pageStart + pi)" @click.stop @change="toggleSelect(pageStart + pi)" class="md-sel" />
+                  <el-checkbox :model-value="isSel(pageStart + pi)" @click.stop
+                               @change="toggleSelect(pageStart + pi)" />
                   <span class="md-idx">{{ c.index + 1 }}</span>
                   <span class="md-title">{{ c.title || I18N.t('p.ch', c.index + 1) }}</span>
-                  <el-tag size="small" :type="c.status === 'done' ? 'success' : (c.status === 'error' ? 'danger' : 'info')"
-                          effect="light">{{ I18N.t('p.chStatus.' + c.status) || c.status }}</el-tag>
+                  <el-tag size="small" effect="light"
+                          :type="c.status === 'done' ? 'success' : (c.status === 'error' ? 'danger' : 'info')">
+                    {{ I18N.t('p.chStatus.' + c.status) || c.status }}
+                  </el-tag>
                 </div>
               </div>
+              <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
               <div class="md-pager" v-if="totalPages > 1">
                 <el-button size="small" :disabled="page === 1" @click="page--">‹</el-button>
                 <span class="muted small">{{ page }} / {{ totalPages }}</span>
                 <el-button size="small" :disabled="page === totalPages" @click="page++">›</el-button>
               </div>
             </div>
+
+            <!-- 中：选中章详情（标题 + 摘要/剧本/提示词 三个子页签，一次「保存」提交） -->
             <div class="md-detail">
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :project-id="data.project.id"
-                              :season-id="seasonId" :season-index="cur"
-                              :def-w="oW" :def-h="oH"
-                              :expanded="true" :no-toggle="true" :locked="locked"
-                              :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
-                              @preview="openLb([$event], 0)" @reloaded="onChapterReloaded" />
+                            :season-id="seasonId" :season-index="cur"
+                            :def-w="oW" :def-h="oH"
+                            :expanded="true" :no-toggle="true" :locked="locked"
+                            :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
+                            @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
+                            @saveplan="savePlan" />
               <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="54" />
             </div>
-          </div>
-        </el-tab-pane>
 
-        <!-- ============ 预览（当前季全部章节视频按顺序排列，无分页；缺视频白色占位） ============ -->
-        <el-tab-pane :label="I18N.t('p.tabPreview')" name="preview" :disabled="!seasonChapters.length">
-          <div class="actions mb8">
-            <el-radio-group v-model="pvMode" size="small">
-              <el-radio-button value="tile">{{ I18N.t('p.pvTile') }}</el-radio-button>
-              <el-radio-button value="gallery">{{ I18N.t('p.pvGallery') }}</el-radio-button>
-            </el-radio-group>
-            <span class="muted small">{{ I18N.t('p.pvHintDrama', pvUrls.length, seasonChapters.length) }}</span>
-          </div>
-          <div class="pv-grid" :class="'pv-' + pvMode">
-            <div v-for="(it, i) in pvItems" :key="'pv' + it.index" class="pv-cell">
-              <video v-if="it.has" :src="it.url" class="pv-video" preload="metadata" playsinline></video>
-              <div v-else class="pv-ph" :title="I18N.t('p.pvMissingDrama')">{{ it.index + 1 }}</div>
-              <div class="pv-cap">{{ i + 1 }}. {{ it.title || I18N.t('p.ch', it.index + 1) }}</div>
+            <!-- 右：本季预览（按章节顺序、不分页；缺视频占位；点击切到对应章节） -->
+            <div class="pv-side">
+              <div class="pv-side-head">
+                <b>{{ I18N.t('p.tabPreview') }}</b>
+                <el-radio-group v-model="pvMode" size="small">
+                  <el-radio-button value="tile">{{ I18N.t('p.pvTile') }}</el-radio-button>
+                  <el-radio-button value="gallery">{{ I18N.t('p.pvGallery') }}</el-radio-button>
+                </el-radio-group>
+              </div>
+              <div class="muted small">{{ I18N.t('p.pvHintDrama', pvUrls.length, seasonChapters.length) }}</div>
+              <div class="pv-side-body">
+                <div class="pv-grid" :class="'pv-' + pvMode">
+                  <div v-for="(it, i) in pvItems" :key="'pv' + it.index" class="pv-cell"
+                       :class="{ cur: i === cur }" @click="gotoChapter(i)">
+                    <video v-if="it.has" :src="it.url" class="pv-video" preload="metadata" playsinline></video>
+                    <div v-else class="pv-ph" :title="I18N.t('p.pvMissingDrama')">{{ it.index + 1 }}</div>
+                    <div class="pv-cap">{{ i + 1 }}. {{ it.title || I18N.t('p.ch', it.index + 1) }}</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </el-tab-pane>
 
-        <!-- ============ 完成（季作用域：显示当前所选季的完成情况） ============ -->
         <el-tab-pane :label="I18N.t('p.tabDone')" name="done">
           <el-card shadow="never">
             <template #header><b>{{ I18N.t('p.tabDone') }}</b></template>
@@ -598,18 +586,21 @@ Views.projectDrama = {
       const a = seasonChapters.value;
       return (a.length && cur.value >= 0 && cur.value < a.length) ? a[cur.value] : null;
     });
+    // 预览点图 → 切到对应章节（左列表页码随 cur 自动同步），并滚回章节工作区
+    function gotoChapter(i) {
+      cur.value = i;
+      const work = document.querySelector('.md-layout');
+      if (work && work.scrollIntoView) work.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     // 左侧章节列表分页：10/页（选中章节变化时跳到对应页，便于生成时跟随）
     const pageSize = 10;
     const page = ref(1);
     const totalPages = computed(() => Math.max(1, Math.ceil(seasonChapters.value.length / pageSize)));
     const pageStart = computed(() => Math.min((page.value - 1) * pageSize, Math.max(0, seasonChapters.value.length - 1)));
     const pageChapters = computed(() => seasonChapters.value.slice(pageStart.value, pageStart.value + pageSize));
-    // 章节规划（plan 子页签）独立分页：10/页（与章节 tab 的 page 解耦，避免互相跳动）
-    const planPage = ref(1);
-    const planPageStart = computed(() => Math.min((planPage.value - 1) * pageSize, Math.max(0, seasonChapters.value.length - 1)));
-    const planPageChapters = computed(() => seasonChapters.value.slice(planPageStart.value, planPageStart.value + pageSize));
+    // 章节数变化时把当前页夹回有效范围（规划与章节已合并为同一列表，共用 page）
     watch(() => seasonChapters.value.length, () => {
-      if (planPage.value > totalPages.value) planPage.value = Math.max(1, totalPages.value);
+      if (page.value > totalPages.value) page.value = Math.max(1, totalPages.value);
     });
     watch(cur, (v) => {
       const n = seasonChapters.value.length;
@@ -832,20 +823,14 @@ Views.projectDrama = {
       seasonId.value = id;
       selected.value = [];
       cur.value = 0;
-      planPage.value = 1;
       if (id === 'overall') {
         oSub.value = 'story';   // 总体模式首个子页签
       } else {
         oSub.value = 'arc';     // 季模式首个子页签
         syncSeasonForm();
       }
-      // 一级切季后当前页签变禁用时回落到「企划」
-      //（「章节」需要所选季有章节；「完成」需要具体季——总体无「本季」）
-      if (tab.value === 'chapters' || tab.value === 'done') {
-        const n = id === 'overall' ? 0
-          : ((data.value?.chapters || []).filter(c => c.season_id === id).length);
-        if (id === 'overall' || (tab.value === 'chapters' && !n)) tab.value = 'outline';
-      }
+      // 总体模式没有「章节 / 完成」（两者都按具体季作用域），切到总体时回落到「企划」
+      if (id === 'overall' && (tab.value === 'chapters' || tab.value === 'done')) tab.value = 'outline';
     }
     async function addSeason() {
       try {
@@ -1377,12 +1362,11 @@ Views.projectDrama = {
     return {
       data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected,
       page, totalPages, pageStart, pageChapters,
-      planPage, planPageStart, planPageChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
-      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls,
+      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,

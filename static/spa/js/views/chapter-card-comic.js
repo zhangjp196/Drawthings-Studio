@@ -1,4 +1,5 @@
-// 章节卡片（手风琴）· 漫画版：折叠=只显照片缩略图+标题；展开=剧本/提示词/分辨率 + 多步操作（生成剧本/生成画面/重生成/保存/上下移/删除）
+// 章节卡片（手风琴）· 漫画版：折叠=缩略图+标题+摘要；展开=标题/摘要/剧本/提示词/分辨率 + 多步操作
+//（生成画面/一次保存全字段/上移/下移/删除）；保存时标题/摘要交给父级保存季规划（saveplan 事件）。
 // 与短剧版（chapter-card-drama.js）完全独立：本卡片媒体固定为图片（img），不含任何视频逻辑。
 window.Views = window.Views || {};
 Views.chapterCardComic = {
@@ -15,7 +16,7 @@ Views.chapterCardComic = {
     defW: { type: Number, default: 0 },             // 总体默认分辨率（仅显示，不可在此修改）
     defH: { type: Number, default: 0 },
   },
-  emits: ['preview', 'reloaded', 'toggle'],
+  emits: ['preview', 'reloaded', 'toggle', 'saveplan'],
   template: `
     <el-card class="chapter" shadow="never" :class="{ 'is-expanded': expanded }">
       <div class="ch-head" :class="{ 'no-toggle': noToggle }" @click="!noToggle && $emit('toggle')">
@@ -26,7 +27,7 @@ Views.chapterCardComic = {
         </div>
         <div class="ch-headtitle">
           <b>{{ I18N.t('p.ch', chapter.index + 1) }} · {{ chapter.title }}</b>
-          <span class="sub muted small">{{ chapter.summary || chapter.description || I18N.t('p.chPending') }}</span>
+          <span class="sub muted small">{{ summary || chapter.description || I18N.t('p.chPending') }}</span>
         </div>
         <span class="ch-tags">
           <el-tag size="small" :type="statusType" effect="light">{{ statusLabel }}</el-tag>
@@ -43,11 +44,25 @@ Views.chapterCardComic = {
         <div class="ch-detail-body">
           <el-alert v-if="chapter.status === 'error'" type="error" :closable="false" class="mb8"
                     :title="I18N.t('p.chFail', chapter.error)" />
-          <div v-if="chapter.summary" class="muted small">{{ I18N.t('p.chSummary') }}：{{ chapter.summary }}</div>
-          <div class="muted small">{{ I18N.t('p.chScript') }}</div>
-          <p class="desc">{{ chapter.description || chapter.summary || '—' }}</p>
-          <div class="muted small">{{ I18N.t('p.chPrompt') }}</div>
-          <el-input v-model="prompt" type="textarea" :rows="3" :readonly="locked" />
+          <div class="muted small">{{ I18N.t('p.chPlanTitle') }}</div>
+          <el-input v-model="title" size="small" :readonly="locked" :placeholder="I18N.t('p.chPlanTitle')" />
+          <div class="ch-tabs">
+            <button type="button" class="ch-tab" :class="{ active: dTab === 'summary' }"
+                    @click="dTab = 'summary'">{{ I18N.t('p.chPlanSummary') }}</button>
+            <button type="button" class="ch-tab" :class="{ active: dTab === 'script' }"
+                    @click="dTab = 'script'">{{ I18N.t('p.chScript') }}</button>
+            <button type="button" class="ch-tab" :class="{ active: dTab === 'prompt' }"
+                    @click="dTab = 'prompt'">{{ I18N.t('p.chPromptTab') }}</button>
+          </div>
+          <div class="ch-tab-body">
+            <el-input v-if="dTab === 'summary'" v-model="summary" type="textarea" :rows="5"
+                      :readonly="locked" :placeholder="I18N.t('p.chPlanSummary')" />
+            <p v-else-if="dTab === 'script'" class="desc">{{ chapter.description || '—' }}</p>
+            <template v-else>
+              <div class="muted small mb8">{{ I18N.t('p.chPrompt') }}</div>
+              <el-input v-model="prompt" type="textarea" :rows="5" :readonly="locked" />
+            </template>
+          </div>
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chResolution') }}</span>
             <span>{{ defW }}×{{ defH }}</span>
@@ -80,6 +95,9 @@ Views.chapterCardComic = {
   `,
   setup(props, { emit }) {
     const busy = ref('');
+    const dTab = ref('summary');                 // 卡片内子页签：summary | script | prompt
+    const title = ref(props.chapter.title || '');
+    const summary = ref(props.chapter.summary || '');
     const prompt = ref(props.chapter.prompt || '');
     const done = computed(() => props.chapter.status === 'done');
     const statusLabel = computed(() => I18N.t('p.chStatus.' + props.chapter.status) || props.chapter.status);
@@ -96,13 +114,16 @@ Views.chapterCardComic = {
         emit('reloaded');
       } finally { busy.value = ''; }
     }
+    // 一次「保存」提交本章全字段：提示词走章节编辑接口；标题/摘要写回季列表并交给父级保存规划（saveplan）
     async function doSave() {
       busy.value = 'save';
       try {
         await API.post(`/api/projects/${props.projectId}/edit/${props.seasonIndex}`,
                        { season_id: props.seasonId, prompt: prompt.value });
-        ElementPlus.ElMessage.success(I18N.t('p.promptSaved'));
         props.chapter.prompt = prompt.value;
+        props.chapter.title = title.value;
+        props.chapter.summary = summary.value;
+        emit('saveplan');
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
@@ -120,7 +141,7 @@ Views.chapterCardComic = {
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
-    return { busy, prompt, done, statusLabel, statusType,
+    return { busy, dTab, title, summary, prompt, done, statusLabel, statusType,
              doGen, doSave, doMove, doDelete };
   },
 };

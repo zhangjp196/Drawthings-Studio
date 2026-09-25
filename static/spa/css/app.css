@@ -344,9 +344,6 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .mt12 { margin-top: 12px; }
 .proj-tabs { margin-top: 6px; }
- .plan-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-.plan-row .el-textarea { flex: 1; min-width: 0; }
-.plan-row .plan-idx { flex: none; width: 28px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .char-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; }
 .char-ref { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .char-ref-img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
@@ -390,11 +387,23 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .pv-grid { display: grid; gap: 10px; }
 .pv-tile { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
 .pv-gallery { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-.pv-cell { min-width: 0; }
+.pv-cell { min-width: 0; cursor: pointer; }
+/* 当前选中章节高亮（点击预览会切到该章） */
+.pv-cell.cur img, .pv-cell.cur video.pv-video { outline: 2px solid var(--el-color-primary); outline-offset: 1px; }
+.pv-media { position: relative; line-height: 0; }
 .pv-cell img {
   display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover;
-  background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
 }
+/* 点整格 = 切到该章；放大走悬浮按钮 */
+.pv-zoom {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .25); border-radius: 8px; cursor: zoom-in;
+  background: rgba(0, 0, 0, .5); color: #fff; font-size: 13px; line-height: 1;
+  opacity: 0; transition: opacity .14s ease;
+}
+.pv-cell:hover .pv-zoom { opacity: 1; }
 .pv-gallery .pv-cell img { aspect-ratio: auto; max-height: 72vh; object-fit: contain; }
 /* 短剧（视频）预览网格：与图片同一套尺寸约束 */
 .pv-cell video.pv-video {
@@ -434,7 +443,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .md-item:hover { background: var(--el-color-primary-light-9); }
 .md-item.active { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5); }
-.md-item .md-idx {
+.md-idx {
   width: 24px; height: 24px; flex-shrink: 0; border-radius: 7px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--el-fill-color-blank); color: var(--el-text-color-secondary); font-size: 12px; font-weight: 600;
@@ -443,6 +452,35 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .md-item .md-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .md-detail { flex: 1; min-width: 0; }
 .ch-head.no-toggle { cursor: default; }
+
+/* ---------- 章节工作区：章节规划 / 章节详情 / 预览 合并为一屏 ----------
+   顶部工具条（规划 + 批量生成）→ 三栏（左章节列表导航 | 中章详情 | 右本季预览），各栏独立滚动。 */
+.ch-toolbar {
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+  box-shadow: var(--shadow-sm); padding: 10px 12px; margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ch-tb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ch-tb-cap { min-width: 56px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.ch-tb-sep { width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+.ch-work { align-items: stretch; }
+.ch-work .md-left, .ch-work .pv-side { max-height: calc(100vh - 330px); }
+/* 右栏：本季预览（标题行 + 独立滚动网格） */
+.pv-side { width: 340px; flex: none; display: flex; flex-direction: column; gap: 8px; }
+.pv-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pv-side-body {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 8px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--el-bg-color);
+}
+/* 章卡片内子页签：主题摘要 / 剧本描述 / 出图提示词 */
+.ch-tabs { display: flex; gap: 4px; margin: 10px 0 8px; border-bottom: 1px solid var(--line); }
+.ch-tab {
+  padding: 6px 12px; border: none; background: none; cursor: pointer; font-size: 13px;
+  color: var(--el-text-color-regular); border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0;
+}
+.ch-tab:hover { color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+.ch-tab.active { color: var(--el-color-primary); border-bottom-color: var(--el-color-primary); font-weight: 600; }
+.ch-tab-body { min-height: 134px; }
 
 /* ---------- 微创作：作品列表 ---------- */
 .work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
@@ -855,4 +893,8 @@ button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-
   .md-layout { flex-direction: column; }
   .md-left { width: 100%; max-height: none; }
   .md-list { max-height: 40vh; }
+  /* 章节工作区窄窗：三栏纵向堆叠，预览限高内滚 */
+  .ch-work .md-left, .ch-work .pv-side { max-height: none; }
+  .pv-side { width: 100%; }
+  .pv-side-body { max-height: 60vh; }
 }
