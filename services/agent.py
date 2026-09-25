@@ -189,11 +189,6 @@ class ChapterOut(BaseModel):
     scene: str
 
 
-class ChaptersOut(BaseModel):
-    """阶段 3：分章。"""
-    chapters: list[ChapterOut] = []
-
-
 class ChapterCount(BaseModel):
     """先定总章数（供逐章规划：先定 N 再逐章规划 1..N）。"""
     count: int = 0

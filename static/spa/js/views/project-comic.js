@@ -281,9 +281,12 @@ Views.projectComic = {
           <div class="ch-toolbar">
             <div class="ch-tb-row">
               <span class="ch-tb-cap">{{ I18N.t('p.chPlan') }}</span>
-              <el-popconfirm :title="I18N.t('p.chRegenConfirm')" @confirm="planChapters">
+              <el-popconfirm :title="selected.length ? I18N.t('p.planSelConfirm', selected.length) : I18N.t('p.chRegenConfirm')"
+                             @confirm="planChapters">
                 <template #reference>
-                  <el-button size="small" type="primary" :loading="actBusy" :disabled="locked">{{ I18N.t('p.planChapters') }}</el-button>
+                  <el-button size="small" type="primary" :loading="actBusy" :disabled="locked">
+                    {{ selected.length ? I18N.t('p.planSel', selected.length) : I18N.t('p.planChapters') }}
+                  </el-button>
                 </template>
               </el-popconfirm>
               <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="savePlan">
@@ -291,15 +294,9 @@ Views.projectComic = {
               </el-popconfirm>
               <span class="ch-tb-sep"></span>
               <span class="muted small">{{ I18N.t('p.countMode') }}</span>
-              <el-radio-group v-model="cMode" size="small">
-                <el-radio-button value="auto">{{ I18N.t('p.countAuto') }}</el-radio-button>
-                <el-radio-button value="range">{{ I18N.t('p.countRange') }}</el-radio-button>
-              </el-radio-group>
-              <template v-if="cMode === 'range'">
-                <el-input-number v-model="cMin" :min="1" :max="60" size="small" style="width:96px" />
-                <span class="muted small">~</span>
-                <el-input-number v-model="cMax" :min="1" :max="60" size="small" style="width:96px" />
-              </template>
+              <el-input-number v-model="cMin" :min="1" :max="99" size="small" style="width:96px" />
+              <span class="muted small">~</span>
+              <el-input-number v-model="cMax" :min="1" :max="99" size="small" style="width:96px" />
               <span class="ch-tb-sep"></span>
               <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}（{{ I18N.t('p.planResHint') }}）</span>
               <span class="ch-tb-sep"></span>
@@ -325,13 +322,12 @@ Views.projectComic = {
           </div>
 
           <div class="md-layout ch-work">
-            <!-- 左：章节列表（导航：勾选用于批量生成 / 序号 / 标题 / 状态；点击选中） -->
+            <!-- 左：章节列表（整季滚动、不分页；勾选用于批量生成；点击选中，当前章自动滚到可见） -->
             <div class="md-left">
               <div class="md-list" v-if="seasonChapters.length">
-                <div v-for="(c, pi) in pageChapters" :key="'md' + c.index" class="md-item"
-                     :class="{ active: (pageStart + pi) === cur }" @click="cur = pageStart + pi">
-                  <el-checkbox :model-value="isSel(pageStart + pi)" @click.stop
-                               @change="toggleSelect(pageStart + pi)" />
+                <div v-for="(c, i) in seasonChapters" :key="'md' + c.index" class="md-item"
+                     :class="{ active: i === cur }" @click="cur = i">
+                  <el-checkbox :model-value="isSel(i)" @click.stop @change="toggleSelect(i)" />
                   <span class="md-idx">{{ c.index + 1 }}</span>
                   <span class="md-title">{{ c.title || I18N.t('p.ch', c.index + 1) }}</span>
                   <el-tag size="small" effect="light"
@@ -341,11 +337,6 @@ Views.projectComic = {
                 </div>
               </div>
               <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
-              <div class="md-pager" v-if="totalPages > 1">
-                <el-button size="small" :disabled="page === 1" @click="page--">‹</el-button>
-                <span class="muted small">{{ page }} / {{ totalPages }}</span>
-                <el-button size="small" :disabled="page === totalPages" @click="page++">›</el-button>
-              </div>
             </div>
 
             <!-- 中：选中章详情（标题 + 摘要/剧本/提示词 三个子页签，一次「保存」提交） -->
@@ -595,20 +586,12 @@ Views.projectComic = {
       const work = document.querySelector('.md-layout');
       if (work && work.scrollIntoView) work.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    // 左侧章节列表分页：10/页（选中章节变化时跳到对应页，便于生成时跟随）
-    const pageSize = 10;
-    const page = ref(1);
-    const totalPages = computed(() => Math.max(1, Math.ceil(seasonChapters.value.length / pageSize)));
-    const pageStart = computed(() => Math.min((page.value - 1) * pageSize, Math.max(0, seasonChapters.value.length - 1)));
-    const pageChapters = computed(() => seasonChapters.value.slice(pageStart.value, pageStart.value + pageSize));
-    // 章节数变化时把当前页夹回有效范围（规划与章节已合并为同一列表，共用 page）
-    watch(() => seasonChapters.value.length, () => {
-      if (page.value > totalPages.value) page.value = Math.max(1, totalPages.value);
-    });
-    watch(cur, (v) => {
-      const n = seasonChapters.value.length;
-      page.value = n ? Math.min(totalPages.value, Math.floor(v / pageSize) + 1) : 1;
-    });
+    // 左侧章节列表：不分页、整季滚动；当前章自动滚到可见（批量生成 / 预览点击时跟随）
+    function scrollActiveIntoView() {
+      const el = document.querySelector('.md-list .md-item.active');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }
+    watch(cur, () => nextTick(scrollActiveIntoView));
     // 批量生成多选：勾选的章节序号（季内 0 起；空 = 生成全部）
     const selected = ref([]);
     const allSelected = computed(() => {
@@ -669,9 +652,9 @@ Views.projectComic = {
       applyRes();
     }
     function onResChange() { applyRes(); }
-    const cMode = ref('auto');   // 章节数量：auto（模型决定）/ range（区间）
-    const cMin = ref(3);
-    const cMax = ref(5);
+    // 章节数量（仅范围 min~max；0/未设置时后端回退默认 6~12）
+    const cMin = ref(6);
+    const cMax = ref(12);
 
     // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各季完成进度
     const locked = computed(() => (data.value?.project.status) === 'done');
@@ -748,9 +731,6 @@ Views.projectComic = {
       const r = RES_RATIOS.find(x => x.sizes.includes(cur));
       oRatio.value = (oW.value || oH.value) ? (r ? r.key : 'custom') : '';
       oRes.value = (oW.value || oH.value) ? cur : '0×0';
-      cMode.value = p.count_mode === 'range' ? 'range' : 'auto';
-      cMin.value = p.count_min || 3;
-      cMax.value = p.count_max || 5;
     }
     function syncTab() {
       // 默认落在「大纲」页（含已规划章节的进行中项目）；完成已是季级，不再按作品状态自动跳「完成」
@@ -856,17 +836,15 @@ Views.projectComic = {
         seasonArcText.value = '';
         seasonTitleText.value = '';
         seasonChars.value = [];
-        cMode.value = 'auto';
-        cMin.value = 3;
-        cMax.value = 5;
+        cMin.value = 6;
+        cMax.value = 12;
         return;
       }
       seasonArcText.value = s.arc || '';
       seasonTitleText.value = s.title || '';
       seasonChars.value = (s.characters || []).map(c => ({ id: c.id || '', name: c.name || '', description: c.description || '' }));
-      cMode.value = s.count_mode === 'range' ? 'range' : 'auto';
-      cMin.value = s.count_min || 3;
-      cMax.value = s.count_max || 5;
+      cMin.value = s.count_min || 6;
+      cMax.value = s.count_max || 12;
     }
     function addSeasonChar() {
       seasonChars.value.push({ id: '', name: '', description: '' });
@@ -1079,17 +1057,22 @@ Views.projectComic = {
         ElementPlus.ElMessage.warning(I18N.t('p.planNeedArc'));
         return;
       }
+      // 勾选章节 = 只重规划选中的章节（保留其余章节与已生成画面）；未勾选 = 全季重规划
+      const sel = selected.value.slice().sort((a, b) => a - b);
+      const subset = sel.length > 0;
       actBusy.value = true; progress.text = '';
-      data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
-      cur.value = 0;
+      if (!subset) {
+        data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
+        cur.value = 0;
+      }
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/projects/${props.id}/action-stream`, {
           step: 'chapters',
           season_id: seasonId.value,
-          count_mode: cMode.value,
-          count_min: cMode.value === 'range' ? cMin.value : 0,
-          count_max: cMode.value === 'range' ? cMax.value : 0,
+          count_min: cMin.value,
+          count_max: cMax.value,
+          ...(subset ? { indices: sel } : {}),
         }, (ev, d) => {
           if (ev === 'progress') progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
           else if (ev === 'chapter') applyChapterPlan(d);
@@ -1179,9 +1162,9 @@ Views.projectComic = {
       (async () => {
         try {
           await API.patch(`/api/projects/${props.id}/seasons/${seasonId.value}`, {
-            count_mode: cMode.value,
-            count_min: cMode.value === 'range' ? cMin.value : 0,
-            count_max: cMode.value === 'range' ? cMax.value : 0,
+            count_mode: 'range',
+            count_min: cMin.value,
+            count_max: cMax.value,
             chapters: seasonChapters.value.map(c => ({ title: c.title, summary: c.summary })),
           });
           ElementPlus.ElMessage.success(I18N.t('p.planSaved'));
@@ -1364,13 +1347,12 @@ Views.projectComic = {
     onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
       data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected,
-      page, totalPages, pageStart, pageChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
-      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMode, cMin, cMax,
+      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMin, cMax,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,

@@ -1424,7 +1424,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
                             for c in chars_from_raw(project.characters)],
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
-            "count_mode": project.count_mode or "auto",
+            "count_mode": project.count_mode or "range",
             "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
             "created_at": project.created_at, "updated_at": project.updated_at,
@@ -1442,7 +1442,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
                 "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
                                  "image_url": _media_url(c["image"])}
                                 for c in chars_from_raw(s.characters)],
-                "count_mode": s.count_mode or "auto",
+                "count_mode": s.count_mode or "range",
                 "count_min": s.count_min or 0, "count_max": s.count_max or 0,
             }
             for s in (db.query(Season).filter(Season.project_id == project.id)
@@ -1581,7 +1581,6 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
         elif step == "chapters":
             project = await pipeline.step_chapters(
                 db, project, season, lang,
-                count_mode=str(body.get("count_mode") or "auto"),
                 count_min=int(body.get("count_min") or 0),
                 count_max=int(body.get("count_max") or 0))
         elif step == "generate":
@@ -1600,7 +1599,8 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
 @app.post("/api/projects/{project_id}/action-stream")
 async def project_action_stream(request: Request, project_id: str, db: Session = Depends(get_db)):
     """逐章推进的 SSE 进度流：body 传 { step:'generate', season_id, indices:[...] }（省略/空=全部）
-    或 { step:'chapters', season_id, count_mode, count_min, count_max }（逐章规划）。
+    或 { step:'chapters', season_id, count_min, count_max, indices:[...] }（逐章规划：indices 省略/空=全季重规划，
+    非空=只重规划选中的章节）。
     事件：progress(i/total+标题) / chapter(单章完成) / done(附新状态) / error(失败)。"""
     lang = _lang(request)
     body = await _json_body(request)
@@ -1649,11 +1649,13 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
     async def _run():
         try:
             if step == "chapters":
+                raw = body.get("indices")
+                indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全季重规划
                 await pipeline.step_chapters_stream(
                     db, project, season, lang=lang,
-                    count_mode=str(body.get("count_mode") or "auto"),
                     count_min=int(body.get("count_min") or 0),
                     count_max=int(body.get("count_max") or 0),
+                    indices=indices,
                     progress_cb=progress_cb, chapter_done_cb=plan_cb)
             else:
                 raw = body.get("indices")

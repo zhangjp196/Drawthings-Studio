@@ -36,7 +36,6 @@ from .agent import (
     CharDescOut,
     ChapterCount,
     ChapterOut,
-    ChaptersOut,
     SeasonArcOut,
     ScriptOut,
     build_model,
@@ -50,6 +49,7 @@ from .pipeline_common import (
     chars_from_raw,
     chars_to_raw,
     chars_to_text,
+    count_range,
     run_sync,
 )
 
@@ -503,30 +503,6 @@ class DramaPipeline:
         self._save(db, project)
         return desc
 
-    async def _plan_chapters(self, db, project: Project, lang: str,
-                             count_mode: str = "auto", count_min: int = 0, count_max: int = 0) -> list[tuple[str, str]]:
-        """依据当前大纲/风格/角色，让模型规划章节，返回 [(标题, 一句话主题摘要), ...]。
-        章节数量：auto = 模型自行决定；range = 在 [count_min, count_max] 内选择合适数量。"""
-        llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
-        chars = chars_to_text(chars_from_raw(project.characters))
-        gprompt = (project.global_prompt or "").strip()
-        system = ("你是分章策划。依据整体故事大纲、风格、角色设定，把故事拆成章节，"
-                  "每章给出：标题（简短）+ 一句话主题摘要（讲清本章发生什么、如何承接前后）。")
-        agent = make_agent(build_model(llm_cfg), system, output_type=ChaptersOut)
-        if (count_mode or "auto") == "range" and int(count_min or 0) > 0:
-            hi = int(count_max) if int(count_max or 0) >= int(count_min) else int(count_min)
-            cnt = f"请拆分为 {int(count_min)}~{hi} 章（在该范围内选择一个合适的数量）"
-        else:
-            cnt = "请拆分为合适的章节数（一般 3-12 章）"
-        user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
-                + (f"角色设定：{chars}\n" if chars else "")
-                + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
-                + f"{cnt}\n\n整体故事大纲（按此大纲拆章）：\n{(project.arc or '').strip()}")
-        async with agent:
-            data = (await agent.run(user)).output
-        return [(c.title or f"第{i + 1}章", (c.scene or "").strip()) for i, c in enumerate(data.chapters)]
-
     def _rebuild_chapters(self, db, project: Project, season: Season,
                           plan: list[tuple[str, str]]) -> None:
         """按 [(标题, 主题摘要)] 重建**该季**章节：清空旧章节（清理其媒体）后按序建新的。"""
@@ -545,7 +521,7 @@ class DramaPipeline:
                       characters: list[dict] | None = None, style: str | None = None,
                       global_prompt: str | None = None,
                       res_width: int | None = 0, res_height: int | None = 0,
-                      count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0) -> Project:
+                      count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None) -> Project:
         """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定。
         仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_season），
         也不触碰已生成的剧本/媒体（保存不触发生成）。"""
@@ -585,11 +561,9 @@ class DramaPipeline:
         if res_height is not None:
             project.res_height = int(res_height or 0)
         if count_mode is not None:
-            project.count_mode = "range" if count_mode == "range" else "auto"
-        if count_min is not None:
-            project.count_min = int(count_min or 0)
-        if count_max is not None:
-            project.count_max = int(count_max or 0)
+            project.count_mode = "range"          # 仅范围模式（遗留的项目级字段）
+        if count_min is not None or count_max is not None:
+            project.count_min, project.count_max = count_range(count_min, count_max)
         db.commit()
         self._save(db, project)
         return project
@@ -597,7 +571,7 @@ class DramaPipeline:
     def save_season(self, db, project: Project, season: Season, *,
                     title: str | None = None, arc: str | None = None,
                     characters: list[dict] | None = None,
-                    count_mode: str | None = None, count_min: int | None = 0, count_max: int | None = 0,
+                    count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
                     chapters: list[dict] | None = None) -> Season:
         """保存季（篇章）级编辑：季名 / 季大纲 / 季角色（名字+描述，按 id 保留参考图）/ 章节数量设定 / 每章(标题+摘要)。
         仅更新传入（非 None）的字段；章节按季内序号对账。"""
@@ -624,11 +598,11 @@ class DramaPipeline:
                     self._rm_media(c["image"])
             season.characters = chars_to_raw(new_chars)
         if count_mode is not None:
-            season.count_mode = "range" if count_mode == "range" else "auto"
-        if count_min is not None:
-            season.count_min = int(count_min or 0)
-        if count_max is not None:
-            season.count_max = int(count_max or 0)
+            season.count_mode = "range"           # 仅范围模式（兼容旧参数：一律按范围处理）
+        if count_min is not None or count_max is not None:
+            lo, hi = count_range(count_min if count_min is not None else season.count_min,
+                                 count_max if count_max is not None else season.count_max)
+            season.count_min, season.count_max = lo, hi
         if chapters is not None:
             existing = self._season_chapters(db, project, season)
             for i, item in enumerate(chapters):
@@ -677,7 +651,7 @@ class DramaPipeline:
             project.global_prompt = ""
             project.res_width = 0
             project.res_height = 0
-            project.count_mode = "auto"
+            project.count_mode = "range"
             project.count_min = 0
             project.count_max = 0
             for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
@@ -742,15 +716,14 @@ class DramaPipeline:
         return project
 
     async def step_chapters(self, db, project: Project, season: Season, lang: str = "zh",
-                             count_mode: str = "auto", count_min: int = 0, count_max: int = 0) -> Project:
-        """「章节规划」：依据季大纲/风格/角色 + 章节数量设定（auto / range）规划章节（标题 + 主题摘要）。
+                             count_min: int = 0, count_max: int = 0) -> Project:
+        """「章节规划」：依据季大纲/风格/角色 + 章节数量范围（min~max）规划章节（标题 + 主题摘要）。
         会清空该季已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
-        season.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
-        season.count_min = int(count_min or 0)
-        season.count_max = int(count_max or 0)
+        season.count_mode = "range"              # 仅范围模式
+        season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         n = await self._plan_chapter_count(db, project, season, lang,
-                                           season.count_mode, season.count_min, season.count_max, model=model)
+                                           season.count_min, season.count_max, model=model)
         prior: list[tuple[str, str]] = []
         plan: list[tuple[str, str]] = []
         for i in range(1, n + 1):
@@ -763,19 +736,16 @@ class DramaPipeline:
         return project
 
     async def _plan_chapter_count(self, db, project: Project, season: Season, lang: str,
-                                   count_mode: str, count_min: int, count_max: int, model=None) -> int:
-        """先定总章数：auto→模型给一个合适数(3-12)；range→在 [count_min, count_max] 内选一个数。"""
+                                   count_min: int, count_max: int, model=None) -> int:
+        """先定总章数：在 [count_min, count_max] 范围内选一个合适的数。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         gprompt = (project.global_prompt or "").strip()
         arc = self._season_arc(project, season)
         system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterCount)
-        if (count_mode or "auto") == "range" and int(count_min or 0) > 0:
-            hi = int(count_max) if int(count_max or 0) >= int(count_min) else int(count_min)
-            cnt = f"请从 {int(count_min)} 到 {hi} 之间选一个合适的章数"
-        else:
-            cnt = "请选择合适的章数（一般 3-12）"
+        lo, hi = count_range(count_min, count_max)
+        cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
                 + f"{cnt}\n\n整体故事大纲：\n{arc}")
@@ -806,18 +776,30 @@ class DramaPipeline:
         return ((data.title or f"第{i}章").strip(), (data.scene or "").strip())
 
     async def step_chapters_stream(self, db, project: Project, season: Season, lang: str = "zh",
-                                    count_mode: str = "auto", count_min: int = 0, count_max: int = 0,
+                                    count_min: int = 0, count_max: int = 0, indices: list[int] | None = None,
                                     progress_cb=None, chapter_done_cb=None) -> Project:
-        """「章节规划」逐章版：先定总章数 N，再逐章规划第 1..N 章（每章一次调用、参考前面章节承接剧情）。
-        会清空该季已有章节/媒体（按大纲重新拆章）后逐个补入；status → chaptered。
-        progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后（SSE 实时回传标题/摘要，页面逐个刷新）。"""
-        season.count_mode = "range" if (count_mode or "auto") == "range" else "auto"
-        season.count_min = int(count_min or 0)
-        season.count_max = int(count_max or 0)
-        self._rebuild_chapters(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
+        """「章节规划」逐章版（章节数量：仅范围 min~max）：
+        - indices 省略/为空 = 全季重规划：清空该季已有章节/媒体，先定总章数 N，再逐章规划第 1..N 章；
+        - indices 非空 = 多选重规划：只重写选中章节的「标题 + 主题摘要」，其余章节与已生成媒体保持不变，可反复多次批量。
+        status → chaptered。progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后。"""
+        season.count_mode = "range"              # 仅范围模式
+        season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
+        targets = sorted({int(i) for i in (indices or [])})
+        if targets:
+            await self._replan_selected(db, project, season, lang, targets, model, progress_cb, chapter_done_cb)
+        else:
+            await self._replan_season(db, project, season, lang, model, progress_cb, chapter_done_cb)
+        project.status = "chaptered"
+        self._save(db, project)
+        return project
+
+    async def _replan_season(self, db, project: Project, season: Season, lang: str, model,
+                              progress_cb, chapter_done_cb) -> None:
+        """全季重规划：清空该季旧章节/媒体后按大纲重新拆章（先定总章数，再逐章规划）。"""
+        self._rebuild_chapters(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
         n = await self._plan_chapter_count(db, project, season, lang,
-                                           season.count_mode, season.count_min, season.count_max, model=model)
+                                           season.count_min, season.count_max, model=model)
         # base = 所有前序季（季号 < 本季）的章节总数：本季新章紧接「前序季末尾」继续编号
         # （旧实现只算紧邻上一季的章数，第 3 季起会与更前面的季撞号）
         base = self._season_base_index(db, project, season)
@@ -837,9 +819,26 @@ class DramaPipeline:
         # 收尾统一重排扁平序号：本方法逐章插入且中途提交，后续季（季号 > 本季）的旧序号
         # 可能已与新章冲突，须像 _rebuild_chapters 一样在末尾重排一次（旧实现漏了这步）。
         self._reindex_flat(db, project)
-        project.status = "chaptered"
-        self._save(db, project)
-        return project
+
+    async def _replan_selected(self, db, project: Project, season: Season, lang: str, indices: list[int],
+                                model, progress_cb, chapter_done_cb) -> None:
+        """多选重规划：按季内序号就地重写选中章节的标题 + 主题摘要；其余章节、提示词与已生成媒体都不动。"""
+        chapters = self._season_chapters(db, project, season)
+        n = len(chapters)
+        targets = [i for i in indices if 0 <= i < n]
+        for pos, idx in enumerate(targets, start=1):
+            if progress_cb:
+                await progress_cb(pos, len(targets), f"第{idx + 1}章")
+            # 承接上下文：前面章节（含未选中的）按序传入，规划结果与全季剧情保持连贯
+            prior = [(c.title, c.summary) for c in chapters[:idx]]
+            title, summary = await self._plan_one_chapter(db, project, season, lang, idx + 1, n,
+                                                          prior, model=model)
+            ch = chapters[idx]
+            ch.title, ch.summary = title, summary
+            db.commit()
+            db.refresh(ch)
+            if chapter_done_cb:
+                await chapter_done_cb(ch)
 
     def _load_chapters(self, db, project: Project) -> list[Chapter]:
         return (db.query(Chapter)

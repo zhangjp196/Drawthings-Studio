@@ -103,3 +103,15 @@ def chars_to_text(chars: list[dict]) -> str:
         elif name or desc:
             lines.append(name or desc)
     return "\n".join(lines)
+
+
+# ---------------- 章节数量：仅范围模式（min~max） ----------------
+DEFAULT_COUNT_MIN, DEFAULT_COUNT_MAX = 6, 12
+
+
+def count_range(count_min, count_max) -> tuple[int, int]:
+    """规范化章节数量范围 (lo, hi)：未设置（0/None）时回退默认 6~12；hi 不小于 lo。"""
+    lo = int(count_min or 0) or DEFAULT_COUNT_MIN
+    hi = int(count_max or 0) or DEFAULT_COUNT_MAX
+    lo = max(1, lo)
+    return lo, max(lo, hi)

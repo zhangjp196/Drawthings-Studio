@@ -86,7 +86,7 @@ class Project(Base):
     global_prompt = Column(Text, default="")               # 全局提示词（要点/约束）：注入到每次章节 LLM 调用
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
     res_height = Column(Integer, default=0)                # 默认分辨率高（0=跟随智能体/出图端）
-    count_mode = Column(String(10), default="auto")        # 章节数量模式（遗留字段；现按季存于 Season）
+    count_mode = Column(String(10), default="range")       # 章节数量模式（遗留字段，仅范围；现按季存于 Season）
     count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
     count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
     first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面）
@@ -118,7 +118,7 @@ class Season(Base):
     first_image = Column(String(500), default="")             # 季封面（媒体路径，语义同项目封面）
     first_image_base = Column(String(500), default="")        # 季封面原图（无叠字），同项目封面
     cover_as_first_ref = Column(Boolean, default=False)       # 是否把季封面作为本季第 1 章参考（漫画 img2img / 短剧首帧）
-    count_mode = Column(String(10), default="auto")          # 本季章节数量：auto | range
+    count_mode = Column(String(10), default="range")          # 本季章节数量（仅范围 min~max）
     count_min = Column(Integer, default=0)                   # range：最少章节数
     count_max = Column(Integer, default=0)                   # range：最多章节数
     created_at = Column(String(40), default=_now)

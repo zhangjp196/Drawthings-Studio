@@ -92,14 +92,14 @@ class Pipeline:
         return self._of(project).step_chars(db, project, lang, extra_prompt)
 
     def step_chapters(self, db, project, season, lang: str = "zh",
-                      count_mode: str = "auto", count_min: int = 0, count_max: int = 0):
-        return self._of(project).step_chapters(db, project, season, lang, count_mode, count_min, count_max)
+                      count_min: int = 0, count_max: int = 0):
+        return self._of(project).step_chapters(db, project, season, lang, count_min, count_max)
 
     def step_chapters_stream(self, db, project, season, lang: str = "zh",
-                             count_mode: str = "auto", count_min: int = 0, count_max: int = 0,
+                             count_min: int = 0, count_max: int = 0, indices: list | None = None,
                              progress_cb=None, chapter_done_cb=None):
-        return self._of(project).step_chapters_stream(db, project, season, lang, count_mode,
-                                                      count_min, count_max, progress_cb, chapter_done_cb)
+        return self._of(project).step_chapters_stream(db, project, season, lang, count_min,
+                                                      count_max, indices, progress_cb, chapter_done_cb)
 
     def step_generate(self, db, project, season, indices: list | None = None,
                       lang: str = "zh", progress_cb=None, chapter_done_cb=None):
