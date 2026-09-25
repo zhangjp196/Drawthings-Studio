@@ -351,6 +351,10 @@ Views.projectComic = {
                           :type="c.status === 'done' ? 'success' : (c.status === 'error' ? 'danger' : 'info')">
                     {{ I18N.t('p.chStatus.' + c.status) || c.status }}
                   </el-tag>
+                  <el-tag v-if="c.score > 0" size="small" effect="light"
+                          :type="c.score >= (data.project.score_min || 80) ? 'success' : 'warning'">
+                    {{ c.score }}{{ I18N.t('p.scoreUnit') }}
+                  </el-tag>
                 </div>
               </div>
               <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="48" />
