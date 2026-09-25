@@ -519,6 +519,15 @@ Views.projectComic = {
         </template>
       </el-dialog>
 
+      <!-- PDF 预览：iframe 直接渲染导出端点返回的 inline PDF（关闭弹框即销毁） -->
+      <el-dialog v-model="pdfDlg" :title="I18N.t('p.previewPdf')" width="86%" top="4vh" destroy-on-close
+                 @closed="pdfUrl = ''">
+        <iframe v-if="pdfUrl" :src="pdfUrl" class="pdf-frame" />
+        <template #footer>
+          <el-button @click="pdfDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+        </template>
+      </el-dialog>
+
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>
     <div v-else class="page loading"><el-skeleton :rows="6" animated /></div>
@@ -721,6 +730,8 @@ Views.projectComic = {
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
     const cfg = reactive({ llm: '', dt: '' });
+    const pdfDlg = ref(false);
+    const pdfUrl = ref('');
     const lb = reactive({ show: false, list: [], idx: 0 });
     const resetDlg = ref(false);
     const rtitle = ref('');
@@ -1276,9 +1287,10 @@ Views.projectComic = {
     }
     function exportZip() { return exportMedia('zip'); }
     function exportPdf() { return exportMedia('pdf'); }
-    // PDF 预览：新标签打开导出地址（preview=1 → inline 返回，浏览器直接渲染，不下载）
+    // PDF 预览：弹框内 iframe 渲染 inline PDF（不再新标签 window.open，避免桌面端弹窗被拦截报错）
     function previewPdf() {
-      window.open(`/api/projects/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}&preview=1`, '_blank');
+      pdfUrl.value = `/api/projects/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}&preview=1`;
+      pdfDlg.value = true;
     }
 
     async function addChapter() {
@@ -1386,7 +1398,7 @@ Views.projectComic = {
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
-      exportZip, exportPdf, previewPdf, addChapter, delChapter, onChapterReloaded,
+      exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, addChapter, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
     };
   },

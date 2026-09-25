@@ -108,6 +108,8 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .small { font-size: 12px; }
 .hint { font-size: 12.5px; color: var(--muted); margin: 6px 0; line-height: 1.6; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+/* PDF 预览弹框：iframe 内嵌浏览器原生 PDF 渲染 */
+.pdf-frame { display: block; width: 100%; height: 72vh; border: 0; background: #f2f3f5; }
 .mb8 { margin-bottom: 8px; }
 .mt8 { margin-top: 8px; }
 .loading { padding: 40px 0; }
