@@ -1,4 +1,4 @@
-// 微创作作品列表：卡片网格 + 筛选（关键词/类型/排序/每页条数）+ 分页 + 新建弹框 + 删除
+// 微创作作品列表：卡片网格（含作品集预览缩略图）+ 筛选（关键词/类型/排序/每页条数）+ 分页 + 新建弹框 + 删除
 window.Views = window.Views || {};
 Views.micro = {
   template: `
@@ -41,6 +41,12 @@ Views.micro = {
             <el-link :underline="false" type="primary" style="flex: 1; min-width: 0;" @click="enter(w)">
               {{ w.title || I18N.t('common.unnamed') }}
             </el-link>
+          </div>
+          <div class="wc-prev" v-if="w.media_preview && w.media_preview.length">
+            <template v-for="(u, i) in w.media_preview" :key="'pv' + i">
+              <video v-if="isMediaVideo(u)" :src="u" class="wc-prev-item" preload="metadata" muted></video>
+              <img v-else :src="u" class="wc-prev-item" loading="lazy" decoding="async" alt="">
+            </template>
           </div>
           <div class="wc-meta muted">{{ I18N.t('mc.sessions', w.session_count) }} · {{ w.updated_at.slice(0, 10) }}</div>
           <div class="wc-actions">
@@ -154,6 +160,8 @@ Views.micro = {
     }
 
     function enter(w) { router.push('/micro/' + w.id); }
+    // 按文件扩展名判断视频（媒体落盘时按实际内容定扩展名；URL 可能带 ?v= 缓存参数）
+    function isMediaVideo(url) { return /\.(mp4|mov|webm|gif)(\?|$)/i.test(url || ''); }
 
     async function del(w) {
       try {
@@ -169,7 +177,7 @@ Views.micro = {
     onMounted(load);
     return {
       works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab,
-      load, apply, onSearch, reset, openNew, create, enter, del,
+      load, apply, onSearch, reset, openNew, create, enter, isMediaVideo, del,
     };
   },
 };

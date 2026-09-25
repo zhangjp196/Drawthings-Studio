@@ -195,7 +195,6 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .pager { margin-top: 16px; justify-content: center; }
 .filter-card { margin-bottom: 14px; }
 .filter-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.thumb { width: 56px; height: 40px; border-radius: 8px; display: block; }
 
 /* ---------- Element Plus 控件（Liquid Glass 化） ---------- */
 .el-card { border-radius: 12px; }
@@ -446,18 +445,46 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .ch-head.no-toggle { cursor: default; }
 
 /* ---------- 微创作：作品列表 ---------- */
-.work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .work-card {
   border-radius: 12px;
-  padding: 14px 16px;
-  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 10px;
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 }
 .work-card:hover { transform: translateY(-2px); box-shadow: var(--shadow), inset 0 1px 0 var(--edge); border-color: var(--el-color-primary-light-5); }
 .wc-top { display: flex; align-items: center; gap: 8px; }
-.wc-top .el-link { font-weight: 600; font-size: 15px; flex: 1; min-width: 0; }
+.wc-top .el-link { font-weight: 600; font-size: 16px; flex: 1; min-width: 0; }
 .wc-meta { font-size: 12px; }
 .wc-actions { display: flex; gap: 8px; margin-top: auto; }
+
+/* 作品卡片：作品集预览（最近 3 条生成媒体，列表页缩略图） */
+.wc-prev { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.wc-prev-item {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block;
+  border-radius: 8px; border: 1px solid var(--line); background: #000;
+}
+
+/* ---------- 创作中心：项目卡片（列表页；与工作台 wb-card / 微创作 work-card 同一卡片体系） ---------- */
+.proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.proj-card {
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+  overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
+  box-shadow: var(--shadow-sm);
+  transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease;
+}
+.proj-card:hover { border-color: var(--el-color-primary-light-5); box-shadow: var(--shadow); transform: translateY(-2px); }
+.pc-thumb {
+  aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
+  background: var(--chat-bubble); display: flex; align-items: center; justify-content: center;
+}
+.pc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-ph { font-size: 32px; opacity: .4; }
+.pc-body { flex: 1; display: flex; flex-direction: column; gap: 9px; padding: 14px 16px 16px; }
+.pc-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pc-title { font-size: 15.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-meta { font-size: 12px; }
+.pc-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 2px; }
 
 /* ---------- 配置管理：分区（无 tab，基础 / LLM / DrawThings 同页展示） ---------- */
 .cfg-sec { border-radius: 12px; margin-bottom: 18px; overflow: hidden; }

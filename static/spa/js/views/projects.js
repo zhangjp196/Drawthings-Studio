@@ -37,48 +37,31 @@ Views.projects = {
         </div>
       </el-card>
 
-      <el-table v-if="rows.length" :data="rows" style="width: 100%;">
-        <el-table-column :label="I18N.t('proj.type')" width="90">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.kind === 'comic' ? 'primary' : 'success'" effect="light">{{ row.kind === 'comic' ? I18N.t('proj.comic') : I18N.t('proj.drama') }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.colTitle')" min-width="240">
-          <template #default="{ row }">
-            <el-link type="primary" :underline="false" @click="open(row)">{{ row.title || row.origin }}</el-link>
-            <div class="muted small" v-if="row.title && row.origin">{{ row.origin }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.status')" width="110">
-          <template #default="{ row }">
-            <el-tag size="small" :type="statusTag(row.status)" effect="light">{{ statusLabels[row.status] || row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.colChapters')" width="90" align="center">
-          <template #default="{ row }">{{ row.chapter_count }}</template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.colFirst')" width="100">
-          <template #default="{ row }">
-            <el-image v-if="row.first_image_url" :src="row.first_image_url" :preview-src-list="[row.first_image_url]"
-                      fit="cover" class="thumb" lazy :preview-teleported="true" />
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.colUpdated')" width="125">
-          <template #default="{ row }">
-            <div>{{ row.updated_at.slice(0, 10) }}</div>
-            <div class="muted small">{{ I18N.t('proj.colCreated') }} {{ row.created_at.slice(0, 10) }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column :label="I18N.t('proj.colActions')" width="170" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="askRename(row)">{{ I18N.t('proj.rename') }}</el-button>
-            <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del(row)">
-              <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
-            </el-popconfirm>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="proj-grid" v-if="rows.length">
+        <div class="proj-card" v-for="row in rows" :key="row.id" @click="open(row)">
+          <div class="pc-thumb">
+            <img v-if="row.first_image_url" :src="row.first_image_url" :alt="row.title || ''"
+                 loading="lazy" decoding="async">
+            <span v-else class="pc-ph">{{ row.kind === 'comic' ? '🖼' : '🎬' }}</span>
+          </div>
+          <div class="pc-body">
+            <div class="pc-tags">
+              <el-tag size="small" :type="row.kind === 'comic' ? 'primary' : 'success'" effect="light">
+                {{ row.kind === 'comic' ? I18N.t('proj.comic') : I18N.t('proj.drama') }}
+              </el-tag>
+              <el-tag size="small" :type="statusTag(row.status)" effect="light">{{ statusLabels[row.status] || row.status }}</el-tag>
+            </div>
+            <div class="pc-title">{{ row.title || row.origin }}</div>
+            <div class="pc-meta muted">{{ row.chapter_count }} · {{ row.updated_at.slice(0, 10) }}</div>
+            <div class="pc-actions" @click.stop>
+              <el-button size="small" @click="askRename(row)">{{ I18N.t('proj.rename') }}</el-button>
+              <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del(row)">
+                <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
+              </el-popconfirm>
+            </div>
+          </div>
+        </div>
+      </div>
       <el-empty v-else :description="I18N.t('proj.empty')" />
 
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"

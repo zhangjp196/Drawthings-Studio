@@ -567,12 +567,27 @@ def micro_works(db: Session = Depends(get_db), page: int = 1, size: int = MC_PAG
     counts = dict(db.query(MicroSession.micro_id, func.count(MicroSession.id))
                   .filter(MicroSession.micro_id.in_([w.id for w in works] or [""]))
                   .group_by(MicroSession.micro_id).all())
+    # 作品集预览：每作品最近 3 条生成媒体（列表页卡片缩略图）
+    wid_list = [w.id for w in works]
+    previews: dict[str, list[str]] = {wid: [] for wid in wid_list}
+    if wid_list:
+        rows = (db.query(MicroSession.micro_id, MicroMessage.media_url, MicroMessage.id)
+                .join(MicroMessage, MicroMessage.session_id == MicroSession.id)
+                .filter(MicroSession.micro_id.in_(wid_list),
+                        MicroMessage.media_url.isnot(None),
+                        MicroMessage.media_url != "")
+                .order_by(MicroMessage.id.desc()).all())
+        for mid, url, _ in rows:
+            lst = previews.get(mid)
+            if lst is not None and len(lst) < 3:
+                lst.append(url)
     cs = ConfigStore(db)
     return {
         "works": [{
             "id": w.id, "title": w.title, "llm_config_id": w.llm_config_id,
             "drawthings_config_id": w.drawthings_config_id,
             "updated_at": w.updated_at, "session_count": counts.get(w.id, 0),
+            "media_preview": previews.get(w.id, []),
         } for w in works],
         "total": total, "page": page, "size": size,
         "total_pages": max((total + size - 1) // size, 1),
