@@ -112,8 +112,8 @@ class Pipeline:
     def save_chapter_fields(self, db, project, season, index: int, prompt: str):
         return self._of(project).save_chapter_fields(db, project, season, index, prompt)
 
-    def score_chapter(self, db, project, season, index: int, score: int):
-        return self._of(project).score_chapter(db, project, season, index, score)
+    async def vlm_score_chapter(self, db, project, season, index: int, lang: str = "zh"):
+        return await self._of(project).vlm_score_chapter(db, project, season, index, lang)
 
     def add_chapter(self, db, project, season):
         return self._of(project).add_chapter(db, project, season)

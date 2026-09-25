@@ -1721,7 +1721,8 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
 @app.post("/api/projects/{project_id}/chapters/{index}/score")
 async def project_chapter_score(request: Request, project_id: str, index: int,
                                 db: Session = Depends(get_db)):
-    """手动评分：为指定章节（季内）记录 0-100 分；body 需 season_id + score。评分不涉及生成，已完结作品也允许。"""
+    """VLM 自动评分：调用 VLM 对指定章节（季内）重新评分（与流水线自动评分同款）；
+    body 需 season_id（无需分值）。评分不涉及生成，已完结作品也允许。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = pipeline.get(db, project_id)
@@ -1736,12 +1737,10 @@ async def project_chapter_score(request: Request, project_id: str, index: int,
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
     try:
-        score = int(body.get("score") or 0)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400,
-                             detail=L(lang, "分值必须是整数", "Score must be an integer"))
-    project = pipeline.score_chapter(db, project, season, index, max(0, min(100, score)))
-    return {"ok": True}
+        score, note = await pipeline.vlm_score_chapter(db, project, season, index, lang)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
+    return {"ok": True, "score": score, "note": note}
 
 
 @app.post("/api/projects/{project_id}/edit/{index}")

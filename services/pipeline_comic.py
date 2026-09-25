@@ -930,7 +930,7 @@ class ComicPipeline:
         return ch
 
     # ---------------- 阶段 5：逐章生成画面（出图提示词 + 生图，两步连贯） ----------------
-    # ---------------- 自动评分 / 手动评分 ----------------
+    # ---------------- 自动评分 / VLM 评分 ----------------
     def _score_system(self, project: Project) -> str:
         """自动评分系统提示词（漫画）：对单章生成图按百分制打分。"""
         return ("你是漫画制作的美术总监。对当前章节生成的画面按 100 分制评估，"
@@ -961,14 +961,25 @@ class ComicPipeline:
         score = max(0, min(100, int(data.score or 0)))
         return score, (data.note or "").strip()[:300]
 
-    def score_chapter(self, db, project: Project, season: Season, index: int, score: int) -> Project:
-        """手动评分：记录季内第 index 章的评分（0-100）。"""
+    async def vlm_score_chapter(self, db, project: Project, season: Season, index: int,
+                                lang: str = "zh") -> tuple[int, str]:
+        """VLM 自动评分：对季内第 index 章调用 VLM 重新评分（与流水线自动评分同款），
+        落库分值 + 评语。无生成图 / VLM 评分失败 → ValueError（前端提示）。"""
         ch = self._season_chapters(db, project, season)[index]
-        ch.score = max(0, min(100, int(score or 0)))
-        ch.score_note = "手动评分"
+        media = (ch.media_path or "").strip()
+        if not (media and Path(media).is_file()):
+            raise ValueError("本章还没有生成图，无法 VLM 评分")
+        try:
+            model = build_model(self._llm_cfg(db, project, lang))
+            score, note = await self._score_chapter(db, project, season, ch, model)
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"VLM 评分失败：{e}") from e
+        ch.score, ch.score_note = score, note
         db.commit()
         self._save(db, project)
-        return project
+        return score, note
 
     async def step_generate(self, db, project: Project, season: Season,
                              indices: list[int] | None = None,

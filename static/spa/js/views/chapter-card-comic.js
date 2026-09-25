@@ -73,8 +73,7 @@ Views.chapterCardComic = {
           </div>
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chScore') }}</span>
-            <el-input-number v-model="mscore" :min="0" :max="100" size="small" :disabled="locked" style="width:90px" />
-            <el-button size="small" :loading="busy === 'score'" :disabled="locked" @click="doScore">{{ I18N.t('p.chScoreSave') }}</el-button>
+            <el-button size="small" :loading="busy === 'score'" :disabled="locked" @click="doScore">{{ I18N.t('p.vlmScore') }}</el-button>
             <span v-if="chapter.score_note" class="muted small" style="margin-left:6px;">{{ chapter.score_note }}</span>
           </div>
           <div class="actions">
@@ -108,7 +107,6 @@ Views.chapterCardComic = {
     const title = ref(props.chapter.title || '');
     const summary = ref(props.chapter.summary || '');
     const prompt = ref(props.chapter.prompt || '');
-    const mscore = ref(props.chapter.score || 0);    // 手动评分输入（0-100）
     const done = computed(() => props.chapter.status === 'done');
     const statusLabel = computed(() => I18N.t('p.chStatus.' + props.chapter.status) || props.chapter.status);
     const statusType = computed(() =>
@@ -138,13 +136,15 @@ Views.chapterCardComic = {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
     }
+    // VLM 自动评分：调用 VLM 重新给本章评分（与流水线自动评分同款），成功后刷新分值/评语
     async function doScore() {
       busy.value = 'score';
       try {
-        await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/score`,
-                       { season_id: props.seasonId, score: mscore.value });
-        props.chapter.score = mscore.value;
-        props.chapter.score_note = I18N.t('p.manualScoreNote');
+        const r = await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/score`,
+                                 { season_id: props.seasonId });
+        props.chapter.score = (r && r.score) || 0;
+        props.chapter.score_note = (r && r.note) || '';
+        ElementPlus.ElMessage.success(I18N.t('p.scoreResult', props.chapter.title, props.chapter.score));
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
       finally { busy.value = ''; }
@@ -162,7 +162,7 @@ Views.chapterCardComic = {
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
-    return { busy, dTab, title, summary, prompt, mscore, done, statusLabel, statusType,
+    return { busy, dTab, title, summary, prompt, done, statusLabel, statusType,
              doGen, doSave, doScore, doMove, doDelete };
   },
 };
