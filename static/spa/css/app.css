@@ -944,3 +944,18 @@ button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-
   .pv-side { width: 100%; }
   .pv-side-body { max-height: 60vh; }
 }
+
+/* 新建创作：AI 生成标题/主题 对话框 */
+.idea-hint { margin-bottom: 6px; }
+.idea-body {
+  max-height: 46vh; overflow: auto; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--chat-bubble);
+}
+.idea-msg { margin: 6px 0; }
+.idea-msg.user { text-align: right; }
+.idea-msg.user .md {
+  display: inline-block; text-align: left; max-width: 85%;
+  background: rgba(91, 91, 214, .12); padding: 6px 10px; border-radius: 10px;
+}
+.idea-msg.assistant .md { max-width: 92%; }
+.idea-input { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }

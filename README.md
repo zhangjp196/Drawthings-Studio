@@ -52,6 +52,9 @@ With it on, each chapter's prompt is auto-written as an **edit instruction based
 - **Filters**: keyword (title/idea), type (comic/drama), status, sort (newest created / oldest created / recently active), and page size (10/20/50).
 - **Info**: type tag, title/idea, status tag, chapter progress (generated/total chapters), first-image thumbnail (click to preview), last active (with created date);
   the toolbar shows the total count and a "＋ New Project" dialog (the same form component as the /new page).
+- **AI title/theme on the create form**: a **✨ AI title/theme** button on the new-project form opens a
+  **multi-turn, streaming chat**; the model asks a few questions to pin the idea down, then calls a function
+  (`set_fields`) to **write the title and theme straight into the form** (you can keep chatting / ask it to adjust).
 
 ## Creation control (project page)
 
@@ -210,6 +213,8 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 │   ├── api_drama.py     # short-drama project routes (/api/dramas/*)
 │   ├── api_micro.py     # micro-creation routes (/api/micro/*) + SSE transport (drive engine queue + heartbeat)
 │   ├── micro_agent.py   # micro-creation session engine (system prompt / generate_media tool / parts / durable writes / rerun)
+│   ├── api_idea.py      # new-project "AI title/theme" chat routes (/api/idea/*) + SSE transport
+│   ├── idea_agent.py    # new-project idea engine (multi-turn + streaming + set_fields function call)
 │   ├── micro_parts.py   # assistant "ordered content blocks" schema + versioned (de)serialization
 │   ├── capabilities.py  # effective generation capabilities (feature-level model / ref-image overrides; shared)
 │   ├── media_files.py   # media cleanup / path resolve / user-attachment save / ZIP·PDF export (shared)

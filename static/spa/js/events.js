@@ -7,6 +7,7 @@ window.EVENTS = {
   TOOL_STATUS: 'tool_status',
   MEDIA: 'media',
   MEDIA_SCORE: 'media_score',
+  FIELDS: 'fields',
   TOOL_ERROR: 'tool_error',
   ERROR: 'error',
   DONE: 'done',

@@ -14,6 +14,7 @@ TOOL = "tool"              # 开始一次生成 {id,label,prompt,media}
 TOOL_STATUS = "tool_status"  # 生成中状态文案 {id,message}
 MEDIA = "media"            # 生成结果 {id,media,url,prompt}
 MEDIA_SCORE = "media_score"  # 生成后自动评分结果 {id,score,note}
+FIELDS = "fields"          # 新建创作：AI 写入表单字段 {title,origin}
 TOOL_ERROR = "tool_error"  # 生成失败 {id,message,prompt}
 ERROR = "error"           # 会话错误 {message}
 DONE = "done"             # 结束 {}
@@ -27,6 +28,6 @@ SCORE = "score"           # 评分进度
 EOF = "__eof__"
 
 __all__ = [
-    "TOKEN", "TOOL", "TOOL_STATUS", "MEDIA", "MEDIA_SCORE", "TOOL_ERROR", "ERROR", "DONE",
+    "TOKEN", "TOOL", "TOOL_STATUS", "MEDIA", "MEDIA_SCORE", "FIELDS", "TOOL_ERROR", "ERROR", "DONE",
     "PROGRESS", "CHAPTER", "SCORE", "EOF",
 ]

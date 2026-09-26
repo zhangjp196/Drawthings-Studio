@@ -2,6 +2,7 @@
 // 与漫画创作完全独立（不共用组件）：漫画另有 create-form-comic.js
 window.Views = window.Views || {};
 Views.createFormDrama = {
+  components: { 'idea-chat': window.Views.ideaChat },
   props: {
     preset: { type: Object, default: null }, // { origin, title }
   },
@@ -45,6 +46,9 @@ Views.createFormDrama = {
         </el-col>
         <el-col :span="14">
           <!-- 右：创作内容（标题 / 主题 / 风格） -->
+          <div style="margin-bottom: 8px;">
+            <idea-chat :llm="f.llm" :kind="'drama'" @apply="onIdea" />
+          </div>
           <el-form-item :label="I18N.t('cf.title')">
             <el-input v-model="f.title" maxlength="100" :placeholder="I18N.t('cf.titlePh')" />
           </el-form-item>
@@ -160,7 +164,11 @@ Views.createFormDrama = {
     }
 
     onMounted(load);
-    return { f, llms, dts, presets, saving, submit, imgChoices, vidChoices,
+    function onIdea(d) {
+      if (d && d.title) f.title = d.title;
+      if (d && d.origin) f.origin = d.origin;
+    }
+    return { f, llms, dts, presets, saving, submit, imgChoices, vidChoices, onIdea,
              toConfigs: () => router.push('/configs?ctype=drawthings') };
   },
 };
