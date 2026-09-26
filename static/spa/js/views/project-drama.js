@@ -289,22 +289,12 @@ Views.projectDrama = {
           <div class="ch-toolbar">
             <div class="ch-tb-row">
               <span class="ch-tb-cap">{{ I18N.t('p.chPlan') }}</span>
-              <el-popconfirm :title="selected.length ? I18N.t('p.planSelConfirm', selected.length) : I18N.t('p.chRegenConfirm')"
-                             @confirm="planChapters">
-                <template #reference>
-                  <el-button size="small" type="primary" :loading="actBusy" :disabled="locked">
-                    {{ selected.length ? I18N.t('p.planSel', selected.length) : I18N.t('p.planChapters') }}
-                  </el-button>
-                </template>
-              </el-popconfirm>
+              <el-button size="small" type="primary" :loading="actBusy" :disabled="locked" @click="openPlanDlg">
+                {{ selected.length ? I18N.t('p.planSel', selected.length) : I18N.t('p.planChapters') }}
+              </el-button>
               <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="savePlan">
                 <template #reference><el-button size="small" :loading="busySave" :disabled="locked">{{ I18N.t('p.planSave') }}</el-button></template>
               </el-popconfirm>
-              <span class="ch-tb-sep"></span>
-              <span class="muted small">{{ I18N.t('p.countMode') }}</span>
-              <el-input-number v-model="cMin" :min="1" :max="99" size="small" style="width:96px" />
-              <span class="muted small">~</span>
-              <el-input-number v-model="cMax" :min="1" :max="99" size="small" style="width:96px" />
               <span class="ch-tb-sep"></span>
               <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}（{{ I18N.t('p.planResHint') }}）</span>
               <span class="ch-tb-sep"></span>
@@ -476,6 +466,21 @@ Views.projectDrama = {
         <template #footer>
           <el-button @click="genDlg = false">{{ I18N.t('common.cancel') }}</el-button>
           <el-button type="primary" :loading="actBusy" @click="confirmGen">{{ I18N.t('p.genStart') }}</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 章节规划：章节数量（范围）仅在此弹框内显示/设置 -->
+      <el-dialog v-model="planDlg" :title="planDlgTitle" width="480px">
+        <el-form label-position="top">
+          <el-form-item :label="I18N.t('p.countMode')">
+            <el-input-number v-model="cMin" :min="1" :max="99" size="small" style="width:96px" />
+            <span class="muted small"> ~ </span>
+            <el-input-number v-model="cMax" :min="1" :max="99" size="small" style="width:96px" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="planDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="actBusy" @click="confirmPlan">{{ I18N.t('p.planStart') }}</el-button>
         </template>
       </el-dialog>
 
@@ -707,6 +712,12 @@ Views.projectDrama = {
     // 章节数量（仅范围 min~max；0/未设置时后端回退默认 6~12）
     const cMin = ref(6);
     const cMax = ref(12);
+    // 章节规划弹框：章节数量（范围）仅在此弹框内显示
+    const planDlg = ref(false);
+    const planDlgTitle = computed(() =>
+      selected.value.length ? I18N.t('p.planSel', selected.value.length) : I18N.t('p.planChapters'));
+    function openPlanDlg() { planDlg.value = true; }
+    function confirmPlan() { planDlg.value = false; planChapters(); }
 
     // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各季完成进度
     const locked = computed(() => (data.value?.project.status) === 'done');
@@ -1440,7 +1451,7 @@ Views.projectDrama = {
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
-      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMin, cMax,
+      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMin, cMax, planDlg, planDlgTitle, openPlanDlg, confirmPlan,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
