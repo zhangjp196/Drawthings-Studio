@@ -44,7 +44,8 @@ from .agent import (
     image_data_uri,
     make_agent,
 )
-from .drawthings import build_drawthings_client, extract_last_frame, norm_ref_flag
+from .drawthings import extract_last_frame
+from .capabilities import dt_client, ref_video_enabled
 from .pipeline_common import (
     MAX_SCORE_REDO,
     _cjk_font_path,
@@ -78,12 +79,7 @@ class DramaPipeline:
 
         功能级模型 / 参考图开关：项目自选的覆盖配置（留空 = 跟随配置）。"""
         _, dt_cfg = self._configs(db, project, lang)
-        return build_drawthings_client(
-            dt_cfg, self.data_dir,
-            model_image=getattr(project, "dt_model_image", "") or "",
-            model_video=getattr(project, "dt_model_video", "") or "",
-            ref_image=norm_ref_flag(getattr(project, "dt_ref_image", "")),
-            ref_video=norm_ref_flag(getattr(project, "dt_ref_video", "")))
+        return dt_client(dt_cfg, self.data_dir, project)
 
     def _llm_cfg(self, db, project, lang: str = "zh") -> LLMConfig:
         llm_cfg, _ = self._configs(db, project, lang)
@@ -982,8 +978,7 @@ class DramaPipeline:
                 ref_uri = await run_sync(image_data_uri, ref_img)
             except Exception as e:
                 logger.warning("参考图读取失败，本次不带参考图（%s）：%s", ref_img, e)
-        _r = norm_ref_flag(getattr(project, "dt_ref_video", ""))
-        if ref_uri and (bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_video", 0))):
+        if ref_uri and ref_video_enabled(dt_cfg, project):
             user += ("\n【图生视频模式】附图是本次生成的参考帧（上一章画面），视频将基于它生成。"
                      "prompt 必须写成针对参考帧的修改指令：先用一句话点明需与参考帧保持一致的元素"
                      "（角色外形、服装、场景、画风、光照、机位），再具体描述本章的变化（新动作 / 新情节 / 新运镜）；"

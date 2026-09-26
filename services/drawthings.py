@@ -36,6 +36,10 @@ logger = logging.getLogger("drawthings")
 
 DEFAULT_GRPC_PORT = 7859
 
+
+class GenerationCancelled(RuntimeError):
+    """生成被调用方主动取消（协作式取消：cancel_event 置位）。"""
+
 # Draw Things 已知缺陷：图生图（带 init_image）时 app 可能闪退（官方社区 issue #121，未修复）。
 # 连接中断后自动等待用户重启 app（端口恢复，每轮上限 RECOVERY_TIMEOUT 秒），再自动重试生成
 # （最多 MAX_RECOVERY_RETRIES 轮）；始终未恢复 / 重试仍失败才报错。
@@ -322,6 +326,21 @@ class DrawThingsClient:
         self.media_dir.mkdir(parents=True, exist_ok=True)
         # 生成过程中的状态回调（如「正在等待 Draw Things 恢复…」）；调用方按需要设置，可为 None
         self.on_status: Callable[[str], None] | None = None
+        # 协作式取消：置位后本次生成尽快停止（threading.Event，跨线程安全）；None = 不支持取消
+        self.cancel_event = None
+
+    def cancel(self) -> None:
+        """请求取消本次生成（若无 cancel_event 则无操作）。"""
+        ev = self.cancel_event
+        if ev is not None:
+            try:
+                ev.set()
+            except Exception:
+                pass
+
+    def _cancelled(self) -> bool:
+        ev = self.cancel_event
+        return bool(ev is not None and ev.is_set())
 
     # ---------------- 能力 ----------------
     def supports_image(self) -> bool:
@@ -459,13 +478,39 @@ class DrawThingsClient:
             except Exception:
                 pass
 
+    async def _with_cancel(self, coro):
+        """在 cancel_event 置位时取消内部协程（协作式）：无 cancel_event 时直通。"""
+        if self.cancel_event is None:
+            return await coro
+        task = asyncio.ensure_future(coro)
+
+        async def _watch():
+            while not task.done():
+                if self._cancelled():
+                    task.cancel()
+                    return
+                await asyncio.sleep(0.3)
+
+        watcher = asyncio.ensure_future(_watch())
+        try:
+            return await task
+        except asyncio.CancelledError:
+            if self._cancelled():
+                raise GenerationCancelled("生成已取消 / Generation cancelled")
+            raise
+        finally:
+            watcher.cancel()
+
     async def _wait_recovery(self) -> bool:
         """app 断连后等待用户重启 DrawThings（端口恢复）。True=已恢复，False=超时。
-        等待期间通过 on_status 定时上报进度（界面可展示「正在等待 Draw Things 恢复…」）。"""
+        等待期间通过 on_status 定时上报进度（界面可展示「正在等待 Draw Things 恢复…」）。
+        被取消（cancel_event 置位）时抛 GenerationCancelled。"""
         t0 = time.monotonic()
         deadline = t0 + RECOVERY_TIMEOUT
         last_report = 0.0
         while time.monotonic() < deadline:
+            if self._cancelled():
+                raise GenerationCancelled("生成已取消 / Generation cancelled")
             if await self._port_open():
                 return True
             now = time.monotonic()
@@ -578,7 +623,9 @@ class DrawThingsClient:
                     pass
 
         try:
-            result = await _attempt()
+            result = await self._with_cancel(_attempt())
+        except GenerationCancelled:
+            raise
         except Exception as e:
             if not _looks_disconnected(e) and await self._port_open():
                 # app 仍在：普通生成错误，按原样抛出
@@ -605,8 +652,10 @@ class DrawThingsClient:
                 self._report(f"Draw Things 已恢复，自动重试生成（第 {retry}/{MAX_RECOVERY_RETRIES} 轮）")
                 await asyncio.sleep(RECOVERY_SETTLE)  # 刚重启的 app 先稳定几秒
                 try:
-                    result = await _attempt()
+                    result = await self._with_cancel(_attempt())
                     break
+                except GenerationCancelled:
+                    raise
                 except Exception as e2:
                     last = e2
                     if not (_looks_disconnected(e2) or not await self._port_open()):

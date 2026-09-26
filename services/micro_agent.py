@@ -19,8 +19,8 @@ from i18n import L
 from models import MicroMessage
 from services.agent import build_model, to_message_history, user_prompt
 from services.api_common import _media_url
-from services.drawthings import (MAX_VIDEO_SECONDS, build_drawthings_client,
-                                 norm_ref_flag)
+from services.capabilities import caps, dt_client
+from services.drawthings import MAX_VIDEO_SECONDS
 from services.micro_parts import dump_parts
 from services.pipeline import _now, run_sync
 from services import events as E
@@ -74,10 +74,11 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
 
 async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_cfg,
                          img_paths: list[str], user_message: str, history: list[dict],
-                         assistant_idx: int, lang: str = "zh") -> None:
+                         assistant_idx: int, lang: str = "zh", cancel_event=None) -> None:
     """执行一次微创作对话：事件写入 `out`，结束时落库助手消息并发结束标记。
 
     `out` 中的元素为 `(event, data)`；结束发 `(E.EOF, None)`。事件语义见 `services/events.py`。
+    `cancel_event`（threading.Event，可选）：置位后正在进行的 Draw Things 生成尽快停止。
     """
     t0 = time.monotonic()  # 本条回复耗时起点（流式开始 → 落库完成）
     parts: list[dict] = []
@@ -91,21 +92,13 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
         return
 
     try:
-        # DrawThings 客户端（gRPC）：功能级模型/参考图开关优先（作品自选），空 = 跟随配置
-        dt = (build_drawthings_client(
-            dt_cfg, data_dir,
-            model_image=getattr(work, "dt_model_image", "") or "",
-            model_video=getattr(work, "dt_model_video", "") or "",
-            ref_image=norm_ref_flag(getattr(work, "dt_ref_image", "")),
-            ref_video=norm_ref_flag(getattr(work, "dt_ref_video", "")))
-            if dt_cfg else None)
-        can_image = bool(dt and dt.supports_image())
-        can_video = bool(dt and dt.supports_video())
-        # 生效的「支持参考图片」（功能级优先、配置兜底）：决定提示词是否写成参考图修改指令
-        _r = norm_ref_flag(getattr(work, "dt_ref_image", ""))
-        eff_ref_img = bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_image", 0))
-        _r = norm_ref_flag(getattr(work, "dt_ref_video", ""))
-        eff_ref_vid = bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_video", 0))
+        # DrawThings 客户端（gRPC）+ 生效能力：功能级模型/参考图开关优先（作品自选），空 = 跟随配置
+        dt = dt_client(dt_cfg, data_dir, work)
+        if dt is not None:
+            dt.cancel_event = cancel_event  # 调用方中断（如切换会话 / 关闭页面）时协作式停止生成
+        _caps = caps(dt, dt_cfg, work)
+        can_image, can_video = _caps.can_image, _caps.can_video
+        eff_ref_img, eff_ref_vid = _caps.ref_image, _caps.ref_video
 
         instructions = build_instructions(can_image, can_video, dt_cfg,
                                           eff_ref_img, eff_ref_vid, lang)

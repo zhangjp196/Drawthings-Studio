@@ -4,29 +4,29 @@
 会话推理与生成在 `services/micro_agent.py`；共享基础设施取 `services/api_common.py`。
 """
 import asyncio
-import base64
 import json
-import re
+import threading
 import uuid
-import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from PIL import Image
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from config import data_dir
 from config_store import ConfigStore
 from db import get_db
 from i18n import L
 from models import MicroMessage, MicroSession, MicroWork
 from services.api_common import (
     MEDIA_DIR, _clamp_page, _dt_ref_field, _dt_view, _json_body, _lang,
-    _llm_view, _media_url, _sse,
+    _llm_view, _sse,
 )
 from services import events as E
+from services.media_files import (
+    cleanup_message_media, export_pdf, export_zip, is_video_url,
+    media_path_from_url, save_data_uri_images,
+)
 from services.micro_agent import run_micro_chat
 from services.micro_parts import load_parts
 from services.pipeline import _now
@@ -227,7 +227,7 @@ async def micro_works_delete(request: Request, work_id: str, db: Session = Depen
             .filter(MicroSession.micro_id == work_id, MicroMessage.id.in_(ids)).all())
     if not msgs:
         raise HTTPException(status_code=404, detail=L(lang, "作品不存在", "Work not found"))
-    _cleanup_message_media(msgs)
+    cleanup_message_media(msgs)
     for m in msgs:
         db.delete(m)
     work.updated_at = _now()
@@ -261,9 +261,9 @@ def micro_works_export(request: Request, work_id: str, ids: str = "", format: st
         m = by_id.get(mid)
         if not m:
             continue
-        p = _media_path_from_url(m.media_url)
+        p = media_path_from_url(m.media_url)
         if p is not None:
-            files.append((p, _is_video_url(m.media_url)))
+            files.append((p, is_video_url(m.media_url)))
     if not files:
         raise HTTPException(status_code=400,
                             detail=L(lang, "没有可导出的媒体", "No media to export"))
@@ -273,7 +273,7 @@ def micro_works_export(request: Request, work_id: str, ids: str = "", format: st
                                 detail=L(lang, "PDF 仅支持图片，视频请导出 ZIP",
                                          "PDF supports images only — export videos as ZIP"))
         try:
-            path, fname = _micro_export_pdf(work, files)
+            path, fname = export_pdf(work.title or work.id, work.id, files)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
         except Exception as e:
@@ -281,7 +281,7 @@ def micro_works_export(request: Request, work_id: str, ids: str = "", format: st
                                 detail=L(lang, f"导出 PDF 失败：{e}", f"Export PDF failed: {e}"))
         return FileResponse(path, filename=fname, media_type="application/pdf")
     try:
-        path, fname = _micro_export_zip(work, files)
+        path, fname = export_zip(work.title or work.id, work.id, files)
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"导出 ZIP 失败：{e}", f"Export ZIP failed: {e}"))
@@ -337,7 +337,7 @@ def micro_work_delete(request: Request, work_id: str, db: Session = Depends(get_
     if not work:
         raise HTTPException(status_code=404,
                             detail=L(_lang(request), "作品不存在", "Work not found"))
-    _cleanup_message_media(db.query(MicroMessage).join(MicroSession, MicroMessage.session_id == MicroSession.id)
+    cleanup_message_media(db.query(MicroMessage).join(MicroSession, MicroMessage.session_id == MicroSession.id)
                            .filter(MicroSession.micro_id == work_id).all())
     db.delete(work)  # 级联删除会话与消息
     db.commit()
@@ -395,120 +395,11 @@ def micro_session_delete(request: Request, work_id: str, session_id: str,
     if not session or session.micro_id != work_id:
         raise HTTPException(status_code=404,
                             detail=L(_lang(request), "会话不存在", "Session not found"))
-    _cleanup_message_media(session.messages)
+    cleanup_message_media(session.messages)
     db.delete(session)  # 级联删除消息
     db.get(MicroWork, work_id).updated_at = _now()
     db.commit()
     return {"ok": True}
-
-
-# ---------------- 媒体 / 导出 ----------------
-def _cleanup_message_media(msgs) -> None:
-    """删除消息关联的媒体文件：助手生成媒体（media_url）+ 用户附图（images JSON 列表）。"""
-    def _unlink(url: str) -> None:
-        f = MEDIA_DIR / url.rsplit("/", 1)[-1].split("?")[0]
-        if f.is_file() and f.resolve().is_relative_to(MEDIA_DIR.resolve()):
-            f.unlink()
-    for m in msgs:
-        if m.media_url:
-            _unlink(m.media_url)
-        if m.images:
-            try:
-                for u in json.loads(m.images):
-                    _unlink(str(u))
-            except (ValueError, TypeError):
-                pass
-
-
-def _is_video_url(url: str) -> bool:
-    """按扩展名判断媒体是否为视频（媒体落盘时按实际内容定扩展名）。"""
-    return bool(re.search(r"\.(mp4|mov|webm|gif)(?:\?|$)", url or "", re.I))
-
-
-def _media_path_from_url(url: str) -> Path | None:
-    """媒体 URL（/media/xxx）-> 磁盘路径；越界或不存在返回 None。"""
-    name = (url or "").rsplit("/", 1)[-1].split("?")[0]
-    if not name:
-        return None
-    p = MEDIA_DIR / name
-    try:
-        if p.is_file() and p.resolve().is_relative_to(MEDIA_DIR.resolve()):
-            return p
-    except OSError:
-        return None
-    return None
-
-
-def _export_dir() -> Path:
-    d = Path(data_dir) / "exports"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _safe_file_base(text: str, fallback: str) -> str:
-    """标题 -> 安全文件名（去掉路径/非法字符，限长）。"""
-    s = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", (text or "").strip())[:40].strip(" ._")
-    return s or fallback
-
-
-def _micro_export_zip(work: MicroWork, files: list[tuple[Path, bool]]) -> tuple[str, str]:
-    """把所选媒体（图/视频）打包为 ZIP：按导出顺序命名，分 images/ 与 videos/ 两个子目录。"""
-    base = _safe_file_base(work.title or work.id, work.id)
-    fname = f"{base}_media.zip"
-    zpath = _export_dir() / fname
-    n_img = sum(1 for _, v in files if not v)
-    n_vid = len(files) - n_img
-    readme = (f"作品：{work.title or work.id}\n"
-              f"图片：{n_img} 张 · 视频：{n_vid} 个\n")
-    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("README.txt", readme.encode("utf-8"))
-        for i, (p, is_video) in enumerate(files):
-            sub = "videos" if is_video else "images"
-            z.write(str(p), f"{sub}/{i:02d}_{p.name}")
-    return str(zpath), fname
-
-
-def _micro_export_pdf(work: MicroWork, files: list[tuple[Path, bool]]) -> tuple[str, str]:
-    """把所选图片按顺序拼成多页 PDF（仅图片；视频需先导出 ZIP）。"""
-    base = _safe_file_base(work.title or work.id, work.id)
-    fname = f"{base}_images.pdf"
-    ppath = _export_dir() / fname
-    imgs: list[Image.Image] = []
-    for p, _ in files:
-        try:
-            with Image.open(p) as im:      # 及时关闭文件句柄；convert 产生独立图像
-                imgs.append(im.convert("RGB"))
-        except Exception:
-            continue
-    if not imgs:
-        raise ValueError("没有可导出的图片")
-    try:
-        imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)
-    finally:
-        for im in imgs:
-            im.close()
-    return str(ppath), fname
-
-
-def _save_user_images(items: list) -> list[str]:
-    """把请求里的图片（data URI 列表）存到 MEDIA_DIR，返回媒体 URL 列表（最多 4 张）。"""
-    urls: list[str] = []
-    for data in [str(x) for x in (items or [])][:4]:
-        if not data.startswith("data:image/"):
-            continue
-        try:
-            head, b64 = data.split(",", 1)
-            ext = head.split("/")[-1].split(";")[0] or "png"
-            if ext not in ("png", "jpg", "jpeg", "webp", "gif"):
-                ext = "png"
-            if len(b64) > 8 * 1024 * 1024:  # 单张限 8MB（base64 后）
-                continue
-            p = MEDIA_DIR / f"mc_{uuid.uuid4().hex[:10]}.{ext}"
-            p.write_bytes(base64.b64decode(b64))
-            urls.append(_media_url(str(p)))
-        except Exception:
-            continue
-    return urls
 
 
 # ---------------- 对话（SSE 流式） ----------------
@@ -540,7 +431,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     image_paths: list[str] = []
     raw_images = body.get("images") or []
     if raw_images:
-        image_urls = _save_user_images(raw_images)
+        image_urls = save_data_uri_images(raw_images)
         image_paths = [str(MEDIA_DIR / u.rsplit("/", 1)[-1].split("?")[0]) for u in image_urls]
     if not message and not image_urls:
         raise HTTPException(status_code=400,
@@ -592,10 +483,11 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
     事件语义见 `services/events.py`。出图/出视频耗时长，15s 无事件发心跳保持连接。
     """
     queue: asyncio.Queue = asyncio.Queue()
+    cancel_event = threading.Event()  # 客户端断开（切换会话 / 关闭页面）时协作式停止正在进行的生成
     task = asyncio.create_task(run_micro_chat(
         queue, db=db, session=session, work=work, llm_cfg=llm_cfg, dt_cfg=dt_cfg,
         img_paths=img_paths, user_message=user_message, history=history,
-        assistant_idx=assistant_idx, lang=lang))
+        assistant_idx=assistant_idx, lang=lang, cancel_event=cancel_event))
     try:
         while True:
             try:
@@ -607,6 +499,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                 break
             yield _sse(event, data)
     finally:
+        cancel_event.set()  # 先请求取消（线程内的 Draw Things 生成尽快停止）
         if not task.done():
             task.cancel()
             try:
