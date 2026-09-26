@@ -45,6 +45,11 @@ Views.microChat = {
 
       <button v-if="hasSession && !atBottom" type="button" class="scroll-btn" :title="I18N.t('mw.scrollBottom')" @click="scrollBottom(true)">↓</button>
 
+      <div class="mc-status" v-if="hasSession && activeJob && !busy">
+        <span class="muted small">{{ I18N.t('mw.jobRunning') }}</span>
+        <el-button size="small" type="danger" plain @click="stopJob">{{ I18N.t('mw.jobStop') }}</el-button>
+      </div>
+
       <div class="mc-inputbar" v-if="hasSession" :class="{ drag }"
            @dragover.prevent="drag = true" @dragleave="drag = false" @drop.prevent="onDrop">
         <div class="mc-previews" v-if="attached.length">
@@ -244,6 +249,7 @@ Views.microChat = {
         busy.value = false;
         streaming.value = false;
         if (sseCtrl === ctrl) sseCtrl = null;
+        checkJob();
       }
     }
 
@@ -299,6 +305,7 @@ Views.microChat = {
         busy.value = false;
         streaming.value = false;
         if (sseCtrl === ctrl) sseCtrl = null;
+        checkJob();
       }
     }
 
@@ -312,6 +319,28 @@ Views.microChat = {
           btn.textContent = I18N.t('common.copied');
           setTimeout(() => { btn.textContent = I18N.t('common.copy'); }, 1500);
         });
+      }
+    }
+
+    // ---------- 生成任务（Job）：可观测 / 可取消（不依赖本连接的 AbortController） ----------
+    const activeJob = ref(null);
+    async function checkJob() {
+      if (!props.hasSession) { activeJob.value = null; return; }
+      try {
+        const r = await API.get(`/api/micro/${props.id}/jobs?active=1`);
+        activeJob.value = (r.jobs || []).find(j => j.session_id === props.sid) || null;
+      } catch (e) {
+        activeJob.value = null;
+      }
+    }
+    async function stopJob() {
+      const j = activeJob.value;
+      if (!j) return;
+      try {
+        await API.post(`/api/micro/${props.id}/jobs/${j.id}/cancel`);
+        activeJob.value = null;
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
       }
     }
 
@@ -366,6 +395,7 @@ Views.microChat = {
       pinned = true;
       scrollBottom(true);
       setupObserver();
+      checkJob();
     });
 
     onMounted(() => {
@@ -373,6 +403,7 @@ Views.microChat = {
       pinned = true;
       scrollBottom(true);
       setupObserver();
+      checkJob();
       nextTick(() => {
         const el = chatBox.value;
         if (el) el.addEventListener('click', onChatClick);
@@ -389,7 +420,7 @@ Views.microChat = {
     return {
       ph, input, attached, busy, status, drag, streaming, stream, streamElapsed,
       chatBox, chatInner, inputEl, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter,
-      send, rerun, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
+      send, rerun, activeJob, stopJob, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
     };
   },
 };

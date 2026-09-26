@@ -9,7 +9,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from db import Base
@@ -221,3 +221,58 @@ class MicroMessage(Base):
     parts = Column(Text, nullable=True)                   # 助手回复的有序内容块（JSON：[{type:text|tool|error,...}]，保序）
     status = Column(String(12), default="done")            # done | streaming | interrupted（可恢复流：断连时的部分输出）
     session = relationship("MicroSession", back_populates="messages")
+
+
+class Asset(Base):
+    """生成资产（Asset Graph）：每次成功生成的媒体一条记录，带参数快照与来源。
+
+    与消息解耦：消息是「展示」，资产可被跨轮/跨会话复用为参考图、被画廊/导出按资产维度处理。
+    同一助手消息内多次生成 → 多条资产（block_id 区分）。消息删除时随外键级联删除。
+    """
+
+    __tablename__ = "assets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    micro_id = Column(String(12), ForeignKey("micro_works.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(12), ForeignKey("micro_sessions.id", ondelete="CASCADE"), nullable=False)
+    message_id = Column(Integer, ForeignKey("micro_messages.id", ondelete="CASCADE"), nullable=True)
+    block_id = Column(String(20), default="")             # 来源内容块 id（同一消息内多次生成区分）
+    kind = Column(String(10), default="image")            # image | video
+    url = Column(String(500), default="")                 # /media/xxx
+    prompt = Column(Text, default="")                     # 生成用提示词
+    model = Column(String(200), default="")               # 实际使用的模型
+    width = Column(Integer, default=0)
+    height = Column(Integer, default=0)
+    seconds = Column(Integer, default=0)
+    ref_url = Column(String(500), default="")             # 参考图（/media/xxx；空=无参考）
+    created_at = Column(String(40), default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("message_id", "block_id", name="uq_asset_message_block"),
+    )
+
+
+class GenerationJob(Base):
+    """生成任务（Job）：把「一次生成」建模为可观测、可取消的任务。
+
+    - 对话（chat）/ 重跑（regenerate）开始时建任务（running），事件推进时更新 note，
+      结束时置 done / error / interrupted / cancelled；
+    - 进程内注册表（api_micro._RUNNING_JOBS）持有运行中任务的 cancel_event，供取消接口使用；
+    - 与可恢复流配合：任务中断时消息保留为 interrupted，任务本身记为 interrupted/cancelled。
+    """
+
+    __tablename__ = "generation_jobs"
+
+    id = Column(String(12), primary_key=True)
+    micro_id = Column(String(12), ForeignKey("micro_works.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(12), ForeignKey("micro_sessions.id", ondelete="CASCADE"), nullable=False)
+    message_id = Column(Integer, ForeignKey("micro_messages.id", ondelete="CASCADE"), nullable=True)
+    kind = Column(String(12), default="chat")             # chat | regenerate
+    status = Column(String(12), default="running")        # running | done | error | interrupted | cancelled
+    media = Column(String(10), default="")                # image | video（已知时）
+    prompt = Column(Text, default="")
+    note = Column(Text, default="")                       # 最新状态文案（如「正在生成图像…」）
+    error = Column(Text, default="")
+    created_at = Column(String(40), default=_now)
+    updated_at = Column(String(40), default=_now)
+    finished_at = Column(String(40), default="")

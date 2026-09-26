@@ -214,6 +214,10 @@ def _indexes():
         "CREATE INDEX IF NOT EXISTS idx_projects_created ON projects(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_micro_sessions_micro ON micro_sessions(micro_id)",
         'CREATE INDEX IF NOT EXISTS idx_micro_messages_session ON micro_messages(session_id, "index")',
+        "CREATE INDEX IF NOT EXISTS idx_assets_micro ON assets(micro_id)",
+        "CREATE INDEX IF NOT EXISTS idx_assets_session ON assets(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_micro ON generation_jobs(micro_id)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_status ON generation_jobs(status)",
     ]
     with engine.connect() as conn:
         for s in stmts:
@@ -247,10 +251,15 @@ def _migrate_seasons():
 
 def _mark_interrupted_streams():
     """启动清理：上次进程异常退出时残留的「streaming」助手消息标记为 interrupted
-    （可恢复流：断连/崩溃留下部分输出，下次进入会话可见「可能未完成」）。"""
+    （可恢复流：断连/崩溃留下部分输出，下次进入会话可见「可能未完成」）；
+    残留的 running 生成任务同样标记 interrupted。"""
     from sqlalchemy import text
     with engine.connect() as conn:
         conn.execute(text("UPDATE micro_messages SET status='interrupted' WHERE status='streaming'"))
+        try:
+            conn.execute(text("UPDATE generation_jobs SET status='interrupted' WHERE status='running'"))
+        except Exception:
+            pass  # 表尚未创建（首次启动）
         conn.commit()
 
 

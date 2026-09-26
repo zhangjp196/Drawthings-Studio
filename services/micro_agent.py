@@ -20,7 +20,7 @@ from pydantic_ai import Agent, RunContext
 
 from config import data_dir
 from i18n import L
-from models import MicroMessage
+from models import Asset, MicroMessage
 from services.agent import build_model, to_message_history, user_prompt
 from services.api_common import _media_url
 from services.capabilities import caps, dt_client
@@ -73,13 +73,24 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
         instructions += (
             "参考图模式：附图（无附图时为本会话最近一次生成的媒体）将作为图生图 / 图生视频的参考图。"
             "此时 prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
-            "（角色、服装、画风、光照、构图），再具体描述用户本次要求的改动；不要从头重新描述整个画面。")
+            "（角色、服装、画风、光照、构图），再具体描述用户本次要求的改动；不要从头重新描述整个画面。"
+            "若要参考本会话中更早的某张已生成媒体，给 generate_media 传 ref_index（1=最近一张，2=倒数第二张…）。")
     return instructions
 
 
 def latest_session_media_path(db, session_id: str) -> str | None:
-    """本会话最近一次生成的媒体磁盘路径（无参考图时的回退参考；跨轮次也生效）。"""
+    """本会话最近一次生成的媒体磁盘路径（无参考图时的回退参考；跨轮次也生效）。
+
+    优先查资产表（Asset Graph，含参数与类型）；旧数据无资产时回退按消息扫描。
+    """
     try:
+        a = (db.query(Asset)
+             .filter(Asset.session_id == session_id, Asset.url.isnot(None), Asset.url != "")
+             .order_by(Asset.id.desc()).first())
+        if a is not None:
+            p = media_path_from_url(a.url or "")
+            if p:
+                return str(p)
         m = (db.query(MicroMessage)
              .filter(MicroMessage.session_id == session_id,
                      MicroMessage.role == "assistant",
@@ -91,6 +102,22 @@ def latest_session_media_path(db, session_id: str) -> str | None:
     if not m:
         return None
     p = media_path_from_url(m.media_url or "")
+    return str(p) if p else None
+
+
+def asset_path_by_recency(db, session_id: str, n: int) -> str | None:
+    """本会话第 n 近的生成资产（1=最近）的磁盘路径；用于「参考更早的某张图」（tool 编排）。"""
+    if not n or n < 1:
+        return None
+    try:
+        a = (db.query(Asset)
+             .filter(Asset.session_id == session_id, Asset.url.isnot(None), Asset.url != "")
+             .order_by(Asset.id.desc()).offset(n - 1).first())
+    except Exception:
+        return None
+    if not a:
+        return None
+    p = media_path_from_url(a.url or "")
     return str(p) if p else None
 
 
@@ -128,7 +155,35 @@ class _MsgPersister:
         m.media_url = self.last_media.get("url", "")
         m.prompt = self.last_media.get("prompt", "")
         m.status = status
+        self._sync_assets(m.id)  # 资产图：把成功的生成写入 assets（幂等 upsert）
         self.db.commit()
+
+    def _sync_assets(self, message_id) -> None:
+        """把消息里成功的生成块 upsert 为资产（Asset Graph），按 (message_id, block_id) 幂等。"""
+        if not message_id:
+            return
+        try:
+            for b in self.parts:
+                if b.get("type") != "tool" or b.get("status") != "ok" or not b.get("url"):
+                    continue
+                bid = str(b.get("id") or "")
+                a = (self.db.query(Asset)
+                     .filter(Asset.message_id == message_id, Asset.block_id == bid).first())
+                if a is None:
+                    a = Asset(micro_id=self.session.micro_id, session_id=self.session.id,
+                              message_id=message_id, block_id=bid, created_at=_now())
+                    self.db.add(a)
+                a.kind = str(b.get("media") or "image")
+                a.url = str(b.get("url") or "")
+                a.prompt = str(b.get("prompt") or "")
+                a.model = str(b.get("model") or "")
+                a.width = int(b.get("width") or 0)
+                a.height = int(b.get("height") or 0)
+                a.seconds = int(b.get("seconds") or 0)
+                a.ref_url = str(b.get("ref_url") or "")
+        except Exception:
+            # 资产写入失败不应影响对话落库
+            pass
 
     def save(self, status: str, throttle: bool = False) -> None:
         """写入草稿；throttle=True 时最多每秒一次（用于逐 token 的高频更新）。"""
@@ -262,11 +317,13 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
             if dt:
                 @agent.tool
                 async def generate_media(ctx: RunContext, prompt: str, media: str = "",
-                                         width: int = 0, height: int = 0, seconds: int = 0) -> str:
+                                         width: int = 0, height: int = 0, seconds: int = 0,
+                                         ref_index: int = 0) -> str:
                     """生成图片或视频：根据详细英文提示词产出单张图或单个视频。
 
                     若用户当前消息附带了图片，会自动作为参考图做图生图 / 图生视频（受配置「支持参考图片」开关
                     控制，未开启时按文生图 / 文生视频）；无附图时回退使用本会话最近一次生成的媒体作参考。
+                    若用户想参考本会话中**更早的某张已生成媒体**，用 ref_index 指定（1=最近一张，2=倒数第二张…）。
 
                     Args:
                         prompt: 详细英文提示词（主体、场景、构图、光线、风格；视频补充运镜与动态）
@@ -274,6 +331,7 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                         width: 图片宽（64 的倍数；用户未指定比例时传 0）
                         height: 图片高（64 的倍数；用户未指定比例时传 0）
                         seconds: 视频时长（秒，1~上限；用户未指定时传 0 = 用配置上限）
+                        ref_index: 参考本会话倒数第几张生成媒体（0/1=最近一张；>1 更早；无附图时生效）
                     """
                     kind = (media or "").strip().lower()
                     if kind not in ("image", "video"):
@@ -285,9 +343,12 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                         await out.put((E.TOOL_ERROR, {"id": f"t{next(tool_ids)}", "message": msg, "prompt": prompt}))
                         return f"生成失败：{msg}"
                     tid = f"t{next(tool_ids)}"
-                    # 参考图：当前消息附图优先，回退本会话最近生成的媒体（跨轮次生效）
-                    ref = img_paths[-1] if img_paths else (last_media.get("path")
-                                                           or latest_session_media_path(db, session.id))
+                    # 参考图优先级：本条消息附图 > 显式指定的历史资产（ref_index）> 本会话最近生成的媒体
+                    ref = img_paths[-1] if img_paths else None
+                    if ref is None and ref_index and int(ref_index) > 1:
+                        ref = asset_path_by_recency(db, session.id, int(ref_index))
+                    if ref is None:
+                        ref = last_media.get("path") or latest_session_media_path(db, session.id)
                     result = await _do_generation(
                         out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                         seconds=seconds, ref=ref, tid=tid, lang=lang,

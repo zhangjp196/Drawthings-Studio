@@ -112,6 +112,15 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   directly (no LLM in the loop)** — deterministic re-generation.
 - **Cross-turn reference**: with "Supports reference image" on, when no image is attached the generation falls back to
   the **session's most recently generated media** (across turns), not just the current one.
+- **Asset graph**: every successful generation is also recorded as an **asset** (media + prompt + model / size /
+  seconds / reference), independent of the message that displays it — so gallery cards show the generation parameters,
+  assets can be reused as references, and `GET /api/micro/{work}/assets` exposes them for filtering/export.
+- **Generation jobs**: each chat / re-run is a **job** (`running → done | error | interrupted | cancelled`) with a note
+  and prompt; `GET /api/micro/{work}/jobs` lists them and `POST .../jobs/{id}/cancel` stops a running one **without
+  relying on the client connection** (a live job also shows a Stop control in the chat).
+- **Reference orchestration**: the model can target an **earlier asset** of the session via the `ref_index` argument of
+  `generate_media` (1 = most recent, 2 = second most recent…), so multi-step "use the 2nd image as reference" flows are
+  deterministic instead of always chaining the latest.
 - **User image attachments**: when the chosen LLM supports vision (`supports_vision`), the input box lets you click 📎 to upload, **paste**, or **drag**
   images (up to 4 per message; you can send images without text). Attachments are stored with the message and sent back to the model as part of the multi-turn context.
   Non-vision models do not show this entry.
@@ -162,7 +171,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── paths.py             # path resolution (resource & data dirs for source / packaged modes)
 ├── config.py            # keeps only the data directory (reads env DATA_DIR, optional)
 ├── db.py                # SQLAlchemy engine / session / init_db (incl. migrations; marks stale streams interrupted)
-├── models.py            # ORM models: LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
+├── models.py            # ORM models: LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage / Asset / GenerationJob
 ├── config_store.py      # config CRUD (with "referenced by a project/work" protection before delete)
 ├── i18n.py              # backend zh/en localization (Accept-Language → zh|en + L() text helper)
 ├── build_app.sh         # one-step .app packaging (PyInstaller)

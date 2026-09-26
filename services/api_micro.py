@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from config_store import ConfigStore
 from db import get_db
 from i18n import L
-from models import MicroMessage, MicroSession, MicroWork
+from models import Asset, GenerationJob, MicroMessage, MicroSession, MicroWork
 from services.api_common import (
     MEDIA_DIR, _clamp_page, _dt_ref_field, _dt_view, _json_body, _lang,
     _llm_view, _sse,
@@ -34,6 +34,24 @@ from services.pipeline import _now
 router = APIRouter(prefix="/api/micro", tags=["micro"])
 
 MC_PAGE_SIZE = 10  # 微创作作品列表每页条数
+
+# 运行中的生成任务：job_id → {"event": threading.Event, "cancelled": bool}
+# 供取消接口使用（单进程本地应用；进程重启后由启动清理把 running 标记为 interrupted）。
+_RUNNING_JOBS: dict = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def _new_job(db: Session, *, micro_id: str, session_id: str, message_id, kind: str,
+             prompt: str, media: str = "") -> GenerationJob:
+    """创建生成任务（running）并登记取消句柄。"""
+    job = GenerationJob(id=uuid.uuid4().hex[:12], micro_id=micro_id, session_id=session_id,
+                        message_id=message_id, kind=kind, status="running", media=media,
+                        prompt=(prompt or "")[:2000], created_at=_now(), updated_at=_now())
+    db.add(job)
+    db.commit()
+    with _JOBS_LOCK:
+        _RUNNING_JOBS[job.id] = {"event": threading.Event(), "cancelled": False}
+    return job
 
 
 def _work_paged(db: Session, page: int, size: int = MC_PAGE_SIZE, q: str = "",
@@ -196,13 +214,104 @@ def micro_works_gallery(request: Request, work_id: str, db: Session = Depends(ge
                     MicroMessage.media_url.isnot(None),
                     MicroMessage.media_url != "")
             .order_by(MicroMessage.created_at.desc(), MicroMessage.id.desc()).all())
-    items = [{
-        "id": m.id, "session_id": m.session_id,
-        "session_title": sess_title.get(m.session_id, ""),
-        "media_url": m.media_url, "prompt": m.prompt or "",
-        "content": m.content or "", "created_at": m.created_at or "",
-    } for m in msgs]
+    # 附加资产元数据（Asset Graph）：模型 / 尺寸 / 时长 / 参考图（旧数据可能没有）
+    meta: dict = {}
+    mids = [m.id for m in msgs]
+    if mids:
+        for a in (db.query(Asset).filter(Asset.message_id.in_(mids))
+                  .order_by(Asset.id.asc()).all()):
+            meta[(a.message_id, a.url)] = a
+    items = []
+    for m in msgs:
+        a = meta.get((m.id, m.media_url))
+        items.append({
+            "id": m.id, "session_id": m.session_id,
+            "session_title": sess_title.get(m.session_id, ""),
+            "media_url": m.media_url, "prompt": m.prompt or "",
+            "content": m.content or "", "created_at": m.created_at or "",
+            "asset_id": a.id if a else None,
+            "kind": (a.kind if a else ("video" if is_video_url(m.media_url) else "image")),
+            "model": (a.model or "") if a else "",
+            "width": (a.width or 0) if a else 0,
+            "height": (a.height or 0) if a else 0,
+            "seconds": (a.seconds or 0) if a else 0,
+            "ref_url": (a.ref_url or "") if a else "",
+        })
     return {"works": items, "total": len(items)}
+
+
+@router.get("/{work_id}/assets")
+def micro_assets(request: Request, work_id: str, kind: str = "", session_id: str = "",
+                 db: Session = Depends(get_db)):
+    """资产图（Asset Graph）：该作品的全部生成资产（图/视频），可按类型 / 会话过滤。
+
+    比「作品画廊」粒度更细（同一消息内多次生成 = 多条资产），并带参数快照，
+    供跨轮/跨会话复用为参考图、按资产维度导出或统计。
+    """
+    work = db.get(MicroWork, work_id)
+    if not work:
+        raise HTTPException(status_code=404,
+                            detail=L(_lang(request), "作品不存在", "Work not found"))
+    q = db.query(Asset).filter(Asset.micro_id == work_id)
+    if kind in ("image", "video"):
+        q = q.filter(Asset.kind == kind)
+    if session_id:
+        q = q.filter(Asset.session_id == session_id)
+    assets = q.order_by(Asset.id.desc()).all()
+    return {"assets": [{
+        "id": a.id, "session_id": a.session_id, "message_id": a.message_id,
+        "kind": a.kind or "image", "url": a.url or "", "prompt": a.prompt or "",
+        "model": a.model or "", "width": a.width or 0, "height": a.height or 0,
+        "seconds": a.seconds or 0, "ref_url": a.ref_url or "",
+        "created_at": a.created_at or "",
+    } for a in assets], "total": len(assets)}
+
+
+@router.get("/{work_id}/jobs")
+def micro_jobs(request: Request, work_id: str, active: int = 0, limit: int = 20,
+               db: Session = Depends(get_db)):
+    """生成任务列表（Job）：可按 active=1 只看运行中；用于可观测与「停止生成」。"""
+    work = db.get(MicroWork, work_id)
+    if not work:
+        raise HTTPException(status_code=404,
+                            detail=L(_lang(request), "作品不存在", "Work not found"))
+    q = db.query(GenerationJob).filter(GenerationJob.micro_id == work_id)
+    if active:
+        q = q.filter(GenerationJob.status == "running")
+    jobs = q.order_by(GenerationJob.created_at.desc()).limit(min(max(limit, 1), 100)).all()
+    return {"jobs": [{
+        "id": j.id, "session_id": j.session_id, "message_id": j.message_id,
+        "kind": j.kind, "status": j.status, "media": j.media or "",
+        "prompt": j.prompt or "", "note": j.note or "", "error": j.error or "",
+        "created_at": j.created_at or "", "updated_at": j.updated_at or "",
+        "finished_at": j.finished_at or "",
+    } for j in jobs], "total": len(jobs)}
+
+
+@router.post("/{work_id}/jobs/{job_id}/cancel")
+def micro_job_cancel(request: Request, work_id: str, job_id: str,
+                     db: Session = Depends(get_db)):
+    """取消运行中的生成任务：置位其取消句柄（引擎协作式停止；不依赖客户端连接）。"""
+    lang = _lang(request)
+    job = db.get(GenerationJob, job_id)
+    if not job or job.micro_id != work_id:
+        raise HTTPException(status_code=404,
+                            detail=L(lang, "任务不存在", "Job not found"))
+    if job.status != "running":
+        return {"ok": True, "status": job.status}
+    with _JOBS_LOCK:
+        rec = _RUNNING_JOBS.get(job_id)
+        if rec:
+            rec["cancelled"] = True
+            rec["event"].set()
+    if not rec:
+        # 无运行句柄（进程重启后的残留 running）：直接标记为已取消
+        job.status = "cancelled"
+        job.updated_at = _now()
+        job.finished_at = _now()
+        db.commit()
+        return {"ok": True, "status": "cancelled"}
+    return {"ok": True, "status": "cancelling"}
 
 
 @router.post("/{work_id}/works/delete")
@@ -457,6 +566,8 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     work.updated_at = _now()
     db.commit()
     assistant_id = draft.id
+    job_id = _new_job(db, micro_id=work_id, session_id=session_id, message_id=assistant_id,
+                      kind="chat", prompt=message).id
 
     rows = db.query(MicroMessage).filter(MicroMessage.session_id == session_id,
                                          MicroMessage.index < user_idx)\
@@ -482,7 +593,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
             assistant_id=assistant_id)
 
     return StreamingResponse(
-        _sse_transport(_runner),
+        _sse_transport(_runner, db=db, job_id=job_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -532,6 +643,8 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str,
     work.updated_at = _now()
     db.commit()
     assistant_id = draft.id
+    job_id = _new_job(db, micro_id=work_id, session_id=session_id, message_id=assistant_id,
+                      kind="regenerate", prompt=prompt, media=kind).id
 
     def _runner(queue, cancel_event):
         return run_regenerate(
@@ -540,20 +653,51 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str,
             ref_url=ref_url, lang=lang, cancel_event=cancel_event)
 
     return StreamingResponse(
-        _sse_transport(_runner),
+        _sse_transport(_runner, db=db, job_id=job_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _sse_transport(runner):
+async def _sse_transport(runner, db: Session | None = None, job_id: str | None = None):
     """SSE 传输层：驱动引擎（runner 协程，事件写入队列）转成 SSE 帧（含心跳）。
 
     runner(queue, cancel_event) 由调用方构造（对话 / 重跑）；事件语义见 `services/events.py`。
     出图/出视频耗时长，15s 无事件发心跳保持连接；客户端断开时协作式取消生成。
+    传入 job_id 时同步更新生成任务（可观测/可取消）；运行中任务的 cancel_event 存在注册表，
+    取消接口可置位，从而在不依赖客户端连接的情况下停止生成。
     """
     queue: asyncio.Queue = asyncio.Queue()
-    cancel_event = threading.Event()  # 客户端断开（切换会话 / 关闭页面）时协作式停止正在进行的生成
+    with _JOBS_LOCK:
+        rec = _RUNNING_JOBS.get(job_id) if job_id else None
+    # 复用注册表里的取消句柄（取消接口置位同一个 event）；无任务时用一次性句柄
+    cancel_event = rec["event"] if rec else threading.Event()
+    job = db.get(GenerationJob, job_id) if (db is not None and job_id) else None
+
+    def _job_update(status=None, note=None, error=None, media=None, finished=False) -> None:
+        if job is None:
+            return
+        try:
+            if status:
+                job.status = status
+            if note is not None:
+                job.note = str(note)[:500]
+            if error is not None:
+                job.error = str(error)[:2000]
+            if media:
+                job.media = str(media)[:10]
+            job.updated_at = _now()
+            if finished:
+                job.finished_at = _now()
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
     task = asyncio.create_task(runner(queue, cancel_event))
+    finished_normally = False
+    had_error = False
     try:
         while True:
             try:
@@ -562,13 +706,36 @@ async def _sse_transport(runner):
                 yield ": ping\n\n"  # 心跳：出图/出视频耗时长，保持 SSE 连接不被空闲断开
                 continue
             if event == E.EOF:
+                finished_normally = True
                 break
+            d = data or {}
+            if event in (E.TOOL_ERROR, E.ERROR):
+                had_error = True
+                _job_update(error=d.get("message", ""))
+            elif event == E.TOOL:
+                _job_update(note=d.get("label", ""), media=d.get("media", ""))
+            elif event == E.TOOL_STATUS:
+                _job_update(note=d.get("message", ""))
+            elif event == E.MEDIA:
+                _job_update(note="已生成", media=d.get("media", ""))
             yield _sse(event, data)
     finally:
         cancel_event.set()  # 先请求取消（线程内的 Draw Things 生成尽快停止）
+        with _JOBS_LOCK:
+            rec2 = _RUNNING_JOBS.pop(job_id, None) if job_id else None
+        cancelled_by_api = bool(rec2 and rec2.get("cancelled"))
         if not task.done():
             task.cancel()
             try:
                 await task  # 等引擎清理（落库）完成再结束请求（数据库会话此时才关闭）
             except asyncio.CancelledError:
                 pass
+        if cancelled_by_api:
+            final = "cancelled"
+        elif had_error:
+            final = "error"
+        elif finished_normally:
+            final = "done"
+        else:
+            final = "interrupted"
+        _job_update(status=final, finished=True)

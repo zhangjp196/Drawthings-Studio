@@ -106,6 +106,14 @@
   **重跑**——按**原参数直接重生成（不经 LLM）**，结果可复现。
 - **跨轮次参考图**：勾选「支持参考图片」且本次未附图时，回退使用**本会话最近一次生成的媒体**作参考
   （跨轮次生效，不再限于同一次生成）。
+- **资产图（Asset Graph）**：每次成功生成同时记为一条**资产**（媒体 + 提示词 + 模型 / 尺寸 / 时长 / 参考图），
+  与「展示它的消息」解耦；画廊卡片据此展示生成参数，资产可被复用为参考图，
+  `GET /api/micro/{work}/assets` 可按类型 / 会话过滤导出。
+- **生成任务（Job）**：每次对话 / 重跑是一个任务（`running → done | error | interrupted | cancelled`，带 note / prompt）；
+  `GET /api/micro/{work}/jobs` 查询、`POST .../jobs/{id}/cancel` 取消，**不依赖客户端连接**
+  （运行中的任务在对话区显示「停止」控件）。
+- **参考编排（ref_index）**：模型可通过 `generate_media` 的 `ref_index` 指定参考**本会话更早的某张资产**
+  （1=最近一张，2=倒数第二张…），让「用第 2 张图作参考」这类多步流程可确定复现，而非永远只接最近一张。
 - **用户附图**：所选 LLM 支持视觉（`supports_vision`）时，输入框可点 📎 上传、**粘贴**或**拖拽**
   图片（每条最多 4 张，可只发图不发文字）；附图随消息落库，并随多轮上下文回传给模型。
   附图同时作为下一次生成的**参考图**（图生图 / 图生视频，受作品「支持参考图片」勾选控制，配置作兜底；
@@ -149,7 +157,7 @@
 ├── paths.py             # 路径解析（源码 / 打包两种模式的资源与数据目录）
 ├── config.py            # 仅保留数据目录位置（读环境变量 DATA_DIR，可选）
 ├── db.py                # SQLAlchemy 引擎 / 会话 / init_db（含迁移；启动把残留的 streaming 消息标记为 interrupted）
-├── models.py            # ORM 模型：LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
+├── models.py            # ORM 模型：LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage / Asset / GenerationJob
 ├── config_store.py      # 配置增删查（含删除前的“被项目/微创作作品引用”保护）
 ├── i18n.py              # 后端中英文本地化（Accept-Language → zh|en + L() 文案助手）
 ├── build_app.sh         # 一键打包 .app（PyInstaller）

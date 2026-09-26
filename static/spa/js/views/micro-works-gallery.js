@@ -38,6 +38,7 @@ Views.microWorksGallery = {
               <el-checkbox class="wp-check" :model-value="isWSel(w.id)" @click.stop @change="toggleWSel(w.id)"></el-checkbox>
             </div>
             <div class="wp-cap" v-if="w.prompt || w.content">{{ w.prompt || w.content }}</div>
+            <div class="wp-meta muted small" v-if="metaLine(w)">{{ metaLine(w) }}</div>
             <div class="wp-src muted">{{ (w.session_title || I18N.t('mw.newSession')) }} · {{ (w.created_at || '').slice(0, 10) }}</div>
             <div class="wp-actions">
               <el-button size="small" text :disabled="exporting" @click="exportWorks([w.id], 'zip')">{{ I18N.t('mw.exportZip') }}</el-button>
@@ -59,6 +60,14 @@ Views.microWorksGallery = {
 
     function isMediaVideo(url) {  // 按文件扩展名判断（媒体落盘时按实际内容定扩展名；URL 可能带 ?v= 缓存参数）
       return /\.(mp4|mov|webm|gif)(\?|$)/i.test(url || '');
+    }
+    // 资产参数行：尺寸 / 时长 / 模型（来自 Asset Graph；旧数据为空）
+    function metaLine(w) {
+      const seg = [];
+      if (w.width && w.height) seg.push(w.width + '×' + w.height);
+      if (w.seconds) seg.push(w.seconds + 's');
+      if (w.model) seg.push(w.model);
+      return seg.join(' · ');
     }
     function isWSel(id) { return selWorks.value.indexOf(id) >= 0; }
     function toggleWSel(id) {
@@ -129,7 +138,7 @@ Views.microWorksGallery = {
 
     return {
       works, selWorks, worksBusy, worksKind, exporting,
-      isMediaVideo, isWSel, toggleWSel, delWorks, sections, toggleAllKind, exportWorks,
+      isMediaVideo, metaLine, isWSel, toggleWSel, delWorks, sections, toggleAllKind, exportWorks,
     };
   },
 };
