@@ -30,7 +30,7 @@ from services.api_common import _media_url
 from services.capabilities import caps, dt_client
 from services.drawthings import MAX_VIDEO_SECONDS, extract_last_frame
 from services.media_files import media_path_from_url
-from services.micro_parts import dump_parts
+from services.micro_parts import dump_parts, load_parts
 from services.pipeline import _now, run_sync
 from services import events as E
 
@@ -156,7 +156,9 @@ async def vlm_score_media(llm_cfg, image_path: str, prompt: str = "", lang: str 
         text = f"生成提示词：{prompt or '（无）'}\n请评分并给出一句话评语。"
     content = [ImageUrl(url=image_data_uri(image_path)), text]
     data = (await agent.run(content)).output
-    return int(getattr(data, "score", 0) or 0), str(getattr(data, "note", "") or "")
+    s = int(getattr(data, "score", 0) or 0)
+    s = max(0, min(100, s))  # 收敛到 0–100
+    return s, str(getattr(data, "note", "") or "").strip()
 
 
 class _PromptOut(BaseModel):
@@ -201,6 +203,25 @@ class _MsgPersister:
     def _text(self) -> str:
         return "".join(p.get("text", "") for p in self.parts if p.get("type") == "text").strip()
 
+    def _merge_scores(self, m) -> None:
+        """把已落库的分值/评语合并进本次要写的 parts（按媒体 url 匹配）。
+
+        防止「生成进行中对已出现的媒体评分 → 本次落库把分值覆盖掉」。
+        """
+        try:
+            if not (m is not None and getattr(m, "parts", None)):
+                return
+            prev = load_parts(m.parts)
+            by_url = {b.get("url"): (int(b.get("score") or 0), b.get("score_note") or "")
+                      for b in prev if b.get("type") == "tool" and b.get("url")}
+            if not by_url:
+                return
+            for b in self.parts:
+                if b.get("type") == "tool" and b.get("url") in by_url and not b.get("score"):
+                    b["score"], b["score_note"] = by_url[b["url"]]
+        except Exception:
+            pass
+
     def _write(self, status: str) -> None:
         text = self._text()
         m = self.db.get(MicroMessage, self.id) if self.id else None
@@ -212,6 +233,7 @@ class _MsgPersister:
             self.db.add(m)
             self.db.flush()  # 取 id，供后续增量更新
             self.id = m.id
+        self._merge_scores(m)  # 保留评分期间由「评分」接口写入的分值/评语，避免被本次覆盖
         m.content = text
         m.parts = dump_parts(self.parts)
         m.duration = round(time.monotonic() - self.t0, 1)

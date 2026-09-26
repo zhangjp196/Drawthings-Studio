@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+import logging
 import threading
 import uuid
 from pathlib import Path
@@ -703,10 +704,16 @@ async def micro_score(request: Request, work_id: str, session_id: str,
                             detail=L(lang, "媒体不存在", "Media not found"))
     img = str(p)
     if kind == "video" or is_video_path(img):
-        img = extract_last_frame(img, MEDIA_DIR) or img
+        frame = extract_last_frame(img, MEDIA_DIR)
+        if not frame:
+            raise HTTPException(status_code=400,
+                                detail=L(lang, "无法提取视频末帧用于评分（需安装 ffmpeg）",
+                                         "Cannot extract a video frame to score (ffmpeg required)"))
+        img = frame
     try:
         score, note = await vlm_score_media(llm_cfg, img, prompt, lang)
     except Exception as e:
+        logging.getLogger("drawthings").warning("微创作评分失败：%s", e, exc_info=True)
         raise HTTPException(status_code=400,
                             detail=L(lang, f"评分失败：{e}", f"Scoring failed: {e}"))
     # 写回该会话内对应内容块（按媒体 url 匹配）

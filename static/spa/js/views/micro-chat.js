@@ -85,7 +85,7 @@ Views.microChat = {
           {{ ctx.busy ? I18N.t('mw.scoring') : I18N.t('mw.scoreAction') }}
         </button>
         <button v-if="ctx.block" type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="redoMedia">{{ I18N.t('mw.redoAction') }}</button>
-        <template v-if="ctx.block && ctx.block.score">
+        <template v-if="ctx.block && (ctx.block.score || ctx.block.score_note)">
           <div class="mc-ctxscore">{{ I18N.t('mw.scoreLabel') }} {{ ctx.block.score }}<span v-if="ctx.block.score_note"> · {{ ctx.block.score_note }}</span></div>
         </template>
       </div>

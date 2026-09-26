@@ -34,7 +34,7 @@ Views.microBlock = {
           <div v-if="b.scoring" class="tool-note">{{ I18N.t('mw.scoring') }}</div>
           <div v-if="b.status === 'error' && b.message" class="tool-err">{{ b.message }}</div>
         </div>
-        <div class="tool-score" v-if="b.score">
+        <div class="tool-score" v-if="b.score || b.score_note">
           <span class="ts-val">{{ I18N.t('mw.scoreLabel') }} {{ b.score }}</span>
           <span class="ts-note" v-if="b.score_note">{{ b.score_note }}</span>
         </div>
