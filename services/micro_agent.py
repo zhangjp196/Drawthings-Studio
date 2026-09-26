@@ -13,6 +13,7 @@
 """
 import asyncio
 import itertools
+import logging
 import time
 from functools import partial
 from pathlib import Path
@@ -303,10 +304,13 @@ class _MsgPersister:
 
 async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, height: int = 0,
                          seconds: int = 0, ref: str | None, tid: str, lang: str,
-                         parts: list, last_media: dict) -> str:
+                         parts: list, last_media: dict, llm_cfg=None) -> str:
     """执行一次生成（图/视频），把 tool/tool_status/media/tool_error 事件写入 out。
 
-    返回给 LLM 的结果文本（成功/失败），与提示词内容无关；生成参数快照写入内容块。
+    - 生成参数快照写入内容块；
+    - 成功且提供了 llm_cfg 时**自动用该 VLM 评分**（图/视频；视频取末帧），
+      评分写入内容块并经 `media_score` 事件下发（失败静默忽略，不影响生成）。
+    返回给 LLM 的结果文本（成功/失败），与提示词内容无关。
     """
     if kind == "image":
         label = L(lang, "正在生成图像…", "Generating image…")
@@ -350,6 +354,16 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
     last_media["prompt"] = prompt
     last_media["path"] = path
     await out.put((E.MEDIA, {"id": tid, "media": kind, "url": url, "prompt": prompt}))
+    # 自动评分：生成成功后用作品所选 VLM 评分（图/视频；失败静默忽略，不影响生成）
+    if llm_cfg:
+        try:
+            score_path = image_ref_path(path)  # 视频 → 末帧
+            s, n = await vlm_score_media(llm_cfg, score_path, prompt, lang)
+            block["score"] = s
+            block["score_note"] = n
+            await out.put((E.MEDIA_SCORE, {"id": tid, "score": s, "note": n}))
+        except Exception as e:
+            logging.getLogger("drawthings").warning("微创作自动评分失败（忽略）：%s", e)
     return f"生成成功，媒体地址：{url}"
 
 
@@ -441,7 +455,7 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                     result = await _do_generation(
                         out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                         seconds=seconds, ref=ref, tid=tid, lang=lang,
-                        parts=parts, last_media=last_media)
+                        parts=parts, last_media=last_media, llm_cfg=llm_cfg)
                     persister.save("streaming")  # 生成的里程碑立即落库（断连可恢复）
                     return result
 
@@ -518,7 +532,7 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
             prompt = await refine_prompt(llm_cfg, prompt, score, note, lang)
         await _do_generation(out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                              seconds=seconds, ref=str(ref) if ref else None, tid="t1",
-                             lang=lang, parts=parts, last_media=last_media)
+                             lang=lang, parts=parts, last_media=last_media, llm_cfg=llm_cfg)
         persister.save("done" if last_media.get("url") else "interrupted")
         persister.final = True
         await out.put((E.DONE, {}))

@@ -81,9 +81,6 @@ Views.microChat = {
 
       <div v-if="ctx.show" class="mc-ctxmenu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
         <button type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="applyQuote">{{ I18N.t('mw.quoteRef') }}</button>
-        <button v-if="ctx.block" type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="scoreMedia">
-          {{ ctx.busy ? I18N.t('mw.scoring') : I18N.t('mw.scoreAction') }}
-        </button>
         <button v-if="ctx.block" type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="redoMedia">{{ I18N.t('mw.redoAction') }}</button>
         <template v-if="ctx.block && (ctx.block.score || ctx.block.score_note)">
           <div class="mc-ctxscore">{{ I18N.t('mw.scoreLabel') }} {{ ctx.block.score }}<span v-if="ctx.block.score_note"> · {{ ctx.block.score_note }}</span></div>
@@ -134,21 +131,7 @@ Views.microChat = {
         b.scoring = false;
       }
     }
-    async function scoreMedia() {
-      const b = ctx.block;
-      if (!b || ctx.busy) return;
-      ctx.busy = true;
-      try {
-        await doScore(b);
-        ElementPlus.ElMessage.success(I18N.t('mw.scoreDone', b.score));
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      } finally {
-        ctx.busy = false;
-        ctx.show = false;
-      }
-    }
-    // 重做：先评分（未评分时）→ 结合评分让 LLM 改进提示词后重新生成；新消息，**不删除原来的**
+    // 重做：先确保有评分（无则补评分）→ 结合评分让 LLM 改进提示词后重新生成；新消息，**不删除原来的**
     async function redoMedia() {
       const b = ctx.block;
       ctx.show = false;
@@ -262,6 +245,11 @@ Views.microChat = {
       const t = d.id ? findTool(d.id) : null;
       if (t && t.status === 'running') { t.message = d.message || ''; }
     }
+    function onMediaScore(d) {
+      // 生成后自动评分结果：写回对应内容块（与卡片显示一致）
+      const t = d.id ? findTool(d.id) : null;
+      if (t) { t.score = d.score || 0; t.score_note = d.note || ''; }
+    }
     function onError(d) {
       stream.parts.push({ type: 'error', message: d.message || I18N.t('mw.err') });
     }
@@ -307,6 +295,8 @@ Views.microChat = {
             stickBottom();
           } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
+          } else if (ev === EVENTS.MEDIA_SCORE) {
+            onMediaScore(d);
           } else if (ev === EVENTS.TOOL_ERROR) {
             onToolError(d);
           } else if (ev === EVENTS.ERROR) {
@@ -368,6 +358,8 @@ Views.microChat = {
             stickBottom();
           } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
+          } else if (ev === EVENTS.MEDIA_SCORE) {
+            onMediaScore(d);
           } else if (ev === EVENTS.TOOL_ERROR) {
             onToolError(d);
           } else if (ev === EVENTS.ERROR) {
@@ -516,7 +508,7 @@ Views.microChat = {
       ph, input, attached, busy, status, drag, streaming, stream, streamElapsed,
       chatBox, chatInner, inputEl, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter,
       send, rerun, activeJob, stopJob, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
-      quoted, ctx, openQuote, onReference, applyQuote, scoreMedia, redoMedia,
+      quoted, ctx, openQuote, onReference, applyQuote, redoMedia,
     };
   },
 };
