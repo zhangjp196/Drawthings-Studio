@@ -89,6 +89,7 @@ Views.micro = {
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
               <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
             </el-select>
+            <el-checkbox v-model="f.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
           </el-form-item>
           <el-form-item v-if="f.dt" :label="I18N.t('mc.dtModelVideo')">
             <el-select v-model="f.mv" filterable allow-create clearable style="width: 100%"
@@ -96,6 +97,8 @@ Views.micro = {
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
               <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
             </el-select>
+            <el-checkbox v-model="f.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
         </el-form>
         <template #footer>
@@ -115,7 +118,7 @@ Views.micro = {
     const flt = reactive({ q: '', kind: '', sort: 'desc', size: 10 });
     const dlg = ref(false);
     const saving = ref(false);
-    const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '' });
+    const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false });
     const tab = ref('works');  // 列表页 tab：作品集（默认）；预留后续扩展
 
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
@@ -134,12 +137,14 @@ Views.micro = {
       }
     }
     watch(() => f.dt, (id) => {
-      f.mi = ''; f.mv = '';
+      f.mi = ''; f.mv = ''; f.ref_i = false; f.ref_v = false;
       const c = dts.value.find(x => x.id === id);
       if (!c) return;
-      // 预填配置里的模型（功能级可覆盖）；配置未设模型则保持空 = 跟随
+      // 预填配置里的模型 / 参考图开关（功能级可覆盖）；配置未设则保持空/不勾选
       f.mi = c.model_image || '';
       f.mv = c.model_video || '';
+      f.ref_i = !!c.ref_image;
+      f.ref_v = !!c.ref_video;
       fetchModels();
     });
 
@@ -166,7 +171,7 @@ Views.micro = {
     }
 
     async function openNew() {
-      Object.assign(f, { title: '', llm: '', dt: '', mi: '', mv: '' });
+      Object.assign(f, { title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false });
       dlg.value = true;
       // 基础配置里的默认配置 → 预填（仅当对应配置仍存在时）
       try {
@@ -189,6 +194,7 @@ Views.micro = {
           title: f.title, llm_config_id: f.llm,
           drawthings_config_id: f.dt,
           dt_model_image: f.mi, dt_model_video: f.mv,
+          dt_ref_image: f.ref_i ? 1 : 0, dt_ref_video: f.ref_v ? 1 : 0,
         });
         dlg.value = false;
         router.push('/micro/' + data.id);

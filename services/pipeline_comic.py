@@ -43,7 +43,7 @@ from .agent import (
     image_data_uri,
     make_agent,
 )
-from .drawthings import build_drawthings_client, extract_last_frame
+from .drawthings import build_drawthings_client, extract_last_frame, norm_ref_flag
 from .pipeline_common import (
     MAX_SCORE_REDO,
     _cjk_font_path,
@@ -73,12 +73,14 @@ class ComicPipeline:
     def _clients(self, db, project, lang: str = "zh"):
         """DrawThings 客户端（出图/出视频用；仅 gRPC）。
 
-        功能级模型：项目自选的模型覆盖配置里的模型（留空 = 跟随配置）。"""
+        功能级模型 / 参考图开关：项目自选的覆盖配置（留空 = 跟随配置）。"""
         _, dt_cfg = self._configs(db, project, lang)
         return build_drawthings_client(
             dt_cfg, self.data_dir,
             model_image=getattr(project, "dt_model_image", "") or "",
-            model_video=getattr(project, "dt_model_video", "") or "")
+            model_video=getattr(project, "dt_model_video", "") or "",
+            ref_image=norm_ref_flag(getattr(project, "dt_ref_image", "")),
+            ref_video=norm_ref_flag(getattr(project, "dt_ref_video", "")))
 
     def _llm_cfg(self, db, project, lang: str = "zh") -> LLMConfig:
         llm_cfg, _ = self._configs(db, project, lang)
@@ -969,8 +971,9 @@ class ComicPipeline:
             + f"本章主题摘要：{base}\n\n{context}"
         )
         # 图生图模式（勾选「支持参考图片」且本章有参考图）：提示词写成基于参考图的修改指令，
-        # 避免从头完整描述导致重绘覆盖参考画面
-        if ref_img and bool(getattr(dt_cfg, "ref_image", 0)):
+        # 避免从头完整描述导致重绘覆盖参考画面（功能级开关优先，配置兜底）
+        _r = norm_ref_flag(getattr(project, "dt_ref_image", ""))
+        if ref_img and (bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_image", 0))):
             user += ("\n【图生图模式】附图是本次生成的参考图，画面将基于它生成。"
                      "prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
                      "（角色外形、服装、画风、光照、构图），再具体描述本章的变化（新动作 / 新场景 / 新物件）；"

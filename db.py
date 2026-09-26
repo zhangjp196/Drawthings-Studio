@@ -106,10 +106,14 @@ def _migrate():
             "auto_redo": "INTEGER DEFAULT 1",
             "dt_model_image": "VARCHAR(200) DEFAULT ''",
             "dt_model_video": "VARCHAR(200) DEFAULT ''",
+            "dt_ref_image": "VARCHAR(1) DEFAULT ''",
+            "dt_ref_video": "VARCHAR(1) DEFAULT ''",
         },
         "micro_works": {
             "dt_model_image": "VARCHAR(200) DEFAULT ''",
             "dt_model_video": "VARCHAR(200) DEFAULT ''",
+            "dt_ref_image": "VARCHAR(1) DEFAULT ''",
+            "dt_ref_video": "VARCHAR(1) DEFAULT ''",
         },
         "micro_messages": {
             "images": "TEXT",

@@ -17,7 +17,8 @@ Start from **one sentence** and run it through a single pipeline to produce a **
 
 The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
 Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent
-(enable "Supports reference image" in the Draw Things config; otherwise it is text-to-image / text-to-video).
+(enable "Supports reference image" for the work — picked per feature in the create form, config value as fallback;
+otherwise it is text-to-image / text-to-video).
 
 The UI **supports both Chinese and English**; toggle with one click in the toolbar (frontend `I18N` switch + the backend localizes error messages via `Accept-Language`).
 
@@ -28,7 +29,8 @@ The UI **supports both Chinese and English**; toggle with one click in the toolb
 | Comic | Continuous image generation | one image per chapter | ch.1 = first image; the rest = the previous image |
 | Short drama | Continuous video generation | one clip per chapter | ch.1 = first image (first frame); the rest = the last frame of the previous clip |
 
-Continuity references require **"Supports reference image"** to be checked in the work's Draw Things config (image-to-image / image-to-video); unchecked = text-to-image / text-to-video.
+Continuity references require **"Supports reference image"** to be enabled for the work (picked per feature in the
+create form; the config value is the fallback) — image-to-image / image-to-video; off = text-to-image / text-to-video.
 With it on, each chapter's prompt is auto-written as an **edit instruction based on the reference image** (keep characters / style / composition consistent, describe only what changes this chapter) instead of a full re-description — so generations follow the reference.
 
 ## Workspace (home /)
@@ -50,7 +52,7 @@ The project page is organized into **three tabs — Outline / Chapters / Complet
 
 - **First image**: the project page lets you **upload a first image** or **generate one from a prompt** (leave the prompt empty and the LLM writes one from the idea + style).
   The first image is the reference for chapter 1 (comic = img2img reference; drama = the first video frame;
-  requires "Supports reference image" in the config),
+  requires "Supports reference image" for the work (config value as fallback),
   and serves as the character/style baseline for the whole work during scripting (visible to a multimodal LLM).
 - **Style selection (with custom)**: when creating a project, pick a preset style (Japanese manga / Chinese ink wash / chibi /
   realistic cinematic / Pixar 3D / cyberpunk) or choose "Custom…" and type any description;
@@ -132,9 +134,10 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
   `max_seconds` (max video duration in seconds; **default 8 = built-in cap**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap).
-  **Supports reference image** (`ref_image` / `ref_video`, **unchecked by default**): declares per type whether the model can do
-  image-to-image / image-to-video. When checked, comics pass the previous image and dramas the last frame of the previous clip as
-  `init_image`; unchecked = plain text-to-image / text-to-video (greyed out and zeroed when that model is empty).
+  **Supports reference image** (now picked per feature in the project / micro-creation create form; the config-level
+  `ref_image` / `ref_video` is kept as a fallback default, **off by default**): per type, whether the generation uses
+  the reference image (image-to-image / image-to-video). When on, comics pass the previous image and dramas the last
+  frame of the previous clip as `init_image`; off = plain text-to-image / text-to-video.
   Known Draw Things bug: on some app versions, reference-image generation may crash the app — this app then detects the
   disconnection, waits up to 2 minutes per round for the app to restart, and retries the generation automatically
   (up to twice; community issue #121).
@@ -354,7 +357,7 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
   → 768×448, ~90 s for 25 frames).
 - Duration: the config's `max_seconds` (**default 8 = built-in cap**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), then bounded by the preset frame count and the **built-in 8s cap**. (E.g. with the LTX preset at fps=25: 2s = 49 frames, 4s = 97 frames ≈ 3.9s; longer requests are capped by the preset's 121 frames ≈ 4.84s.)
 - Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically);
-  requires "Supports reference image" (`ref_image` / `ref_video`) in the config — unchecked = text-to-image / text-to-video.
+  requires "Supports reference image" on the work (config value as fallback) — off = text-to-image / text-to-video.
 
 Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's
 per-scene choice during scripting (`ScriptOut.width/height`, multiples of 64); then capped by `max_side`.

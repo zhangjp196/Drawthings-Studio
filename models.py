@@ -86,6 +86,8 @@ class Project(Base):
     drawthings_config_id = Column(String(12), ForeignKey("drawthing_configs.id"), nullable=False)
     dt_model_image = Column(String(200), default="")            # 功能级模型：本项目出图模型（空=跟随 DrawThings 配置）
     dt_model_video = Column(String(200), default="")             # 功能级模型：本项目出视频模型（空=跟随 DrawThings 配置）
+    dt_ref_image = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
+    dt_ref_video = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
     status = Column(String(20), default="planning")       # planning|arced|done（done 为遗留值；完成已下沉到季，不再由 UI 设置）
     scope = Column(JSON, default=dict)                     # 风格/主题/基调（整体，供后续保持一致）
     arc = Column(Text, default="")                         # 总纲（整部作品主线；各季 arc 为其分段，可编辑）
@@ -178,6 +180,8 @@ class MicroWork(Base):
     drawthings_config_id = Column(String(12), default="")   # 空 = 纯对话
     dt_model_image = Column(String(200), default="")         # 功能级模型：本作品出图模型（空=跟随 DrawThings 配置）
     dt_model_video = Column(String(200), default="")         # 功能级模型：本作品出视频模型（空=跟随 DrawThings 配置）
+    dt_ref_image = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
+    dt_ref_video = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     sessions = relationship("MicroSession", back_populates="work",

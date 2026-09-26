@@ -621,16 +621,33 @@ class DrawThingsClient:
         return str(out)
 
 
+def norm_ref_flag(v) -> int | None:
+    """功能级「支持参考图片」开关归一：''/None = 跟随配置（返回 None）；其余 → 0/1。"""
+    if v in (None, ""):
+        return None
+    if isinstance(v, bool):
+        return 1 if v else 0
+    if isinstance(v, int):
+        return 1 if v else 0
+    return 1 if str(v).strip().lower() in ("1", "true", "yes", "on") else 0
+
+
 def build_drawthings_client(cfg, data_dir: Path,
-                             model_image: str = "", model_video: str = "") -> DrawThingsClient:
+                             model_image: str = "", model_video: str = "",
+                             ref_image: int | None = None, ref_video: int | None = None) -> DrawThingsClient:
     """构造 Draw Things 客户端（仅 gRPC）。
 
     model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）；
     留空 = 跟随 DrawThings 配置里的模型。
+    ref_image / ref_video：功能级「支持参考图片」覆盖；None = 跟随配置，0/1 = 显式关/开。
     """
     c = DrawThingsClient(cfg, data_dir)
     if model_image:
         c.model_image = str(model_image).strip()
     if model_video:
         c.model_video = str(model_video).strip()
+    if ref_image is not None:
+        c.ref_image = bool(ref_image)
+    if ref_video is not None:
+        c.ref_video = bool(ref_video)
     return c

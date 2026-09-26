@@ -36,6 +36,10 @@ Views.createForm = {
         </el-select>
         <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
       </el-form-item>
+      <el-form-item v-if="f.dt" :label="I18N.t('cf.dtRef')">
+        <el-checkbox v-model="f.dt_ref">{{ I18N.t(f.kind === 'comic' ? 'cfg.refImage' : 'cfg.refVideo') }}</el-checkbox>
+        <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
+      </el-form-item>
       <el-form-item :label="I18N.t('cf.title')">
         <el-input v-model="f.title" maxlength="100" :placeholder="I18N.t('cf.titlePh')" />
       </el-form-item>
@@ -63,6 +67,7 @@ Views.createForm = {
       llm: '',
       dt: '',
       dt_model: '',
+      dt_ref: false,
       title: (props.preset && props.preset.title) || '',
       origin: (props.preset && props.preset.origin) || '',
       style: '',
@@ -86,13 +91,15 @@ Views.createForm = {
     }
     watch(() => f.dt, (id) => {
       f.dt_model = '';
+      f.dt_ref = false;
       const c = dtsAll.value.find(x => x.id === id);
       if (!c) return;
-      // 预填配置里的模型（功能级可覆盖）；配置未设模型则保持空 = 必须自选
+      // 预填配置里的模型 / 参考图开关（功能级可覆盖）；配置未设模型则保持空 = 必须自选
       f.dt_model = f.kind === 'comic' ? (c.model_image || '') : (c.model_video || '');
+      f.dt_ref = f.kind === 'comic' ? !!c.ref_image : !!c.ref_video;
       fetchModels();
     });
-    watch(() => f.kind, () => { f.dt_model = ''; });
+    watch(() => f.kind, () => { f.dt_model = ''; f.dt_ref = false; });
 
     async function load() {
       const data = await API.get('/api/choices');
@@ -129,6 +136,8 @@ Views.createForm = {
           llm_config_id: f.llm, drawthings_config_id: f.dt,
           dt_model_image: f.kind === 'comic' ? f.dt_model : '',
           dt_model_video: f.kind === 'drama' ? f.dt_model : '',
+          dt_ref_image: f.kind === 'comic' ? (f.dt_ref ? 1 : 0) : '',
+          dt_ref_video: f.kind === 'drama' ? (f.dt_ref ? 1 : 0) : '',
           style: f.style === 'custom' ? '' : f.style,
           style_custom: f.style === 'custom' ? f.styleCustom.trim() : '',
         });

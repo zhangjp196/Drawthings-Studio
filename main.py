@@ -47,7 +47,7 @@ from models import Project, Chapter, Season, MicroWork, MicroSession, MicroMessa
 from config_store import ConfigStore
 from services.agent import build_model, to_message_history, user_prompt, make_httpx_client
 from services.pipeline import Pipeline, _now, chars_from_raw, hex_to_rgb, run_sync
-from services.drawthings import build_drawthings_client, MAX_VIDEO_SECONDS
+from services.drawthings import build_drawthings_client, MAX_VIDEO_SECONDS, norm_ref_flag
 
 STATIC_ROOT = resource_root() / "static"
 MEDIA_DIR = Path(data_dir) / "media"
@@ -170,6 +170,13 @@ def _dt_view(c) -> dict:
         "ref_video": int(getattr(c, "ref_video", 0) or 0),   # 视频支持参考图片（图生视频）
         "created_at": c.created_at,
     }
+
+
+def _dt_ref_field(body: dict, key: str) -> str:
+    """功能级参考图开关：请求缺省 = 跟随配置（''）；提供 = 归一为 '0'/'1'。"""
+    if key not in body:
+        return ""
+    return "1" if norm_ref_flag(body.get(key)) else "0"
 
 
 def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
@@ -620,6 +627,8 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
         drawthings_config_id=str(body.get("drawthings_config_id") or "").strip(),
         dt_model_image=str(body.get("dt_model_image") or "").strip()[:200],
         dt_model_video=str(body.get("dt_model_video") or "").strip()[:200],
+        dt_ref_image=_dt_ref_field(body, "dt_ref_image"),
+        dt_ref_video=_dt_ref_field(body, "dt_ref_video"),
         created_at=_now(), updated_at=_now(),
     )
     db.add(w)
@@ -646,6 +655,8 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "drawthings_config_id": work.drawthings_config_id,
             "dt_model_image": work.dt_model_image or "",
             "dt_model_video": work.dt_model_video or "",
+            "dt_ref_image": work.dt_ref_image or "",
+            "dt_ref_video": work.dt_ref_video or "",
             "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "",
             "dt_name": dt_cfg.name if dt_cfg else "",
@@ -833,6 +844,8 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     work.drawthings_config_id = str(body.get("drawthings_config_id") or "").strip()
     work.dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
     work.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
+    work.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
+    work.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
     work.updated_at = _now()
     db.commit()
     return {"ok": True}
@@ -1098,14 +1111,21 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
         yield _sse("done", {})
         return
 
-    # DrawThings 客户端（gRPC）：功能级模型优先（作品自选），留空 = 跟随配置里的模型
+    # DrawThings 客户端（gRPC）：功能级模型/参考图开关优先（作品自选），空 = 跟随配置
     dt = (build_drawthings_client(
         dt_cfg, data_dir,
         model_image=getattr(work, "dt_model_image", "") or "",
-        model_video=getattr(work, "dt_model_video", "") or "")
+        model_video=getattr(work, "dt_model_video", "") or "",
+        ref_image=norm_ref_flag(getattr(work, "dt_ref_image", "")),
+        ref_video=norm_ref_flag(getattr(work, "dt_ref_video", "")))
         if dt_cfg else None)
     can_image = bool(dt and dt.supports_image())
     can_video = bool(dt and dt.supports_video())
+    # 生效的「支持参考图片」（功能级优先、配置兜底）：决定提示词是否写成参考图修改指令
+    _r = norm_ref_flag(getattr(work, "dt_ref_image", ""))
+    eff_ref_img = bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_image", 0))
+    _r = norm_ref_flag(getattr(work, "dt_ref_video", ""))
+    eff_ref_vid = bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_video", 0))
 
     if dt and (can_image or can_video):
         kinds = []
@@ -1134,7 +1154,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
             + sec_hint + ratio)
         # 参考图模式：勾选「支持参考图片」后，附图 / 最近生成的媒体会作为参考图 →
         # 提示词写成基于参考图的修改指令，而不是从头完整描述
-        if bool(getattr(dt_cfg, "ref_image", 0)) or bool(getattr(dt_cfg, "ref_video", 0)):
+        if eff_ref_img or eff_ref_vid:
             instructions += (
                 "参考图模式：附图（无附图时为本会话最近一次生成的媒体）将作为图生图 / 图生视频的参考图。"
                 "此时 prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
@@ -1344,6 +1364,9 @@ async def project_create(request: Request, db: Session = Depends(get_db)):
     # 功能级模型：项目侧自选；留空 = 跟随 DrawThings 配置里的模型（两边都空才拒绝）
     dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
     dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
+    # 功能级参考图开关：缺省 = 跟随配置；显式 0/1 = 覆盖
+    dt_ref_image = norm_ref_flag(body.get("dt_ref_image"))
+    dt_ref_video = norm_ref_flag(body.get("dt_ref_video"))
     if kind == "comic" and not dt_model_image and not (dt_cfg.model_image or ""):
         raise HTTPException(status_code=400,
                             detail=L(lang, "请选择出图模型（DrawThings 配置里也未设置模型）",
@@ -1358,7 +1381,11 @@ async def project_create(request: Request, db: Session = Depends(get_db)):
         project.dt_model_image = dt_model_image
     if dt_model_video:
         project.dt_model_video = dt_model_video
-    if dt_model_image or dt_model_video:
+    if dt_ref_image is not None:
+        project.dt_ref_image = "1" if dt_ref_image else "0"
+    if dt_ref_video is not None:
+        project.dt_ref_video = "1" if dt_ref_video else "0"
+    if dt_model_image or dt_model_video or dt_ref_image is not None or dt_ref_video is not None:
         db.commit()
     return {"id": project.id}
 
@@ -1482,6 +1509,8 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "drawthings_config_id": project.drawthings_config_id,
             "dt_model_image": project.dt_model_image or "",
             "dt_model_video": project.dt_model_video or "",
+            "dt_ref_image": project.dt_ref_image or "",
+            "dt_ref_video": project.dt_ref_video or "",
             "llm_name": llm_cfg.name if llm_cfg else unknown,
             "dt_name": dt_cfg.name if dt_cfg else unknown,
         },

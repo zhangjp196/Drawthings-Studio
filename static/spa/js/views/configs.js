@@ -168,16 +168,6 @@ Views.configs = {
             </el-form-item>
           </template>
           <template v-else>
-            <el-form-item :label="I18N.t('cfg.refImageSec')">
-              <el-checkbox v-model="f.ref_image" style="margin-right: 20px;">
-                {{ I18N.t('cfg.refImage') }}
-              </el-checkbox>
-              <el-checkbox v-model="f.ref_video">
-                {{ I18N.t('cfg.refVideo') }}
-              </el-checkbox>
-              <div class="hint" style="margin-top:2px;">{{ I18N.t('cfg.refModelHint') }}</div>
-              <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
-            </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxSideOpt')">
               <el-select v-model="f.max_side" style="width: 220px;">
                 <el-option :value="0" :label="I18N.t('cfg.maxSideNoneOpt')" />
