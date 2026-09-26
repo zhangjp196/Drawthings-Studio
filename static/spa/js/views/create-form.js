@@ -39,7 +39,7 @@ Views.createForm = {
                   <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
                   <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
                 </el-select>
-                <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
+                <el-checkbox v-model="f.dt_ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
               </el-form-item>
             </el-col>
             <el-col v-if="f.kind === 'drama'" :span="12">
@@ -49,14 +49,10 @@ Views.createForm = {
                   <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
                   <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
                 </el-select>
+                <el-checkbox v-model="f.dt_ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
               </el-form-item>
             </el-col>
           </el-row>
-          <el-form-item v-if="f.dt" :label="I18N.t('cf.dtRef')">
-            <el-checkbox v-model="f.dt_ref_i" style="margin-right: 16px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
-            <el-checkbox v-if="f.kind === 'drama'" v-model="f.dt_ref_v">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
-            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
-          </el-form-item>
         </el-col>
         <el-col :span="14">
           <!-- 右：创作内容（标题 / 主题 / 风格） -->

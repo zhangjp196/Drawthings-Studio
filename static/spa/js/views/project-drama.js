@@ -428,12 +428,10 @@ Views.projectDrama = {
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
               <el-option v-for="m in modelChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
-            <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
-          </el-form-item>
-          <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtRef')">
-            <el-checkbox v-model="cfg.dt_ref_i" style="margin-right: 16px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
-            <el-checkbox v-model="cfg.dt_ref_v">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
-            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
+            <div style="margin-top: 4px;">
+              <el-checkbox v-model="cfg.dt_ref_i" style="margin-right: 16px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+              <el-checkbox v-model="cfg.dt_ref_v">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+            </div>
           </el-form-item>
         </el-form>
         <template #footer>
