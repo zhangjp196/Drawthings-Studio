@@ -12,8 +12,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from config import data_dir
-from services.api_common import MEDIA_DIR, _media_url
+from config import data_dir, MEDIA_DIR, media_url as _media_url
 
 _IMAGE_EXTS = ("png", "jpg", "jpeg", "webp", "gif")
 _MAX_IMAGE_B64 = 8 * 1024 * 1024  # 单张用户附图上限（base64 后，约 6MB 原图）
@@ -106,6 +105,20 @@ def export_zip(title: str, fallback: str, files: list[tuple[Path, bool]],
     return str(zpath), fname
 
 
+def save_images_pdf(images: list, out_path) -> None:
+    """把一组已打开的 PIL 图像按顺序写成多页 PDF，并关闭它们（通用底层原语）。
+
+    业务侧负责「选哪些图 / 什么顺序 / 文件名」，本函数只做通用编码。
+    """
+    if not images:
+        raise ValueError("没有可导出的图片")
+    try:
+        images[0].save(out_path, save_all=True, append_images=images[1:], resolution=96.0)
+    finally:
+        for im in images:
+            im.close()
+
+
 def export_pdf(title: str, fallback: str, files: list[tuple[Path, bool]]) -> tuple[str, str]:
     """把所选图片按顺序拼成多页 PDF（仅图片；视频需先导出 ZIP）。"""
     base = safe_file_base(title or fallback, fallback)
@@ -118,17 +131,11 @@ def export_pdf(title: str, fallback: str, files: list[tuple[Path, bool]]) -> tup
                 imgs.append(im.convert("RGB"))
         except Exception:
             continue
-    if not imgs:
-        raise ValueError("没有可导出的图片")
-    try:
-        imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)
-    finally:
-        for im in imgs:
-            im.close()
+    save_images_pdf(imgs, ppath)
     return str(ppath), fname
 
 
 __all__ = [
     "cleanup_message_media", "is_video_url", "media_path_from_url", "save_data_uri_images",
-    "export_dir", "safe_file_base", "export_zip", "export_pdf",
+    "export_dir", "safe_file_base", "save_images_pdf", "export_zip", "export_pdf",
 ]

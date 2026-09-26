@@ -4,12 +4,11 @@
 本模块不含任何类型特有逻辑。
 """
 import json
-from pathlib import Path
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
-from config import data_dir
+from config import MEDIA_DIR, media_url as _media_url
 from i18n import L, lang_of
 from models import Project
 from config_store import ConfigStore
@@ -17,7 +16,6 @@ from services.drawthings import MAX_VIDEO_SECONDS, norm_ref_flag
 from services.pipeline import hex_to_rgb
 from services.runtime import pipeline
 
-MEDIA_DIR = Path(data_dir) / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -39,17 +37,7 @@ async def _json_body(request: Request) -> dict:
 
 
 # ---------------- 媒体 URL / 序列化 ----------------
-def _media_url(media_path: str) -> str:
-    if not media_path:
-        return ""
-    name = Path(media_path).name
-    # 附带文件修改时间作为缓存破坏参数：文件被重新生成（覆盖同名文件）后 URL 变化，
-    # 强制浏览器重新拉取，避免命中旧缓存（如封面重新生成不刷新）。
-    try:
-        mtime = (MEDIA_DIR / name).stat().st_mtime_ns
-        return f"/media/{name}?v={mtime}"
-    except OSError:
-        return f"/media/{name}"
+# _media_url 现由 config.media_url 提供（api_common 顶部已重导出，兼容既有 `_media_url` 引用）。
 
 
 def _chapter_view(ch) -> dict:

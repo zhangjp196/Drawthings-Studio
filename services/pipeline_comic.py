@@ -49,6 +49,7 @@ from .agent import (
 )
 from .drawthings import extract_last_frame
 from .capabilities import dt_client, ref_image_enabled
+from .media_files import save_images_pdf
 from .pipeline_common import (
     MAX_SCORE_REDO,
     _cjk_font_path,
@@ -1559,11 +1560,7 @@ class ComicPipeline:
             base = f"{base}_S{season.number}"
         fname = f"{base}.pdf"
         ppath = export_dir / fname
-        try:
-            imgs[0].save(ppath, save_all=True, append_images=imgs[1:], resolution=96.0)
-        finally:
-            for im in imgs:
-                im.close()
+        save_images_pdf(imgs, ppath)  # 通用原语：图片列表 → 多页 PDF（业务侧只组织图与文件名）
         return str(ppath), fname
 
 
