@@ -754,6 +754,8 @@ class ComicPipeline:
         system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterCount)
         lo, hi = count_range(count_min, count_max)
+        if lo == hi:
+            return lo                             # 固定值（min=max）：无需 LLM 挑选
         cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
@@ -786,14 +788,21 @@ class ComicPipeline:
 
     async def step_chapters_stream(self, db, project: Project, season: Season, lang: str = "zh",
                                     count_min: int = 0, count_max: int = 0, indices: list[int] | None = None,
-                                    progress_cb=None, chapter_done_cb=None) -> Project:
-        """「章节规划」逐章版（章节数量：仅范围 min~max）：
-        - indices 省略/为空 = 全季重规划：清空该季已有章节/媒体，先定总章数 N，再逐章规划第 1..N 章；
-        - indices 非空 = 多选重规划：只重写选中章节的「标题 + 主题摘要」，其余章节与已生成媒体保持不变，可反复多次批量。
+                                    mode: str = "replan", progress_cb=None, chapter_done_cb=None) -> Project:
+        """「章节规划」逐章版（章节数量：固定值，count_min=count_max=N）：
+        - mode='replan'（默认，重做）：indices 省略/空 = 全季重规划（清空该季已有章节/媒体后逐章规划 1..N）；
+          indices 非空 = 多选重规划：只重写选中章节的「标题 + 主题摘要」，其余章节与已生成媒体保持不变；
+        - mode='append'（新增）：保留已有章节与其媒体，在现有章节末尾之后续规划 N 章（承接前序剧情）。
         status → chaptered。progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后。"""
-        season.count_mode = "range"              # 仅范围模式
+        season.count_mode = "range"              # 仅范围模式（固定值即 min=max）
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
+        if mode == "append":
+            await self._append_chapters(db, project, season, lang, model, season.count_max,
+                                        progress_cb, chapter_done_cb)
+            project.status = "chaptered"
+            self._save(db, project)
+            return project
         targets = sorted({int(i) for i in (indices or [])})
         if targets:
             await self._replan_selected(db, project, season, lang, targets, model, progress_cb, chapter_done_cb)
@@ -848,6 +857,30 @@ class ComicPipeline:
             db.refresh(ch)
             if chapter_done_cb:
                 await chapter_done_cb(ch)
+
+    async def _append_chapters(self, db, project: Project, season: Season, lang: str, model,
+                                count: int, progress_cb, chapter_done_cb) -> None:
+        """新增章节：保留现有章节与其媒体，在现有章节末尾之后续规划 count 章（每章承接前序剧情）。"""
+        chapters = self._season_chapters(db, project, season)
+        existing = len(chapters)
+        base = self._season_base_index(db, project, season)
+        prior: list[tuple[str, str]] = [(c.title, c.summary) for c in chapters]
+        for k in range(1, count + 1):
+            if progress_cb:
+                await progress_cb(k, count, f"第{existing + k}章")
+            title, summary = await self._plan_one_chapter(db, project, season, lang,
+                                                           existing + k, existing + count,
+                                                           prior, model=model)
+            prior.append((title, summary))
+            ch = Chapter(project_id=project.id, season_id=season.id,
+                         index=base + existing + k - 1, title=title, summary=summary)
+            db.add(ch)
+            db.commit()
+            db.refresh(ch)
+            if chapter_done_cb:
+                await chapter_done_cb(ch)
+        # 章号可能与后续季旧序号冲突，末尾统一重排扁平序号（同 _replan_season）
+        self._reindex_flat(db, project)
 
     def _load_chapters(self, db, project: Project) -> list[Chapter]:
         return (db.query(Chapter)

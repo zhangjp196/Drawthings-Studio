@@ -1590,8 +1590,9 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
 @app.post("/api/projects/{project_id}/action-stream")
 async def project_action_stream(request: Request, project_id: str, db: Session = Depends(get_db)):
     """逐章推进的 SSE 进度流：body 传 { step:'generate', season_id, indices:[...] }（省略/空=全部）
-    或 { step:'chapters', season_id, count_min, count_max, indices:[...] }（逐章规划：indices 省略/空=全季重规划，
-    非空=只重规划选中的章节）。
+    或 { step:'chapters', season_id, count_min, count_max, indices:[...], mode }（逐章规划，数量固定值：
+    mode=replan（默认，重做）indices 省略/空=全季重规划、非空=只重规划选中的章节；
+    mode=append（新增）在现有章节之后新增 count 章，保留已有章节与媒体）。
     事件：progress(i/total+标题) / chapter(单章完成) / done(附新状态) / error(失败)。"""
     lang = _lang(request)
     body = await _json_body(request)
@@ -1656,6 +1657,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                     count_min=int(body.get("count_min") or 0),
                     count_max=int(body.get("count_max") or 0),
                     indices=indices,
+                    mode=str(body.get("mode") or "replan"),  # replan=重做 / append=新增
                     progress_cb=progress_cb, chapter_done_cb=plan_cb)
             elif step == "score":
                 # VLM 批量评分：逐章评分（季内），单章失败不阻塞后续章节（error 阶段事件单独提示）

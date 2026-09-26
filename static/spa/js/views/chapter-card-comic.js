@@ -68,7 +68,6 @@ Views.chapterCardComic = {
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chResolution') }}</span>
             <span>{{ defW }}×{{ defH }}</span>
-            <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.planResHint') }}</span>
           </div>
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chScore') }}</span>

@@ -296,9 +296,7 @@ Views.projectDrama = {
                 <template #reference><el-button size="small" :loading="busySave" :disabled="locked">{{ I18N.t('p.planSave') }}</el-button></template>
               </el-popconfirm>
               <span class="ch-tb-sep"></span>
-              <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}（{{ I18N.t('p.planResHint') }}）</span>
-              <span class="ch-tb-sep"></span>
-              <el-button size="small" :disabled="locked" @click="addChapter">{{ I18N.t('p.addChapter') }}</el-button>
+              <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}</span>
               <span class="muted small" v-if="actBusy || busySave">{{ progress.text || I18N.t('p.busy') }}</span>
             </div>
             <div class="ch-tb-row">
@@ -469,15 +467,20 @@ Views.projectDrama = {
         </template>
       </el-dialog>
 
-      <!-- 章节规划：章节数量（范围）仅在此弹框内显示/设置 -->
+      <!-- 章节规划（与新增章节融合）：章节数量固定值 + 方式（新增/重做），仅在此弹框内显示 -->
       <el-dialog v-model="planDlg" :title="planDlgTitle" width="480px">
         <el-form label-position="top">
           <el-form-item :label="I18N.t('p.countMode')">
-            <el-input-number v-model="cMin" :min="1" :max="99" size="small" style="width:96px" />
-            <span class="muted small"> ~ </span>
-            <el-input-number v-model="cMax" :min="1" :max="99" size="small" style="width:96px" />
+            <el-input-number v-model="planCount" :min="1" :max="99" size="small" style="width:96px" />
+          </el-form-item>
+          <el-form-item :label="I18N.t('p.planMode')">
+            <el-radio-group v-model="planMode">
+              <el-radio value="append">{{ I18N.t('p.planModeAppend') }}</el-radio>
+              <el-radio value="replan">{{ I18N.t('p.planModeRedo') }}</el-radio>
+            </el-radio-group>
           </el-form-item>
         </el-form>
+        <p class="hint">{{ planModeHint }}</p>
         <template #footer>
           <el-button @click="planDlg = false">{{ I18N.t('common.cancel') }}</el-button>
           <el-button type="primary" :loading="actBusy" @click="confirmPlan">{{ I18N.t('p.planStart') }}</el-button>
@@ -709,13 +712,18 @@ Views.projectDrama = {
       applyRes();
     }
     function onResChange() { applyRes(); }
-    // 章节数量（仅范围 min~max；0/未设置时后端回退默认 6~12）
-    const cMin = ref(6);
-    const cMax = ref(12);
-    // 章节规划弹框：章节数量（范围）仅在此弹框内显示
+    // 章节数量（固定值）与规划方式（新增/重做）
+    const planCount = ref(12);                      // 章节数量（固定值）
+    const planMode = ref('append');                 // 新增（现有章节之后新增）/ 重做（清空全部重规划 / 重写所选）
+    // 章节规划弹框（与新增章节融合）：章节数量固定值 + 方式仅在此弹框内显示
     const planDlg = ref(false);
     const planDlgTitle = computed(() =>
       selected.value.length ? I18N.t('p.planSel', selected.value.length) : I18N.t('p.planChapters'));
+    const planModeHint = computed(() => {
+      if (planMode.value === 'append') return I18N.t('p.planAppendHint', planCount.value);
+      if (selected.value.length) return I18N.t('p.planSelConfirm', selected.value.length);
+      return I18N.t('p.planRedoHint', planCount.value);
+    });
     function openPlanDlg() { planDlg.value = true; }
     function confirmPlan() { planDlg.value = false; planChapters(); }
 
@@ -902,15 +910,15 @@ Views.projectDrama = {
         seasonArcText.value = '';
         seasonTitleText.value = '';
         seasonChars.value = [];
-        cMin.value = 6;
-        cMax.value = 12;
+        planCount.value = 12;
+        planMode.value = 'append';
         return;
       }
       seasonArcText.value = s.arc || '';
       seasonTitleText.value = s.title || '';
       seasonChars.value = (s.characters || []).map(c => ({ id: c.id || '', name: c.name || '', description: c.description || '' }));
-      cMin.value = s.count_min || 6;
-      cMax.value = s.count_max || 12;
+      planCount.value = s.count_max || 12;   // 固定值：读已存的 count_max（min=max）
+      planMode.value = 'append';
     }
     function addSeasonChar() {
       seasonChars.value.push({ id: '', name: '', description: '' });
@@ -1123,11 +1131,12 @@ Views.projectDrama = {
         ElementPlus.ElMessage.warning(I18N.t('p.planNeedArc'));
         return;
       }
-      // 勾选章节 = 只重规划选中的章节（保留其余章节与已生成画面）；未勾选 = 全季重规划
+      // mode=append（新增）：不清空，现有章节之后续加；replan（重做）：未勾选=全季重规划，勾选=仅重写勾选
       const sel = selected.value.slice().sort((a, b) => a - b);
       const subset = sel.length > 0;
+      const isAppend = planMode.value === 'append';
       actBusy.value = true; progress.text = '';
-      if (!subset) {
+      if (!isAppend && !subset) {
         data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
         cur.value = 0;
       }
@@ -1136,9 +1145,10 @@ Views.projectDrama = {
         await API.sse(`/api/projects/${props.id}/action-stream`, {
           step: 'chapters',
           season_id: seasonId.value,
-          count_min: cMin.value,
-          count_max: cMax.value,
-          ...(subset ? { indices: sel } : {}),
+          count_min: planCount.value,
+          count_max: planCount.value,
+          mode: isAppend ? 'append' : 'replan',
+          ...(isAppend ? {} : (subset ? { indices: sel } : {})),
         }, (ev, d) => {
           if (ev === 'progress') progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
           else if (ev === 'chapter') applyChapterPlan(d);
@@ -1230,8 +1240,8 @@ Views.projectDrama = {
         try {
           await API.patch(`/api/projects/${props.id}/seasons/${seasonId.value}`, {
             count_mode: 'range',
-            count_min: cMin.value,
-            count_max: cMax.value,
+            count_min: planCount.value,
+            count_max: planCount.value,
             chapters: seasonChapters.value.map(c => ({ title: c.title, summary: c.summary })),
           });
           ElementPlus.ElMessage.success(I18N.t('p.planSaved'));
@@ -1350,13 +1360,6 @@ Views.projectDrama = {
     function exportZip() { return exportMedia('zip'); }
     function exportPdf() { return exportMedia('pdf'); }
 
-    async function addChapter() {
-      if (!seasonId.value) return;
-      try {
-        await API.post(`/api/projects/${props.id}/chapters`, { season_id: seasonId.value });
-        await load();
-      } catch (e) { ElementPlus.ElMessage.error(e.message); }
-    }
     async function delChapter(i) {
       if (!seasonId.value) return;
       try {
@@ -1451,11 +1454,11 @@ Views.projectDrama = {
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
-      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, cMin, cMax, planDlg, planDlgTitle, openPlanDlg, confirmPlan,
+      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan,
       cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
-      exportZip, exportPdf, addChapter, delChapter, onChapterReloaded,
+      exportZip, exportPdf, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
     };
   },
