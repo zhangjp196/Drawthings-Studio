@@ -7,66 +7,74 @@ Views.createForm = {
   emits: ['created'],
   template: `
     <el-form label-position="top">
-      <el-form-item :label="I18N.t('cf.type')">
-        <el-radio-group v-model="f.kind" @change="f.dt = ''">
-          <el-radio value="comic">{{ I18N.t('cf.comic') }}</el-radio>
-          <el-radio value="drama">{{ I18N.t('cf.drama') }}</el-radio>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item :label="I18N.t('cf.llm')" required>
-        <el-select v-model="f.llm" :placeholder="I18N.t('cf.llmPh')" style="width: 100%">
-          <el-option v-for="c in llms" :key="c.id" :value="c.id"
-                     :label="c.name + '（' + c.model + '）'" />
-          <el-option v-if="!llms.length" value="" :label="I18N.t('cf.llmNone')" />
-        </el-select>
-        <div class="hint">{{ I18N.t('cf.llmHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newLlm') }}</el-link></div>
-      </el-form-item>
-      <el-form-item :label="I18N.t('cf.dt')" required>
-        <el-select v-model="f.dt" :placeholder="I18N.t('cf.dtPh')" style="width: 100%">
-          <el-option v-for="c in dts" :key="c.id" :value="c.id" :label="c.name" />
-          <el-option v-if="!dts.length" value="" :label="I18N.t('cf.dtNone')" />
-        </el-select>
-        <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newCfg') }}</el-link></div>
-      </el-form-item>
-      <el-row :gutter="12" v-if="f.dt">
-        <el-col :span="12">
-          <el-form-item :label="I18N.t('cf.dtModelImage')">
-            <el-select v-model="f.dt_model_i" filterable allow-create clearable style="width: 100%"
-                       :placeholder="I18N.t('cf.dtModelPh')">
-              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-              <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
+      <el-row :gutter="24">
+        <el-col :span="10">
+          <!-- 左：配置（类型 / LLM / DrawThings / 模型 / 参考图） -->
+          <el-form-item :label="I18N.t('cf.type')">
+            <el-radio-group v-model="f.kind" @change="f.dt = ''">
+              <el-radio value="comic">{{ I18N.t('cf.comic') }}</el-radio>
+              <el-radio value="drama">{{ I18N.t('cf.drama') }}</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item :label="I18N.t('cf.llm')" required>
+            <el-select v-model="f.llm" :placeholder="I18N.t('cf.llmPh')" style="width: 100%">
+              <el-option v-for="c in llms" :key="c.id" :value="c.id"
+                         :label="c.name + '（' + c.model + '）'" />
+              <el-option v-if="!llms.length" value="" :label="I18N.t('cf.llmNone')" />
             </el-select>
-            <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
+            <div class="hint">{{ I18N.t('cf.llmHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newLlm') }}</el-link></div>
+          </el-form-item>
+          <el-form-item :label="I18N.t('cf.dt')" required>
+            <el-select v-model="f.dt" :placeholder="I18N.t('cf.dtPh')" style="width: 100%">
+              <el-option v-for="c in dts" :key="c.id" :value="c.id" :label="c.name" />
+              <el-option v-if="!dts.length" value="" :label="I18N.t('cf.dtNone')" />
+            </el-select>
+            <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newCfg') }}</el-link></div>
+          </el-form-item>
+          <el-row :gutter="12" v-if="f.dt">
+            <el-col :span="12">
+              <el-form-item :label="I18N.t('cf.dtModelImage')">
+                <el-select v-model="f.dt_model_i" filterable allow-create clearable style="width: 100%"
+                           :placeholder="I18N.t('cf.dtModelPh')">
+                  <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+                  <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
+                </el-select>
+                <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
+              </el-form-item>
+            </el-col>
+            <el-col v-if="f.kind === 'drama'" :span="12">
+              <el-form-item :label="I18N.t('cf.dtModelVideo')">
+                <el-select v-model="f.dt_model_v" filterable allow-create clearable style="width: 100%"
+                           :placeholder="I18N.t('cf.dtModelPh')">
+                  <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+                  <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item v-if="f.dt" :label="I18N.t('cf.dtRef')">
+            <el-checkbox v-model="f.dt_ref">{{ I18N.t(f.kind === 'comic' ? 'cfg.refImage' : 'cfg.refVideo') }}</el-checkbox>
+            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
         </el-col>
-        <el-col v-if="f.kind === 'drama'" :span="12">
-          <el-form-item :label="I18N.t('cf.dtModelVideo')">
-            <el-select v-model="f.dt_model_v" filterable allow-create clearable style="width: 100%"
-                       :placeholder="I18N.t('cf.dtModelPh')">
-              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-              <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
+        <el-col :span="14">
+          <!-- 右：创作内容（标题 / 主题 / 风格） -->
+          <el-form-item :label="I18N.t('cf.title')">
+            <el-input v-model="f.title" maxlength="100" :placeholder="I18N.t('cf.titlePh')" />
+          </el-form-item>
+          <el-form-item :label="I18N.t('cf.origin')" required>
+            <el-input v-model="f.origin" type="textarea" :rows="5" :placeholder="I18N.t('cf.originPh')" />
+          </el-form-item>
+          <el-form-item :label="I18N.t('cf.style')">
+            <el-select v-model="f.style" style="width: 100%">
+              <el-option value="" :label="I18N.t('cf.styleAuto')" />
+              <el-option v-for="(s, i) in presets" :key="s" :value="s" :label="s" />
+              <el-option value="custom" :label="I18N.t('cf.styleCustom')" />
             </el-select>
+            <el-input v-if="f.style === 'custom'" v-model="f.styleCustom" class="mt8" :placeholder="I18N.t('cf.styleCustomPh')" />
           </el-form-item>
         </el-col>
       </el-row>
-      <el-form-item v-if="f.dt" :label="I18N.t('cf.dtRef')">
-        <el-checkbox v-model="f.dt_ref">{{ I18N.t(f.kind === 'comic' ? 'cfg.refImage' : 'cfg.refVideo') }}</el-checkbox>
-        <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
-      </el-form-item>
-      <el-form-item :label="I18N.t('cf.title')">
-        <el-input v-model="f.title" maxlength="100" :placeholder="I18N.t('cf.titlePh')" />
-      </el-form-item>
-      <el-form-item :label="I18N.t('cf.origin')" required>
-        <el-input v-model="f.origin" type="textarea" :rows="3" :placeholder="I18N.t('cf.originPh')" />
-      </el-form-item>
-      <el-form-item :label="I18N.t('cf.style')">
-        <el-select v-model="f.style" style="width: 100%">
-          <el-option value="" :label="I18N.t('cf.styleAuto')" />
-          <el-option v-for="(s, i) in presets" :key="s" :value="s" :label="s" />
-          <el-option value="custom" :label="I18N.t('cf.styleCustom')" />
-        </el-select>
-        <el-input v-if="f.style === 'custom'" v-model="f.styleCustom" class="mt8" :placeholder="I18N.t('cf.styleCustomPh')" />
-      </el-form-item>
       <el-button type="primary" :loading="saving" @click="submit">{{ I18N.t('cf.start') }}</el-button>
     </el-form>
   `,

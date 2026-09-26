@@ -67,7 +67,7 @@ Views.projects = {
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
                      :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
-      <el-dialog v-model="newDlg" :title="I18N.t('proj.newDlg')" width="580px">
+      <el-dialog v-model="newDlg" :title="I18N.t('proj.newDlg')" width="880px">
         <create-form :preset="newPreset" @created="created" />
       </el-dialog>
 

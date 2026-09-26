@@ -4,7 +4,7 @@ Views.newProject = {
   template: `
     <div class="page">
       <h1 style="margin: 0 0 14px; font-size: 22px;">{{ I18N.t('new.title') }}</h1>
-      <el-card shadow="never" style="max-width: 720px;">
+      <el-card shadow="never" style="max-width: 960px;">
         <create-form @created="go" />
       </el-card>
     </div>
