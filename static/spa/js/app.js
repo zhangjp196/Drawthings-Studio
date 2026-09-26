@@ -112,6 +112,26 @@
     },
   };
 
+  // 全局错误兜底：任何未捕获的渲染/异步错误都记录并（去重后）提示用户，
+  // 避免出现「界面突然不动/空白但毫无反馈」的静默失败。
+  const _errSeen = new Map();
+  function reportError(err, where) {
+    try { console.error('[Drawthings Studio]', where, err); } catch (e) { /* ignore */ }
+    try {
+      const msg = String((err && (err.message || err)) || 'unknown error').slice(0, 300);
+      const now = Date.now();
+      if (now - (_errSeen.get(msg) || 0) < 4000) return;  // 同类错误 4s 内只提示一次
+      _errSeen.set(msg, now);
+      if (_errSeen.size > 200) _errSeen.clear();          // 防无限增长
+      if (window.ElementPlus && ElementPlus.ElMessage) ElementPlus.ElMessage.error(msg);
+    } catch (e) { /* 提示本身失败不影响应用 */ }
+  }
+  window.addEventListener('unhandledrejection', (e) => reportError(e && e.reason, 'promise'));
+  window.addEventListener('error', (e) => {
+    // 仅处理脚本运行时错误；资源加载失败（img/script）不打扰用户
+    if (e && e.error) reportError(e.error, 'window');
+  });
+
   let app = null;
   function mount() {
     app = Vue.createApp(root);
@@ -124,7 +144,7 @@
       app.component(name, comp);
     }
     app.use(router);
-    app.config.errorHandler = (err) => { console.error('[Drawthings Studio]', err); };
+    app.config.errorHandler = (err) => { reportError(err, 'vue'); };
     app.mount('#app');
   }
   mount();

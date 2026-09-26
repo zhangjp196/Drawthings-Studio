@@ -51,10 +51,13 @@ Base = declarative_base()
 
 
 def get_db():
-    """FastAPI 依赖：为每个请求提供一个数据库会话，请求结束后关闭。"""
+    """FastAPI 依赖：为每个请求提供一个数据库会话；处理中途异常时回滚，结束后关闭。"""
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()  # 未提交事务回滚，避免异常后残留未完成事务影响后续请求
+        raise
     finally:
         db.close()
 

@@ -102,7 +102,7 @@ Views.microWork = {
           <div class="mc-sess-list">
             <div v-for="s in data.sessions" :key="s.id" class="mc-sess" :class="{ active: s.id === sid }" @click="pick(s.id)">
               <div class="ms-title">{{ s.title || I18N.t('mw.newSession') }}</div>
-              <div class="ms-meta muted">{{ s.created_at.slice(0, 10) }} · {{ I18N.t('mw.msgs', s.msg_count) }}</div>
+              <div class="ms-meta muted">{{ (s.created_at || '').slice(0, 10) }} · {{ I18N.t('mw.msgs', s.msg_count) }}</div>
               <div class="ms-actions">
                 <el-button size="small" text :icon="EditPen" @click.stop="askRename(s)">{{ I18N.t('mw.rename') }}</el-button>
                 <el-popconfirm :title="I18N.t('mw.delSessConfirm')" @confirm="delSess(s)">
@@ -199,7 +199,7 @@ Views.microWork = {
                   <el-checkbox class="wp-check" :model-value="isWSel(w.id)" @click.stop @change="toggleWSel(w.id)"></el-checkbox>
                 </div>
                 <div class="wp-cap" v-if="w.prompt || w.content">{{ w.prompt || w.content }}</div>
-                <div class="wp-src muted">{{ (w.session_title || I18N.t('mw.newSession')) }} · {{ w.created_at.slice(0, 10) }}</div>
+                <div class="wp-src muted">{{ (w.session_title || I18N.t('mw.newSession')) }} · {{ (w.created_at || '').slice(0, 10) }}</div>
                 <div class="wp-actions">
                   <el-button size="small" text :disabled="exporting" @click="exportWorks([w.id], 'zip')">{{ I18N.t('mw.exportZip') }}</el-button>
                   <el-button v-if="sec.kind === 'image'" size="small" text :disabled="exporting" @click="exportWorks([w.id], 'pdf')">{{ I18N.t('mw.exportPdf') }}</el-button>

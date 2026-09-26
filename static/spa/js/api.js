@@ -55,7 +55,18 @@ window.API = {
     return ct.includes('application/json') ? r.json() : null;
   },
 
-  get: (u, timeout) => API.req('GET', u, undefined, false, timeout),
+  get: async (u, timeout) => {
+    try {
+      return await API.req('GET', u, undefined, false, timeout);
+    } catch (e) {
+      // 冗余：GET 幂等，仅对网络/超时类失败（无 HTTP 状态）自动重试一次，缓解瞬时抖动
+      if (e && !e.status) {
+        await new Promise((r) => setTimeout(r, 400));
+        return await API.req('GET', u, undefined, false, timeout);
+      }
+      throw e;
+    }
+  },
   post: (u, body, timeout) => API.req('POST', u, body, false, timeout),
   put: (u, body, timeout) => API.req('PUT', u, body, false, timeout),
   patch: (u, body, timeout) => API.req('PATCH', u, body, false, timeout),

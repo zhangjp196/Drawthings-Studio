@@ -48,7 +48,7 @@ Views.micro = {
               <img v-else :src="u" class="wc-prev-item" loading="lazy" decoding="async" alt="">
             </template>
           </div>
-          <div class="wc-meta muted">{{ I18N.t('mc.sessions', w.session_count) }} · {{ w.updated_at.slice(0, 10) }}</div>
+          <div class="wc-meta muted">{{ I18N.t('mc.sessions', w.session_count) }} · {{ (w.updated_at || '').slice(0, 10) }}</div>
           <div class="wc-actions">
             <el-button size="small" type="primary" plain @click="enter(w)">{{ I18N.t('mc.enter') }}</el-button>
             <el-popconfirm :title="I18N.t('mc.delConfirm')" @confirm="del(w)">

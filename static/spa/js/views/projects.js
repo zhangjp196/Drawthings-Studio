@@ -51,7 +51,7 @@ Views.projects = {
               <el-tag size="small" :type="statusTag(row.status)" effect="light">{{ statusLabels[row.status] || row.status }}</el-tag>
             </div>
             <div class="pc-title">{{ row.title || row.origin }}</div>
-            <div class="pc-meta muted">{{ row.chapter_count }} · {{ row.updated_at.slice(0, 10) }}</div>
+            <div class="pc-meta muted">{{ row.chapter_count }} · {{ (row.updated_at || '').slice(0, 10) }}</div>
             <div class="pc-actions" @click.stop>
               <el-button size="small" @click="askRename(row)">{{ I18N.t('proj.rename') }}</el-button>
               <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del(row)">
