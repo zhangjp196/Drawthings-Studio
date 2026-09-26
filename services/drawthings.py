@@ -9,6 +9,8 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
   （可只填其一 = 只支持该类型）。
 - 参考图（图生图 / 图生视频）需在配置里**勾选「支持参考图片」**（ref_image / ref_video）：
   勾选后把上一章媒体作为 init_image 传入；未勾选一律文生图 / 文生视频（参考图被忽略）。
+- 崩溃自愈：生成中 app 闪退 / 断连（Draw Things 图生图已知缺陷，社区 issue #121）时，自动等待 app
+  重启（每轮上限 2 分钟）并自动重试生成（最多 2 轮），无法恢复才报错；等待过程经 on_status 回调上报。
 - 模型清单可从 app 读取（`get_models`，需 refresh_cache），生成前会校验模型已下载。
 
 图像分辨率：调用方 params > 预设，受 max_side（最长边）限幅。
@@ -24,6 +26,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -34,9 +37,12 @@ logger = logging.getLogger("drawthings")
 DEFAULT_GRPC_PORT = 7859
 
 # Draw Things 已知缺陷：图生图（带 init_image）时 app 可能闪退（官方社区 issue #121，未修复）。
-# 连接中断后自动等待用户重启 app（端口恢复），再自动重试一次生成。
-RECOVERY_POLL = 3.0        # 秒：等待恢复期间的端口探测间隔
-RECOVERY_TIMEOUT = 120.0   # 秒：等待 app 恢复的最长时间
+# 连接中断后自动等待用户重启 app（端口恢复，每轮上限 RECOVERY_TIMEOUT 秒），再自动重试生成
+# （最多 MAX_RECOVERY_RETRIES 轮）；始终未恢复 / 重试仍失败才报错。
+RECOVERY_POLL = 3.0           # 秒：等待恢复期间的端口探测间隔
+RECOVERY_TIMEOUT = 120.0      # 秒：单轮等待 app 恢复的最长时间
+MAX_RECOVERY_RETRIES = 2      # 断连后自动重试的轮数（含首次共最多 3 次生成尝试）
+RECOVERY_SETTLE = 3.0         # 秒：端口恢复后先等 app 稳定，再发起重试
 
 
 def _looks_disconnected(e: Exception) -> bool:
@@ -314,6 +320,8 @@ class DrawThingsClient:
         self.ref_video = bool(getattr(cfg, "ref_video", 0))   # 视频模型支持参考图片（图生视频）
         self.media_dir = Path(data_dir) / "media"
         self.media_dir.mkdir(parents=True, exist_ok=True)
+        # 生成过程中的状态回调（如「正在等待 Draw Things 恢复…」）；调用方按需要设置，可为 None
+        self.on_status: Callable[[str], None] | None = None
 
     # ---------------- 能力 ----------------
     def supports_image(self) -> bool:
@@ -426,12 +434,27 @@ class DrawThingsClient:
         except Exception:
             return False
 
+    def _report(self, msg: str) -> None:
+        """生成状态回调（吞掉回调自身异常，不影响生成流程）。"""
+        if self.on_status:
+            try:
+                self.on_status(msg)
+            except Exception:
+                pass
+
     async def _wait_recovery(self) -> bool:
-        """app 断连后等待用户重启 DrawThings（端口恢复）。True=已恢复，False=超时。"""
-        deadline = time.monotonic() + RECOVERY_TIMEOUT
+        """app 断连后等待用户重启 DrawThings（端口恢复）。True=已恢复，False=超时。
+        等待期间通过 on_status 定时上报进度（界面可展示「正在等待 Draw Things 恢复…」）。"""
+        t0 = time.monotonic()
+        deadline = t0 + RECOVERY_TIMEOUT
+        last_report = 0.0
         while time.monotonic() < deadline:
             if await self._port_open():
                 return True
+            now = time.monotonic()
+            if now - last_report >= 10:
+                last_report = now
+                self._report(f"正在等待 Draw Things 恢复…（已等待 {int(now - t0)}s / 上限 {RECOVERY_TIMEOUT:.0f}s）")
             await asyncio.sleep(RECOVERY_POLL)
         return False
 
@@ -544,23 +567,40 @@ class DrawThingsClient:
                     f"且模型「{model}」确实存在。"
                     f" / Draw Things gRPC generation failed: {e}")
             # 连接中断 / app 已掉线：Draw Things 图生图闪退的已知缺陷（社区 issue #121）
-            # → 等待用户重启 app，再自动重试一次
-            logger.warning("DrawThings 连接中断（app 可能已闪退），等待恢复：%s", e)
-            if not await self._wait_recovery():
+            # → 等待用户重启 app，自动重试生成（最多 MAX_RECOVERY_RETRIES 轮）
+            last = e
+            for retry in range(1, MAX_RECOVERY_RETRIES + 1):
+                logger.warning("DrawThings 连接中断（app 可能已闪退），等待恢复（第 %d/%d 轮重试）：%s",
+                                retry, MAX_RECOVERY_RETRIES, e)
+                self._report(f"与 Draw Things 的连接中断（app 可能已闪退），正在等待 app 重启后自动重试…（第 {retry}/{MAX_RECOVERY_RETRIES} 轮）")
+                if not await self._wait_recovery():
+                    raise RuntimeError(
+                        f"与 Draw Things 应用的连接中断（app 可能已闪退），等待 {RECOVERY_TIMEOUT:.0f} 秒后仍未恢复。"
+                        "请重启 Draw Things 后重试本次生成。"
+                        f" / Draw Things connection was interrupted (the app may have crashed); "
+                        f"it did not recover within {RECOVERY_TIMEOUT:.0f}s. Please restart Draw Things and retry.")
+                logger.info("DrawThings 已恢复，自动重试生成（第 %d/%d 轮）", retry, MAX_RECOVERY_RETRIES)
+                self._report(f"Draw Things 已恢复，自动重试生成（第 {retry}/{MAX_RECOVERY_RETRIES} 轮）")
+                await asyncio.sleep(RECOVERY_SETTLE)  # 刚重启的 app 先稳定几秒
+                try:
+                    result = await _attempt()
+                    break
+                except Exception as e2:
+                    last = e2
+                    if not (_looks_disconnected(e2) or not await self._port_open()):
+                        # 不是断连：普通生成错误，立即抛出（不再等待）
+                        if isinstance(e2, RuntimeError):
+                            raise
+                        raise RuntimeError(
+                            f"Draw Things 生成失败（恢复后自动重试）：{e2}"
+                            f" / Draw Things generation failed (auto-retry after recovery): {e2}")
+            else:
+                # 每轮重试都再次闪退 / 失败：如实报错
+                if isinstance(last, RuntimeError):
+                    raise last
                 raise RuntimeError(
-                    f"与 Draw Things 应用的连接中断（app 可能已闪退），等待 {RECOVERY_TIMEOUT:.0f} 秒后仍未恢复。"
-                    "请重启 Draw Things 后重试本次生成。"
-                    f" / Draw Things connection was interrupted (the app may have crashed); "
-                    f"it did not recover within {RECOVERY_TIMEOUT:.0f}s. Please restart Draw Things and retry.")
-            logger.info("DrawThings 已恢复，自动重试生成")
-            try:
-                result = await _attempt()
-            except Exception as e2:
-                if isinstance(e2, RuntimeError):
-                    raise
-                raise RuntimeError(
-                    f"Draw Things 生成失败（恢复后自动重试）：{e2}"
-                    f" / Draw Things generation failed (auto-retry after recovery): {e2}")
+                    f"Draw Things 生成失败（恢复后自动重试 {MAX_RECOVERY_RETRIES} 轮仍失败）：{last}"
+                    f" / Draw Things generation failed (still failing after {MAX_RECOVERY_RETRIES} auto-retries): {last}")
 
         if video:
             out = self.media_dir / f"gen_{uuid.uuid4().hex[:8]}.mp4"

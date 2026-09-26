@@ -27,6 +27,7 @@ Views.microBlock = {
             {{ showPrompt ? I18N.t('mw.hidePrompt') : I18N.t('mw.prompt') }}
           </button>
           <div v-if="showPrompt && b.prompt" class="tool-prompt">{{ b.prompt }}</div>
+          <div v-if="b.status === 'running' && b.message" class="tool-note">{{ b.message }}</div>
           <div v-if="b.status === 'error' && b.message" class="tool-err">{{ b.message }}</div>
         </div>
         <div class="msg-media" v-if="b.status === 'ok' && b.url">
@@ -647,6 +648,11 @@ Views.microWork = {
       if (t) { t.status = 'error'; t.message = d.message || ''; }
       else stream.parts.push({ type: 'error', message: d.message || I18N.t('mw.genFail') });
     }
+    function onToolStatus(d) {
+      // 生成进行中状态（如「正在等待 Draw Things 恢复…」）：只更新文案，气泡保持 running
+      const t = d.id ? findTool(d.id) : null;
+      if (t && t.status === 'running') { t.message = d.message || ''; }
+    }
     function onError(d) {
       stream.parts.push({ type: 'error', message: d.message || I18N.t('mw.err') });
     }
@@ -689,6 +695,8 @@ Views.microWork = {
           } else if (ev === 'media') {
             onMedia(d);
             scrollBottom(false);
+          } else if (ev === 'tool_status') {
+            onToolStatus(d);
           } else if (ev === 'tool_error') {
             onToolError(d);
           } else if (ev === 'error') {

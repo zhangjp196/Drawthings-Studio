@@ -1197,6 +1197,10 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             params["seconds"] = int(seconds)
                         # 参考图：当前消息附图优先，回退会话内上次生成的媒体（用不用由客户端按「支持参考图片」勾选决定）
                         ref = img_paths[-1] if img_paths else last_media.get("path")
+                        # 生成状态实时透传（如「正在等待 Draw Things 恢复…」）→ 前端工具气泡
+                        _loop = asyncio.get_running_loop()
+                        dt.on_status = lambda msg: _loop.call_soon_threadsafe(
+                            out.put_nowait, ("tool_status", {"id": tid, "message": msg}))
                         try:
                             if kind == "image":
                                 path = await run_sync(partial(dt.generate_image, prompt,
@@ -1209,6 +1213,8 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             block["message"] = str(e)
                             await out.put(("tool_error", {"id": tid, "message": str(e), "prompt": prompt}))
                             return f"生成失败：{e}。请向用户说明原因并建议如何调整。"
+                        finally:
+                            dt.on_status = None
                         url = _media_url(path)
                         block["status"] = "ok"
                         block["url"] = url

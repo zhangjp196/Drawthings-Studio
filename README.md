@@ -134,7 +134,8 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   image-to-image / image-to-video. When checked, comics pass the previous image and dramas the last frame of the previous clip as
   `init_image`; unchecked = plain text-to-image / text-to-video (greyed out and zeroed when that model is empty).
   Known Draw Things bug: on some app versions, reference-image generation may crash the app — this app then detects the
-  disconnection, waits up to 2 minutes for the app to restart, and retries the generation once (community issue #121).
+  disconnection, waits up to 2 minutes per round for the app to restart, and retries the generation automatically
+  (up to twice; community issue #121).
   There is also a **hard 8-second cap** on a single video (frames = fps × 8).
 
 ## Directory structure

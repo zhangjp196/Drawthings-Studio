@@ -761,6 +761,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
   background: var(--code-bg); border-radius: 8px; padding: 8px 10px;
 }
 .tool-chip .tool-err { flex-basis: 100%; font-size: 12px; line-height: 1.6; word-break: break-word; }
+.tool-chip .tool-note { flex-basis: 100%; font-size: 12px; line-height: 1.6; word-break: break-word; opacity: .72; }
 
 /* 有序内容块（文本 / 生成 / 媒体 / 错误） */
 .msg.assistant .blk { margin-bottom: 8px; }
