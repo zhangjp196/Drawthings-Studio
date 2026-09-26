@@ -87,7 +87,7 @@ Views.micro = {
             <el-select v-model="f.mi" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-              <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
+              <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="f.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
           </el-form-item>
@@ -95,7 +95,7 @@ Views.micro = {
             <el-select v-model="f.mv" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-              <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
+              <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="f.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
             <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
@@ -121,11 +121,14 @@ Views.micro = {
     const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false });
     const tab = ref('works');  // 列表页 tab：作品集（默认）；预留后续扩展
 
-    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
+    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
-    const modelChoices = computed(() => dtModels.value
-      .filter(m => m.file)
-      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
+    const imgChoices = computed(() => dtModels.value
+      .filter(m => m.file && !m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
+    const vidChoices = computed(() => dtModels.value
+      .filter(m => m.file && m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
     async function fetchModels() {
       const c = dts.value.find(x => x.id === f.dt);
       if (!c || !c.base_url) { dtModels.value = []; return; }
@@ -222,7 +225,7 @@ Views.micro = {
 
     onMounted(load);
     return {
-      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab, modelChoices,
+      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab, imgChoices, vidChoices,
       load, apply, onSearch, reset, openNew, create, enter, isMediaVideo, del,
     };
   },

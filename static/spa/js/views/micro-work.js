@@ -238,7 +238,7 @@ Views.microWork = {
               <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
                          :placeholder="I18N.t('cf.dtModelPh')">
                 <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-                <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
+                <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
               </el-select>
               <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
             </el-form-item>
@@ -246,7 +246,7 @@ Views.microWork = {
               <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
                          :placeholder="I18N.t('cf.dtModelPh')">
                 <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-                <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
+                <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
               </el-select>
               <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
               <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
@@ -308,11 +308,14 @@ Views.microWork = {
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
     const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false });
-    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
+    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
-    const modelChoices = computed(() => dtModels.value
-      .filter(m => m.file)
-      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
+    const imgChoices = computed(() => dtModels.value
+      .filter(m => m.file && !m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
+    const vidChoices = computed(() => dtModels.value
+      .filter(m => m.file && m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
     async function fetchModels() {
       const c = (data.value && data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
       if (!c || !c.base_url) { dtModels.value = []; return; }
@@ -819,7 +822,7 @@ Views.microWork = {
     return {
       data, msgs, hasSession, sideHidden, setSide, tab,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgBusy, cfg, modelChoices, saveCfg, delWork,
+      cfgBusy, cfg, imgChoices, vidChoices, saveCfg, delWork,
       works, worksBusy, worksKind, selWorks, isWSel, toggleWSel, delWorks,
       sections, toggleAllKind, exportWorks, exporting,
       lb, openLb, input, attached, busy, status, drag, streaming, stream,
