@@ -112,7 +112,8 @@ Views.microWork = {
         </template>
       </el-dialog>
 
-      <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
+      <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx"
+                       :hide-on-click-modal="true" @close="lb.show = false" />
     </div>
     <div v-else class="page loading"><el-skeleton :rows="8" animated /></div>
   `,
@@ -188,10 +189,13 @@ Views.microWork = {
     // 图片放大（灯箱）：子组件 emit('preview', list, idx)
     const lb = reactive({ show: false, list: [], idx: 0 });
     function openLb(list, idx) {
-      lb.list = list;
-      lb.idx = idx;
+      const arr = Array.isArray(list) ? list.filter(Boolean) : (list ? [list] : []);
+      if (!arr.length) return;              // 无有效地址：不打开（避免空灯箱遮住界面）
+      lb.list = arr;
+      lb.idx = Math.min(Math.max(intOf(idx), 0), arr.length - 1);
       lb.show = true;
     }
+    function intOf(v) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; }
 
     // 持久化消息 -> 有序内容块（旧数据无 parts：文本在前、媒体在后，保持可读）
     function normalizeMsg(m) {
@@ -313,6 +317,7 @@ Views.microWork = {
 
     // 切换作品 / 会话：重新加载数据（消息流由 micro-chat 自身在 sid 变化时重置）
     watch(() => [props.id, props.sid], () => {
+      lb.show = false;  // 切换后关闭灯箱，避免残留遮罩盖住新会话
       load();
     });
     onMounted(load);

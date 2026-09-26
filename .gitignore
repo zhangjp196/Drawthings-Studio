@@ -11,3 +11,6 @@ build/
 *.dmg
 assets/icon_1024.png
 assets/Drawthings.icns
+
+# OpenChamber 浏览器面板产物（截图等）
+.openchamber/
