@@ -1,11 +1,11 @@
-// 封面卡片（项目详情页子组件）：预览 + 上传 + 提示词 +「作为第 1 章参考」开关
-// 提示词由父组件（project.js）持有，「生成封面」按钮在企划页顶部操作栏
+// 漫画项目页 —— 封面卡片（漫画专属，不与短剧共享）：预览 + 上传 + 提示词。
+// 「生成封面」按钮在企划页顶部操作栏（父组件持有提示词）。
 window.Views = window.Views || {};
-Views.firstImage = {
+
+Views.comicFirstImage = {
   props: {
     project: { type: Object, required: true },   // data.project
     projectId: { type: String, required: true },
-    kind: { type: String, default: 'comic' },    // comic | drama（决定调用的 API 命名空间）
     prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
     locked: { type: Boolean, default: false },   // 作品已完结（锁定）：操作只读
   },
@@ -52,7 +52,7 @@ Views.firstImage = {
       }
       const fd = new FormData();
       fd.append('file', file);
-      API.postForm(`/api/${props.kind}s/${props.projectId}/first-image`, fd)
+      API.postForm(`/api/comics/${props.projectId}/first-image`, fd)
         .then(() => { ElementPlus.ElMessage.success(I18N.t('p.msgFirstUploaded')); emit('reloaded'); })
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }

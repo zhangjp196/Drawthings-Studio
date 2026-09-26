@@ -1,0 +1,62 @@
+// 短剧项目页 —— 封面卡片（短剧专属，不与漫画共享）：预览 + 上传 + 提示词。
+// 「生成封面」按钮在企划页顶部操作栏（父组件持有提示词）。
+window.Views = window.Views || {};
+
+Views.dramaFirstImage = {
+  props: {
+    project: { type: Object, required: true },   // data.project
+    projectId: { type: String, required: true },
+    prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
+    locked: { type: Boolean, default: false },   // 作品已完结（锁定）：操作只读
+  },
+  emits: ['preview', 'reloaded', 'overlay', 'update:prompt'],
+  template: `
+    <el-card class="first-card" shadow="never">
+      <template #header>
+        <b>{{ I18N.t('p.first') }}</b>
+        <span class="muted small" style="margin-left: 8px;">{{ I18N.t('p.firstHint') }}</span>
+      </template>
+      <div class="first-row">
+        <div class="first-preview">
+          <img v-if="project.first_image_url" :src="project.first_image_url" :alt="I18N.t('p.first')"
+               loading="lazy" decoding="async" @click="$emit('preview', project.first_image_url)">
+          <el-empty v-else :description="I18N.t('p.noFirst')" :image-size="54" />
+        </div>
+        <div class="first-forms">
+          <div class="frow">
+            <span class="k">{{ I18N.t('p.upload') }}</span>
+            <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :disabled="locked" :on-change="onFile">
+              <el-button size="small" :disabled="locked">{{ I18N.t('p.uploadBtn') }}</el-button>
+            </el-upload>
+          </div>
+          <div class="frow">
+            <span class="k">{{ I18N.t('p.overlayTitleK') }}</span>
+            <el-button size="small" :disabled="locked || !project.first_image_url" @click="$emit('overlay')">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
+          </div>
+          <div class="frow">
+            <span class="k">{{ I18N.t('p.genPrompt') }}</span>
+            <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('p.genPromptPh')"
+                      @update:modelValue="(v) => $emit('update:prompt', v)" />
+          </div>
+        </div>
+      </div>
+    </el-card>
+  `,
+  setup(props, { emit }) {
+    function onFile(uploadFile) {
+      const file = uploadFile.raw;
+      if (!file) return;
+      if (!file.type || !file.type.startsWith('image/')) {
+        ElementPlus.ElMessage.warning(I18N.t('p.uploadWarn'));
+        return;
+      }
+      const fd = new FormData();
+      fd.append('file', file);
+      API.postForm(`/api/dramas/${props.projectId}/first-image`, fd)
+        .then(() => { ElementPlus.ElMessage.success(I18N.t('p.msgFirstUploaded')); emit('reloaded'); })
+        .catch(e => ElementPlus.ElMessage.error(e.message));
+    }
+
+    return { onFile };
+  },
+};

@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectDrama = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'plan-dialog': Views.dramaPlanDialog, 'cfg-dialog': Views.dramaCfgDialog, 'reset-dialog': Views.dramaResetDialog },
+  components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'plan-dialog': Views.dramaPlanDialog, 'cfg-dialog': Views.dramaCfgDialog, 'reset-dialog': Views.dramaResetDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -209,7 +209,7 @@ Views.projectDrama = {
                     <el-button type="primary" :loading="busyFirst" :disabled="locked" @click="openCoverGenDlg('project')">{{ I18N.t('p.genFirst') }}</el-button>
                     <span class="muted" v-if="busyFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
-                  <first-image :project="data.project" :project-id="data.project.id" :kind="'drama'" v-model:prompt="coverPrompt"
+                  <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt"
                                :locked="locked" @preview="openLb([$event], 0)" @reloaded="load"
                                @overlay="openOvlDlg('project')" />
                 </div>

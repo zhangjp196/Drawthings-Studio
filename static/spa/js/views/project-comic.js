@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'plan-dialog': Views.comicPlanDialog, 'cfg-dialog': Views.comicCfgDialog, 'reset-dialog': Views.comicResetDialog },
+  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'plan-dialog': Views.comicPlanDialog, 'cfg-dialog': Views.comicCfgDialog, 'reset-dialog': Views.comicResetDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -209,7 +209,7 @@ Views.projectComic = {
                     <el-button type="primary" :loading="busyFirst" :disabled="locked" @click="openCoverGenDlg('project')">{{ I18N.t('p.genFirst') }}</el-button>
                     <span class="muted" v-if="busyFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
-                  <first-image :project="data.project" :project-id="data.project.id" :kind="'comic'" v-model:prompt="coverPrompt"
+                  <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt"
                                :locked="locked" @preview="openLb([$event], 0)" @reloaded="load"
                                @overlay="openOvlDlg('project')" />
                 </div>

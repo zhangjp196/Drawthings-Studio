@@ -1,7 +1,8 @@
-// 季封面卡片（项目详情页子组件）：预览 + 上传 + 提示词
-// 「生成季封面」按钮在季封面子页顶部操作栏（project.js 持有提示词）
+// 漫画项目页 —— 季封面卡片（漫画专属，不与短剧共享）：预览 + 上传 + 提示词 +「作为第 1 章参考」。
+// 「生成季封面」按钮在季封面子页顶部操作栏（父组件持有提示词）。
 window.Views = window.Views || {};
-Views.seasonCover = {
+
+Views.comicSeasonCover = {
   props: {
     season: { type: Object, required: true },        // data.seasons 中当前季
     projectId: { type: String, required: true },
@@ -50,7 +51,7 @@ Views.seasonCover = {
 
     async function onCoverRefChange(v) {
       try {
-        await API.post(`/api/dramas/${props.projectId}/seasons/${props.seasonId}/first-image/ref`,
+        await API.post(`/api/comics/${props.projectId}/seasons/${props.seasonId}/first-image/ref`,
           { enabled: !!v });
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -66,7 +67,7 @@ Views.seasonCover = {
       }
       const fd = new FormData();
       fd.append('file', file);
-      API.postForm(`/api/dramas/${props.projectId}/seasons/${props.seasonId}/first-image`, fd)
+      API.postForm(`/api/comics/${props.projectId}/seasons/${props.seasonId}/first-image`, fd)
         .then(() => { ElementPlus.ElMessage.success(I18N.t('p.msgSeasonFirstUploaded')); emit('reloaded'); })
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }
