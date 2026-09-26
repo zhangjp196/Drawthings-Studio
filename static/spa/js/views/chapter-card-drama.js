@@ -116,7 +116,7 @@ Views.chapterCardDrama = {
     async function doGen() {
       busy.value = 'gen';
       try {
-        await API.post(`/api/projects/${props.projectId}/gen/${props.seasonIndex}`, { season_id: props.seasonId }, 0);
+        await API.post(`/api/dramas/${props.projectId}/gen/${props.seasonIndex}`, { season_id: props.seasonId }, 0);
         emit('reloaded', props.seasonIndex);
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -127,7 +127,7 @@ Views.chapterCardDrama = {
     async function doSave() {
       busy.value = 'save';
       try {
-        await API.post(`/api/projects/${props.projectId}/edit/${props.seasonIndex}`,
+        await API.post(`/api/dramas/${props.projectId}/edit/${props.seasonIndex}`,
                        { season_id: props.seasonId, prompt: prompt.value });
         props.chapter.prompt = prompt.value;
         props.chapter.title = title.value;
@@ -141,7 +141,7 @@ Views.chapterCardDrama = {
     async function doScore() {
       busy.value = 'score';
       try {
-        const r = await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/score`,
+        const r = await API.post(`/api/dramas/${props.projectId}/chapters/${props.seasonIndex}/score`,
                                  { season_id: props.seasonId });
         props.chapter.score = (r && r.score) || 0;
         props.chapter.score_note = (r && r.note) || '';
@@ -152,13 +152,13 @@ Views.chapterCardDrama = {
     }
     async function doMove(dir) {
       try {
-        await API.post(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}/move`, { season_id: props.seasonId, direction: dir });
+        await API.post(`/api/dramas/${props.projectId}/chapters/${props.seasonIndex}/move`, { season_id: props.seasonId, direction: dir });
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
     async function doDelete() {
       try {
-        await API.del(`/api/projects/${props.projectId}/chapters/${props.seasonIndex}?season_id=${props.seasonId}`);
+        await API.del(`/api/dramas/${props.projectId}/chapters/${props.seasonIndex}?season_id=${props.seasonId}`);
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }

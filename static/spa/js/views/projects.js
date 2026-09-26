@@ -16,8 +16,7 @@ Views.projects = {
         <div class="filter-row">
           <el-input v-model="f.q" :placeholder="I18N.t('proj.searchPh')" clearable style="width: 220px"
                     @input="onSearch" @keyup.enter="apply" @clear="apply" />
-          <el-select v-model="f.kind" :placeholder="I18N.t('proj.type')" clearable style="width: 120px" @change="apply">
-            <el-option :label="I18N.t('proj.all')" value="" />
+          <el-select v-model="f.kind" :placeholder="I18N.t('proj.type')" style="width: 120px" @change="apply">
             <el-option :label="I18N.t('proj.comic')" value="comic" />
             <el-option :label="I18N.t('proj.drama')" value="drama" />
           </el-select>
@@ -92,7 +91,7 @@ Views.projects = {
         chaptered: t('proj.status.chaptered'), done: t('proj.status.done'),
       };
     });
-    const f = reactive({ page: 1, size: 10, q: '', kind: (router.currentRoute.value.query.kind || ''), status: '', sort: 'desc' });
+    const f = reactive({ page: 1, size: 10, q: '', kind: (router.currentRoute.value.query.kind === 'drama' ? 'drama' : 'comic'), status: '', sort: 'desc' });
     // 页标题随类型筛选变化：漫画创作 / 视频创作 / 创作中心（全部）
     const kindTitle = computed(() =>
       f.kind === 'comic' ? I18N.t('nav.studioComic')
@@ -108,12 +107,14 @@ Views.projects = {
     const renameDlg = ref(false);
     const renameTitle = ref('');
     const renameId = ref('');
+    const renameKind = ref('comic');
     const busy = ref(false);
 
     async function load() {
       try {
-        const data = await API.get('/api/projects?' + new URLSearchParams({
-          page: f.page, size: f.size, q: f.q, kind: f.kind, status: f.status, sort: f.sort,
+        // 创作中心按类型分开：漫画走 /api/comics、短剧走 /api/dramas
+        const data = await API.get(`/api/${f.kind === 'drama' ? 'dramas' : 'comics'}?` + new URLSearchParams({
+          page: f.page, size: f.size, q: f.q, status: f.status, sort: f.sort,
         }));
         rows.value = data.projects;
         total.value = data.total;
@@ -132,12 +133,12 @@ Views.projects = {
     }
     // 同页点击侧边栏「漫画/视频创作」：URL 变化时同步筛选（不重建组件）
     watch(() => router.currentRoute.value.query.kind, (k) => {
-      k = k || '';
+      k = (k === 'drama') ? 'drama' : 'comic';
       if (k !== f.kind) { f.kind = k; f.page = 1; load(); }
     });
     const onSearch = debounce(apply, 350);
     function reset() {
-      Object.assign(f, { page: 1, size: 10, q: '', kind: '', status: '', sort: 'desc' });
+      Object.assign(f, { page: 1, size: 10, q: '', status: '', sort: 'desc' });
       syncKindQuery();
       load();
     }
@@ -146,13 +147,14 @@ Views.projects = {
     function open(row) { router.push(row.kind === 'comic' ? '/comic/' + row.id : '/drama/' + row.id); }
     function askRename(row) {
       renameId.value = row.id;
+      renameKind.value = row.kind === 'drama' ? 'drama' : 'comic';
       renameTitle.value = row.title || row.origin;
       renameDlg.value = true;
     }
     async function doRename() {
       busy.value = true;
       try {
-        await API.post('/api/projects/' + renameId.value + '/rename', { title: renameTitle.value });
+        await API.post(`/api/${renameKind.value === 'drama' ? 'dramas' : 'comics'}/` + renameId.value + '/rename', { title: renameTitle.value });
         renameDlg.value = false;
         ElementPlus.ElMessage.success(I18N.t('proj.msgRenamed'));
         load();
@@ -164,7 +166,7 @@ Views.projects = {
     }
     async function del(row) {
       try {
-        await API.post('/api/projects/' + row.id + '/delete');
+        await API.post(`/api/${row.kind === 'drama' ? 'dramas' : 'comics'}/` + row.id + '/delete');
         ElementPlus.ElMessage.success(I18N.t('proj.msgDeleted'));
         if (rows.value.length === 1 && f.page > 1) f.page--;
         load();
@@ -178,7 +180,8 @@ Views.projects = {
       router.push((kind === 'comic' ? '/comic/' : '/drama/') + id);
     }
 
-    onMounted(load);
+    // 创作中心按类型分开：无参进入时默认漫画，并把 ?kind= 写进 URL
+    onMounted(() => { syncKindQuery(); load(); });
     return {
       f, kindTitle, rows, total, totalPages, statusLabels, statusTag,
       newComicDlg, newDramaDlg, openNew, renameDlg, renameTitle, busy,

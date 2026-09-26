@@ -7,13 +7,15 @@ Views.project = {
   template: `<div class="page loading"><el-skeleton :rows="4" animated /></div>`,
   setup(props) {
     onMounted(async () => {
-      try {
-        const data = await API.get('/api/projects/' + props.id);
-        const kind = (data && data.project && data.project.kind) || '';
-        router.replace((kind === 'comic' ? '/comic/' : '/drama/') + props.id);
-      } catch (e) {
-        router.replace('/projects');
+      // 详情 API 已按类型分开：先按漫画查，失败再按短剧查（兼容旧链接）
+      for (const kind of ['comic', 'drama']) {
+        try {
+          await API.get(`/api/${kind}s/${props.id}`);
+          router.replace((kind === 'comic' ? '/comic/' : '/drama/') + props.id);
+          return;
+        } catch (e) { /* 不是该类型，继续试下一个 */ }
       }
+      router.replace('/projects');
     });
     return {};
   },

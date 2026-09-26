@@ -50,7 +50,7 @@ Views.seasonCover = {
 
     async function onCoverRefChange(v) {
       try {
-        await API.post(`/api/projects/${props.projectId}/seasons/${props.seasonId}/first-image/ref`,
+        await API.post(`/api/dramas/${props.projectId}/seasons/${props.seasonId}/first-image/ref`,
           { enabled: !!v });
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -66,7 +66,7 @@ Views.seasonCover = {
       }
       const fd = new FormData();
       fd.append('file', file);
-      API.postForm(`/api/projects/${props.projectId}/seasons/${props.seasonId}/first-image`, fd)
+      API.postForm(`/api/dramas/${props.projectId}/seasons/${props.seasonId}/first-image`, fd)
         .then(() => { ElementPlus.ElMessage.success(I18N.t('p.msgSeasonFirstUploaded')); emit('reloaded'); })
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }

@@ -209,7 +209,7 @@ Views.projectComic = {
                     <el-button type="primary" :loading="busyFirst" :disabled="locked" @click="openCoverGenDlg('project')">{{ I18N.t('p.genFirst') }}</el-button>
                     <span class="muted" v-if="busyFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
-                  <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt"
+                  <first-image :project="data.project" :project-id="data.project.id" :kind="'comic'" v-model:prompt="coverPrompt"
                                :locked="locked" @preview="openLb([$event], 0)" @reloaded="load"
                                @overlay="openOvlDlg('project')" />
                 </div>
@@ -768,7 +768,7 @@ Views.projectComic = {
     async function markFinished() {
       finishBusy.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/complete`);
+        await API.post(`/api/comics/${props.id}/complete`);
         ElementPlus.ElMessage.success(I18N.t('p.msgFinished'));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -780,7 +780,7 @@ Views.projectComic = {
     async function unlock() {
       finishBusy.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/unlock`);
+        await API.post(`/api/comics/${props.id}/unlock`);
         ElementPlus.ElMessage.success(I18N.t('p.msgUnlocked'));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -864,7 +864,7 @@ Views.projectComic = {
 
     async function load() {
       try {
-        data.value = await API.get('/api/projects/' + props.id);
+        data.value = await API.get('/api/comics/' + props.id);
         syncOutlineForm();
         const s = data.value.seasons || [];
         // 保持当前选择（'overall' 或有效季 id）；无效则回落到「总体」
@@ -887,7 +887,7 @@ Views.projectComic = {
       actBusy.value = true;
       progress.text = '';
       try {
-        await API.post(`/api/projects/${props.id}/action`, Object.assign({ step }, payload || {}), 0);
+        await API.post(`/api/comics/${props.id}/action`, Object.assign({ step }, payload || {}), 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         await load();
       } catch (e) {
@@ -937,7 +937,7 @@ Views.projectComic = {
     }
     async function addSeason() {
       try {
-        await API.post(`/api/projects/${props.id}/seasons`, { title: '' });
+        await API.post(`/api/comics/${props.id}/seasons`, { title: '' });
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         await load();
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
@@ -945,7 +945,7 @@ Views.projectComic = {
     async function delSeason() {
       if (!seasonId.value) return;
       try {
-        await API.del(`/api/projects/${props.id}/seasons/${seasonId.value}`);
+        await API.del(`/api/comics/${props.id}/seasons/${seasonId.value}`);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         await load();
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
@@ -990,7 +990,7 @@ Views.projectComic = {
       if (!c) return;
       if (!c.id) {
         try {
-          await API.post(`/api/projects/${props.id}/outline`, {
+          await API.post(`/api/comics/${props.id}/outline`, {
             characters: chars.value.map(x => ({ id: x.id, name: x.name, description: x.description })),
           });
           await load();
@@ -1003,7 +1003,7 @@ Views.projectComic = {
       }
       const fd = new FormData();
       fd.append('file', file);
-      API.postForm(`/api/projects/${props.id}/characters/${c.id}/image`, fd)
+      API.postForm(`/api/comics/${props.id}/characters/${c.id}/image`, fd)
         .then(r => {
           const t = chars.value[i];
           if (t) t.image_url = r.url || '';
@@ -1014,7 +1014,7 @@ Views.projectComic = {
     function removeCharImage(i) {
       const c = chars.value[i];
       if (!c || !c.id) return;
-      API.del(`/api/projects/${props.id}/characters/${c.id}/image`)
+      API.del(`/api/comics/${props.id}/characters/${c.id}/image`)
         .then(() => {
           c.image_url = '';
           ElementPlus.ElMessage.success(I18N.t('p.msgCharImageRemoved'));
@@ -1027,7 +1027,7 @@ Views.projectComic = {
       if (!c) return;
       if (!c.id) {
         try {
-          await API.post(`/api/projects/${props.id}/outline`, {
+          await API.post(`/api/comics/${props.id}/outline`, {
             characters: chars.value.map(x => ({ id: x.id, name: x.name, description: x.description })),
           });
           await load();
@@ -1040,7 +1040,7 @@ Views.projectComic = {
       }
       genDescBusy.value = c.id;
       try {
-        const r = await API.post(`/api/projects/${props.id}/characters/${c.id}/gen-desc`, {}, 0);
+        const r = await API.post(`/api/comics/${props.id}/characters/${c.id}/gen-desc`, {}, 0);
         if (r && r.description) c.description = r.description;
         ElementPlus.ElMessage.success(I18N.t('p.msgCharDescGenerated'));
       } catch (e) {
@@ -1052,7 +1052,7 @@ Views.projectComic = {
     async function genFirst(includeTitle = true) {
       busyFirst.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/first-image/generate`,
+        await API.post(`/api/comics/${props.id}/first-image/generate`,
           { prompt: coverPrompt.value, include_title: includeTitle !== false }, 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgFirstGenerated'));
         coverPrompt.value = '';
@@ -1067,7 +1067,7 @@ Views.projectComic = {
     async function genSeasonFirst(includeTitle = true) {
       busySeasonFirst.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/seasons/${seasonId.value}/first-image/generate`,
+        await API.post(`/api/comics/${props.id}/seasons/${seasonId.value}/first-image/generate`,
           { prompt: seasonCoverPrompt.value, include_title: includeTitle !== false }, 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgSeasonFirstGenerated'));
         seasonCoverPrompt.value = '';
@@ -1155,8 +1155,8 @@ Views.projectComic = {
                      style: ovlDlg.style, color: ovlDlg.color, band: ovlDlg.band };
       try {
         const url = ovlDlg.target === 'season'
-          ? `/api/projects/${props.id}/seasons/${seasonId.value}/first-image/overlay-title`
-          : `/api/projects/${props.id}/first-image/overlay-title`;
+          ? `/api/comics/${props.id}/seasons/${seasonId.value}/first-image/overlay-title`
+          : `/api/comics/${props.id}/first-image/overlay-title`;
         await API.post(url, body, 0);
         ElementPlus.ElMessage.success(I18N.t('p.msgOverlayTitle'));
         ovlDlg.show = false;
@@ -1188,7 +1188,7 @@ Views.projectComic = {
       }
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
-        await API.sse(`/api/projects/${props.id}/action-stream`, {
+        await API.sse(`/api/comics/${props.id}/action-stream`, {
           step: 'chapters',
           season_id: seasonId.value,
           count_min: planCount.value,
@@ -1212,7 +1212,7 @@ Views.projectComic = {
     async function doSave(payload, okMsg) {
       busySave.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/outline`, payload);
+        await API.post(`/api/comics/${props.id}/outline`, payload);
         ElementPlus.ElMessage.success(okMsg);
         await load();
       } catch (e) {
@@ -1226,7 +1226,7 @@ Views.projectComic = {
       busySave.value = true;
       (async () => {
         try {
-          await API.post(`/api/projects/${props.id}/outline`, {
+          await API.post(`/api/comics/${props.id}/outline`, {
             arc: arcText.value, style: oStyle.value, global_prompt: oGlobal.value,
             res_width: oW.value, res_height: oH.value,
             auto_score: oScore.value, score_min: oScoreMin.value, auto_redo: oRedo.value,
@@ -1242,7 +1242,7 @@ Views.projectComic = {
       busySave.value = true;
       (async () => {
         try {
-          await API.post(`/api/projects/${props.id}/outline`, {
+          await API.post(`/api/comics/${props.id}/outline`, {
             characters: chars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
           });
           ElementPlus.ElMessage.success(I18N.t('p.charsSaved'));
@@ -1257,7 +1257,7 @@ Views.projectComic = {
       busySave.value = true;
       (async () => {
         try {
-          await API.patch(`/api/projects/${props.id}/seasons/${seasonId.value}`, { title: seasonTitleText.value, arc: seasonArcText.value });
+          await API.patch(`/api/comics/${props.id}/seasons/${seasonId.value}`, { title: seasonTitleText.value, arc: seasonArcText.value });
           ElementPlus.ElMessage.success(I18N.t('p.seasonSaved'));
           await load();
         } catch (e) { ElementPlus.ElMessage.error(e.message); }
@@ -1270,7 +1270,7 @@ Views.projectComic = {
       busySave.value = true;
       (async () => {
         try {
-          await API.patch(`/api/projects/${props.id}/seasons/${seasonId.value}`, {
+          await API.patch(`/api/comics/${props.id}/seasons/${seasonId.value}`, {
             characters: seasonChars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
           });
           ElementPlus.ElMessage.success(I18N.t('p.seasonSaved'));
@@ -1284,7 +1284,7 @@ Views.projectComic = {
       busySave.value = true;
       (async () => {
         try {
-          await API.patch(`/api/projects/${props.id}/seasons/${seasonId.value}`, {
+          await API.patch(`/api/comics/${props.id}/seasons/${seasonId.value}`, {
             count_mode: 'range',
             count_min: planCount.value,
             count_max: planCount.value,
@@ -1351,7 +1351,7 @@ Views.projectComic = {
       const indices = selected.value.length ? selected.value : null;
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
-        await API.sse(`/api/projects/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
+        await API.sse(`/api/comics/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
           if (ev === 'progress') progress.text = I18N.t('p.genProgress', d.current, d.total, d.title);
           else if (ev === 'score') applyScoreLive(d);
           else if (ev === 'chapter') applyChapterLive(d);
@@ -1373,7 +1373,7 @@ Views.projectComic = {
       const indices = selected.value.length ? selected.value : null;
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
-        await API.sse(`/api/projects/${props.id}/action-stream`, { step: 'score', season_id: seasonId.value, indices }, (ev, d) => {
+        await API.sse(`/api/comics/${props.id}/action-stream`, { step: 'score', season_id: seasonId.value, indices }, (ev, d) => {
           if (ev === 'progress') progress.text = I18N.t('p.scoreProgress', d.current, d.total, d.title);
           else if (ev === 'score') applyScoreLive(d);
           else if (ev === 'chapter') applyChapterLive(d);
@@ -1395,7 +1395,7 @@ Views.projectComic = {
       if (exporting.value) return;
       exporting.value = true;
       try {
-        await API.download(`/api/projects/${props.id}/export/${fmt}?season_id=${encodeURIComponent(seasonId.value)}`);
+        await API.download(`/api/comics/${props.id}/export/${fmt}?season_id=${encodeURIComponent(seasonId.value)}`);
         API.notify(I18N.t('app.title'), I18N.t('p.exportDone'));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -1407,14 +1407,14 @@ Views.projectComic = {
     function exportPdf() { return exportMedia('pdf'); }
     // PDF 预览：弹框内 iframe 渲染 inline PDF（不再新标签 window.open，避免桌面端弹窗被拦截报错）
     function previewPdf() {
-      pdfUrl.value = `/api/projects/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}&preview=1`;
+      pdfUrl.value = `/api/comics/${props.id}/export/pdf?season_id=${encodeURIComponent(seasonId.value)}&preview=1`;
       pdfDlg.value = true;
     }
 
     async function delChapter(i) {
       if (!seasonId.value) return;
       try {
-        await API.del(`/api/projects/${props.id}/chapters/${i}?season_id=${seasonId.value}`);
+        await API.del(`/api/comics/${props.id}/chapters/${i}?season_id=${seasonId.value}`);
         await load(); // load() 内 syncCur() 会把选中钳制到有效范围
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
@@ -1445,7 +1445,7 @@ Views.projectComic = {
         return;
       }
       try {
-        await API.post(`/api/projects/${props.id}/reset`, {
+        await API.post(`/api/comics/${props.id}/reset`, {
           title: rtitle.value, origin: rogin.value,
           style: rstyle.value === 'custom' ? rstyleCustom.value.trim() : rstyle.value,
           clear_downstream: rclear.value,
@@ -1471,7 +1471,7 @@ Views.projectComic = {
     async function saveCfg() {
       cfgBusy.value = true;
       try {
-        await API.post(`/api/projects/${props.id}/config`, {
+        await API.post(`/api/comics/${props.id}/config`, {
           llm_config_id: cfg.llm, drawthings_config_id: cfg.dt,
           dt_model_image: cfg.dt_model,
           dt_ref_image: cfg.dt_ref ? 1 : 0,
@@ -1488,7 +1488,7 @@ Views.projectComic = {
 
     async function del() {
       try {
-        await API.post(`/api/projects/${props.id}/delete`);
+        await API.post(`/api/comics/${props.id}/delete`);
         ElementPlus.ElMessage.success(I18N.t('proj.msgDeleted'));
         router.push(backTo());
       } catch (e) {

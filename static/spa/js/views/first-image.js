@@ -5,6 +5,7 @@ Views.firstImage = {
   props: {
     project: { type: Object, required: true },   // data.project
     projectId: { type: String, required: true },
+    kind: { type: String, default: 'comic' },    // comic | drama（决定调用的 API 命名空间）
     prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
     locked: { type: Boolean, default: false },   // 作品已完结（锁定）：操作只读
   },
@@ -51,7 +52,7 @@ Views.firstImage = {
       }
       const fd = new FormData();
       fd.append('file', file);
-      API.postForm(`/api/projects/${props.projectId}/first-image`, fd)
+      API.postForm(`/api/${props.kind}s/${props.projectId}/first-image`, fd)
         .then(() => { ElementPlus.ElMessage.success(I18N.t('p.msgFirstUploaded')); emit('reloaded'); })
         .catch(e => ElementPlus.ElMessage.error(e.message));
     }

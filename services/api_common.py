@@ -14,6 +14,7 @@ from i18n import L, lang_of
 from models import Project
 from config_store import ConfigStore
 from services.drawthings import MAX_VIDEO_SECONDS, norm_ref_flag
+from services.pipeline import hex_to_rgb
 from services.runtime import pipeline
 
 MEDIA_DIR = Path(data_dir) / "media"
@@ -173,8 +174,33 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+MAX_IMAGE_UPLOAD = 20 * 1024 * 1024  # 单张上传图片上限 20MB（防超大文件占满内存）
+
+
+def _overlay_opts(body: dict) -> dict:
+    """封面标题叠加参数（位置/字号/样式/颜色/底条）；非法值回退默认。"""
+    def _f(v, default, lo, hi):
+        try:
+            return min(hi, max(lo, float(v)))
+        except (TypeError, ValueError):
+            return default
+
+    style = str(body.get("style") or "bold_outline")
+    if style not in ("bold_outline", "outline", "shadow", "plain"):
+        style = "bold_outline"
+    return {
+        "x": _f(body.get("x"), 0.5, 0.0, 1.0),
+        "y": _f(body.get("y"), 1 / 3, 0.0, 1.0),
+        "size_pct": _f(body.get("size_pct"), 8.0, 2.0, 40.0),
+        "style": style,
+        "color": hex_to_rgb(str(body.get("color") or "#ffffff")),
+        "band": bool(body.get("band", True)),
+    }
+
+
 __all__ = [
-    "MEDIA_DIR", "_lang", "_json_body", "_media_url", "_chapter_view",
+    "MEDIA_DIR", "MAX_IMAGE_UPLOAD", "_overlay_opts",
+    "_lang", "_json_body", "_media_url", "_chapter_view",
     "_llm_view", "_dt_view", "_dt_ref_field", "_dt_gen_fields", "_project_view",
     "_config_lists", "_clamp_page", "_ensure_not_finished", "_sse",
 ]

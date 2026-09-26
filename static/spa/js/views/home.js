@@ -54,8 +54,15 @@ Views.home = {
     async function load() {
       loading.value = true;
       try {
-        const data = await API.get('/api/projects?' + new URLSearchParams({ page: 1, size: 6, sort: 'active' }));
-        projects.value = data.projects || [];
+        // 列表已按类型分开：工作台是跨类型的，故各取最近 6 条再合并
+        const qs = new URLSearchParams({ page: 1, size: 6, sort: 'active' });
+        const [c, d] = await Promise.all([
+          API.get('/api/comics?' + qs),
+          API.get('/api/dramas?' + qs),
+        ]);
+        const all = [...(c.projects || []), ...(d.projects || [])];
+        all.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+        projects.value = all.slice(0, 6);
       } catch (e) {
         /* 工作台加载失败不打断使用（可去「创作中心」重试） */
       } finally {
