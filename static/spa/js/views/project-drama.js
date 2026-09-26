@@ -1194,9 +1194,9 @@ Views.projectDrama = {
           mode: isAppend ? 'append' : 'replan',
           ...(isAppend ? {} : (subset ? { indices: sel } : {})),
         }, (ev, d) => {
-          if (ev === 'progress') progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
-          else if (ev === 'chapter') applyChapterPlan(d);
-          else if (ev === 'error') throw new Error(d.message);
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
+          else if (ev === EVENTS.CHAPTER) applyChapterPlan(d);
+          else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         await load();
@@ -1350,10 +1350,10 @@ Views.projectDrama = {
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/dramas/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === 'progress') progress.text = I18N.t('p.genProgress', d.current, d.total, d.title);
-          else if (ev === 'score') applyScoreLive(d);
-          else if (ev === 'chapter') applyChapterLive(d);
-          else if (ev === 'error') throw new Error(d.message);
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.genProgress', d.current, d.total, d.title);
+          else if (ev === EVENTS.SCORE) applyScoreLive(d);
+          else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
+          else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         selected.value = [];
@@ -1372,10 +1372,10 @@ Views.projectDrama = {
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/dramas/${props.id}/action-stream`, { step: 'score', season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === 'progress') progress.text = I18N.t('p.scoreProgress', d.current, d.total, d.title);
-          else if (ev === 'score') applyScoreLive(d);
-          else if (ev === 'chapter') applyChapterLive(d);
-          else if (ev === 'error') throw new Error(d.message);
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.scoreProgress', d.current, d.total, d.title);
+          else if (ev === EVENTS.SCORE) applyScoreLive(d);
+          else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
+          else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         selected.value = [];

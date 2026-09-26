@@ -738,22 +738,22 @@ Views.microWork = {
       sseCtrl = ctrl;
       try {
         await API.sse(`/api/micro/${props.id}/${props.sid}/chat`, { message, images: shot }, (ev, d) => {
-          if (ev === 'token') {
+          if (ev === EVENTS.TOKEN) {
             pushText(d.text);
             status.value = '';
             scrollBottom(false);
-          } else if (ev === 'tool') {
+          } else if (ev === EVENTS.TOOL) {
             onTool(d);
             status.value = '';
             scrollBottom(false);
-          } else if (ev === 'media') {
+          } else if (ev === EVENTS.MEDIA) {
             onMedia(d);
             scrollBottom(false);
-          } else if (ev === 'tool_status') {
+          } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
-          } else if (ev === 'tool_error') {
+          } else if (ev === EVENTS.TOOL_ERROR) {
             onToolError(d);
-          } else if (ev === 'error') {
+          } else if (ev === EVENTS.ERROR) {
             failed = true;
             onError(d);
           }
