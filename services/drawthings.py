@@ -621,6 +621,16 @@ class DrawThingsClient:
         return str(out)
 
 
-def build_drawthings_client(cfg, data_dir: Path) -> DrawThingsClient:
-    """构造 Draw Things 客户端（仅 gRPC）。"""
-    return DrawThingsClient(cfg, data_dir)
+def build_drawthings_client(cfg, data_dir: Path,
+                             model_image: str = "", model_video: str = "") -> DrawThingsClient:
+    """构造 Draw Things 客户端（仅 gRPC）。
+
+    model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）；
+    留空 = 跟随 DrawThings 配置里的模型。
+    """
+    c = DrawThingsClient(cfg, data_dir)
+    if model_image:
+        c.model_image = str(model_image).strip()
+    if model_video:
+        c.model_video = str(model_video).strip()
+    return c

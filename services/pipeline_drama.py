@@ -71,9 +71,14 @@ class DramaPipeline:
         return llm_cfg, dt_cfg
 
     def _clients(self, db, project, lang: str = "zh"):
-        """DrawThings 客户端（出图/出视频用；仅 gRPC）。"""
+        """DrawThings 客户端（出图/出视频用；仅 gRPC）。
+
+        功能级模型：项目自选的模型覆盖配置里的模型（留空 = 跟随配置）。"""
         _, dt_cfg = self._configs(db, project, lang)
-        return build_drawthings_client(dt_cfg, self.data_dir)
+        return build_drawthings_client(
+            dt_cfg, self.data_dir,
+            model_image=getattr(project, "dt_model_image", "") or "",
+            model_video=getattr(project, "dt_model_video", "") or "")
 
     def _llm_cfg(self, db, project, lang: str = "zh") -> LLMConfig:
         llm_cfg, _ = self._configs(db, project, lang)

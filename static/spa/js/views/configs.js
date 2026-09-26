@@ -168,28 +168,15 @@ Views.configs = {
             </el-form-item>
           </template>
           <template v-else>
-            <el-form-item :label="I18N.t('cfg.dtModelImage')">
-              <div style="display: flex; gap: 8px; width: 100%;">
-                <el-select v-model="f.model_image" filterable allow-create clearable style="flex: 1;"
-                           :placeholder="I18N.t('cfg.dtModelPh')">
-                  <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
-                </el-select>
-                <el-button :loading="loadingDtModels" @click="fetchDtModels">{{ I18N.t('cfg.fetchModels') }}</el-button>
-              </div>
-              <div class="hint">{{ I18N.t('cfg.dtModelGrpcHint') }}</div>
-              <el-checkbox v-model="f.ref_image" :disabled="!f.model_image" style="margin-top:2px;">
+            <el-form-item :label="I18N.t('cfg.refImageSec')">
+              <el-checkbox v-model="f.ref_image" style="margin-right: 20px;">
                 {{ I18N.t('cfg.refImage') }}
               </el-checkbox>
-            </el-form-item>
-            <el-form-item :label="I18N.t('cfg.dtModelVideo')">
-              <el-select v-model="f.model_video" filterable allow-create clearable style="width: 100%"
-                         :placeholder="I18N.t('cfg.dtModelPh')">
-                <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
-              </el-select>
-              <el-checkbox v-model="f.ref_video" :disabled="!f.model_video" style="margin-top:2px;">
+              <el-checkbox v-model="f.ref_video">
                 {{ I18N.t('cfg.refVideo') }}
               </el-checkbox>
-              <div class="hint" style="margin-top:2px;">{{ I18N.t('cfg.refCrashHint') }}</div>
+              <div class="hint" style="margin-top:2px;">{{ I18N.t('cfg.refModelHint') }}</div>
+              <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxSideOpt')">
               <el-select v-model="f.max_side" style="width: 220px;">
@@ -233,31 +220,6 @@ Views.configs = {
       model_image: '', model_video: '', max_side: 0, max_seconds: 8,
       ref_image: false, ref_video: false,   // 勾选后才图生图 / 图生视频（默认不勾选 = 文生图 / 文生视频）
     });
-    // 清空模型 → 同步取消对应「支持参考图片」（无模型就无参考图可言，避免残留脏勾选）
-    watch(() => f.model_image, v => { if (!v) f.ref_image = false; });
-    watch(() => f.model_video, v => { if (!v) f.ref_video = false; });
-    const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
-    const loadingDtModels = ref(false);
-    // 模型下拉候选：只列 app 里实际已下载的模型（点「获取模型」从 gRPC 读取）
-    const modelChoices = computed(() => dtModels.value
-      .filter(m => m.file)
-      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
-    async function fetchDtModels() {
-      if (!f.base_url) {
-        ElementPlus.ElMessage.warning(I18N.t('cfg.urlRequired'));
-        return;
-      }
-      loadingDtModels.value = true;
-      try {
-        const data = await API.get('/api/dt-models?base_url=' + encodeURIComponent(f.base_url));
-        dtModels.value = data.models || [];
-        if (!dtModels.value.length) ElementPlus.ElMessage.warning(I18N.t('cfg.noDtModels'));
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      } finally {
-        loadingDtModels.value = false;
-      }
-    }
 
     async function load() {
       try {
@@ -345,7 +307,6 @@ Views.configs = {
           max_seconds: row.max_seconds == null ? 8 : row.max_seconds,
           ref_image: !!row.ref_image, ref_video: !!row.ref_video,
         });
-        if (row.base_url) fetchDtModels();  // 预取已下载模型
       } else {
         Object.assign(f, {
           config_type: 'llm', name: row.name, base_url: row.base_url,
@@ -418,7 +379,6 @@ Views.configs = {
     onMounted(() => { load(); loadBasic(); scrollByQuery(); });
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
-      dtModels, loadingDtModels, modelChoices, fetchDtModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
       urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,
     };

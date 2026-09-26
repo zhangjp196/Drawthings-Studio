@@ -83,6 +83,20 @@ Views.micro = {
             </el-select>
             <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
           </el-form-item>
+          <el-form-item v-if="f.dt" :label="I18N.t('mc.dtModelImage')">
+            <el-select v-model="f.mi" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="f.dt" :label="I18N.t('mc.dtModelVideo')">
+            <el-select v-model="f.mv" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
+            </el-select>
+          </el-form-item>
         </el-form>
         <template #footer>
           <el-button @click="dlg = false">{{ I18N.t('common.cancel') }}</el-button>
@@ -101,8 +115,33 @@ Views.micro = {
     const flt = reactive({ q: '', kind: '', sort: 'desc', size: 10 });
     const dlg = ref(false);
     const saving = ref(false);
-    const f = reactive({ title: '', llm: '', dt: '' });
+    const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '' });
     const tab = ref('works');  // 列表页 tab：作品集（默认）；预留后续扩展
+
+    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
+    const dtModels = ref([]);
+    const modelChoices = computed(() => dtModels.value
+      .filter(m => m.file)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
+    async function fetchModels() {
+      const c = dts.value.find(x => x.id === f.dt);
+      if (!c || !c.base_url) { dtModels.value = []; return; }
+      try {
+        const data = await API.get('/api/dt-models?base_url=' + encodeURIComponent(c.base_url));
+        dtModels.value = data.models || [];
+      } catch (e) {
+        dtModels.value = [];  // app 未开 gRPC 不阻塞表单：可手动输入模型文件名
+      }
+    }
+    watch(() => f.dt, (id) => {
+      f.mi = ''; f.mv = '';
+      const c = dts.value.find(x => x.id === id);
+      if (!c) return;
+      // 预填配置里的模型（功能级可覆盖）；配置未设模型则保持空 = 跟随
+      f.mi = c.model_image || '';
+      f.mv = c.model_video || '';
+      fetchModels();
+    });
 
     async function load() {
       try {
@@ -127,7 +166,7 @@ Views.micro = {
     }
 
     async function openNew() {
-      Object.assign(f, { title: '', llm: '', dt: '' });
+      Object.assign(f, { title: '', llm: '', dt: '', mi: '', mv: '' });
       dlg.value = true;
       // 基础配置里的默认配置 → 预填（仅当对应配置仍存在时）
       try {
@@ -149,6 +188,7 @@ Views.micro = {
         const data = await API.post('/api/micro', {
           title: f.title, llm_config_id: f.llm,
           drawthings_config_id: f.dt,
+          dt_model_image: f.mi, dt_model_video: f.mv,
         });
         dlg.value = false;
         router.push('/micro/' + data.id);
@@ -176,7 +216,7 @@ Views.micro = {
 
     onMounted(load);
     return {
-      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab,
+      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab, modelChoices,
       load, apply, onSearch, reset, openNew, create, enter, isMediaVideo, del,
     };
   },

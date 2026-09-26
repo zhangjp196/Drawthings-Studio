@@ -174,7 +174,9 @@ def _dt_view(c) -> dict:
 
 def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
     """DrawThings 个性化参数：0/空 = 跟随 app 当前值。非法值直接 400。
-    ref_image / ref_video：「支持参考图片」（图生图 / 图生视频）勾选，仅在配了对应模型时才生效。"""
+
+    模型改为功能级选择（项目 / 微创作各自选），配置里的模型仅作兜底默认，可为空。
+    ref_image / ref_video：「支持参考图片」能力开关，随配置声明（图生图 / 图生视频）。"""
     def num(key, cast, max_v: int) -> int | float:
         v = body.get(key)
         if v in (None, ""):
@@ -191,10 +193,6 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         return v
     model_image = str(body.get("model_image") or "").strip()
     model_video = str(body.get("model_video") or "").strip()
-    if not (model_image or model_video):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "至少需要指定一个模型（图像或视频）",
-                                     "At least one model (image or video) is required"))
     def flag(key: str) -> int:
         """勾选类字段：true/1/yes/on → 1，其余（含缺省）→ 0。"""
         v = body.get(key)
@@ -206,9 +204,9 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         "model_video": model_video,
         "max_side": int(num("max_side", int, 2048)),
         "max_seconds": int(num("max_seconds", int, MAX_VIDEO_SECONDS)),
-        # 勾选仅在配了对应模型时才生效：无该类型模型 → 开关一并归零（避免残留）
-        "ref_image": flag("ref_image") if model_image else 0,
-        "ref_video": flag("ref_video") if model_video else 0,
+        # 能力开关：模型已在功能级选择，配置只声明「支持参考图片」
+        "ref_image": flag("ref_image"),
+        "ref_video": flag("ref_video"),
     }
 def _project_view(p: Project, chapter_count: int = 0) -> dict:
     scope = p.scope or {}
@@ -620,6 +618,8 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
         title=title[:200],
         llm_config_id=llm_config_id,
         drawthings_config_id=str(body.get("drawthings_config_id") or "").strip(),
+        dt_model_image=str(body.get("dt_model_image") or "").strip()[:200],
+        dt_model_video=str(body.get("dt_model_video") or "").strip()[:200],
         created_at=_now(), updated_at=_now(),
     )
     db.add(w)
@@ -644,6 +644,8 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "id": work.id, "title": work.title,
             "llm_config_id": work.llm_config_id,
             "drawthings_config_id": work.drawthings_config_id,
+            "dt_model_image": work.dt_model_image or "",
+            "dt_model_video": work.dt_model_video or "",
             "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "",
             "dt_name": dt_cfg.name if dt_cfg else "",
@@ -829,6 +831,8 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     work.title = str(body.get("title") or "").strip()[:200]
     work.llm_config_id = llm_config_id
     work.drawthings_config_id = str(body.get("drawthings_config_id") or "").strip()
+    work.dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
+    work.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
     work.updated_at = _now()
     db.commit()
     return {"ok": True}
@@ -1069,13 +1073,14 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
                 pass
         history.append({"role": r.role, "content": r.content, "images": imgs})
     return StreamingResponse(
-        _micro_stream(db, session, llm_cfg, dt_cfg, image_paths,
+        _micro_stream(db, session, llm_cfg, dt_cfg, work, image_paths,
                       message, history, user_idx + 1, lang),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
+                        work: "MicroWork",
                         img_paths: list[str],
                         user_message: str, history: list[dict], assistant_idx: int,
                         lang: str = "zh"):
@@ -1093,8 +1098,12 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
         yield _sse("done", {})
         return
 
-    # DrawThings 客户端（gRPC）：按配置的「图像模型 / 视频模型」决定可用产出类型
-    dt = build_drawthings_client(dt_cfg, data_dir) if dt_cfg else None
+    # DrawThings 客户端（gRPC）：功能级模型优先（作品自选），留空 = 跟随配置里的模型
+    dt = (build_drawthings_client(
+        dt_cfg, data_dir,
+        model_image=getattr(work, "dt_model_image", "") or "",
+        model_video=getattr(work, "dt_model_video", "") or "")
+        if dt_cfg else None)
     can_image = bool(dt and dt.supports_image())
     can_video = bool(dt and dt.supports_video())
 
@@ -1332,8 +1341,25 @@ async def project_create(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400,
                             detail=L(lang, "请选择有效的 VLM 与 DrawThings 配置",
                                      "Please select valid VLM and DrawThings configs"))
+    # 功能级模型：项目侧自选；留空 = 跟随 DrawThings 配置里的模型（两边都空才拒绝）
+    dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
+    dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
+    if kind == "comic" and not dt_model_image and not (dt_cfg.model_image or ""):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请选择出图模型（DrawThings 配置里也未设置模型）",
+                                     "Please pick an image model (none set in the Draw Things config)"))
+    if kind == "drama" and not dt_model_video and not (dt_cfg.model_video or ""):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请选择出视频模型（DrawThings 配置里也未设置模型）",
+                                     "Please pick a video model (none set in the Draw Things config)"))
     project = pipeline.create(db, kind, origin, llm_cfg.id, dt_cfg.id,
-                               style=style, title=str(body.get("title") or "").strip()[:200])
+                              style=style, title=str(body.get("title") or "").strip()[:200])
+    if dt_model_image:
+        project.dt_model_image = dt_model_image
+    if dt_model_video:
+        project.dt_model_video = dt_model_video
+    if dt_model_image or dt_model_video:
+        db.commit()
     return {"id": project.id}
 
 
@@ -1454,6 +1480,8 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "created_at": project.created_at, "updated_at": project.updated_at,
             "llm_config_id": project.llm_config_id,
             "drawthings_config_id": project.drawthings_config_id,
+            "dt_model_image": project.dt_model_image or "",
+            "dt_model_video": project.dt_model_video or "",
             "llm_name": llm_cfg.name if llm_cfg else unknown,
             "dt_name": dt_cfg.name if dt_cfg else unknown,
         },

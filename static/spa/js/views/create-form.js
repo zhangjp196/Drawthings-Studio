@@ -28,6 +28,14 @@ Views.createForm = {
         </el-select>
         <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newCfg') }}</el-link></div>
       </el-form-item>
+      <el-form-item v-if="f.dt" :label="I18N.t('cf.dtModel')">
+        <el-select v-model="f.dt_model" filterable allow-create clearable style="width: 100%"
+                   :placeholder="I18N.t('cf.dtModelPh')">
+          <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+          <el-option v-for="m in modelChoices" :key="m.file" :value="m.file" :label="m.label" />
+        </el-select>
+        <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
+      </el-form-item>
       <el-form-item :label="I18N.t('cf.title')">
         <el-input v-model="f.title" maxlength="100" :placeholder="I18N.t('cf.titlePh')" />
       </el-form-item>
@@ -54,11 +62,37 @@ Views.createForm = {
       kind: (props.preset && props.preset.kind) || 'comic',
       llm: '',
       dt: '',
+      dt_model: '',
       title: (props.preset && props.preset.title) || '',
       origin: (props.preset && props.preset.origin) || '',
       style: '',
       styleCustom: '',
     });
+
+    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
+    const dtModels = ref([]);
+    const modelChoices = computed(() => dtModels.value
+      .filter(m => m.file)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
+    async function fetchModels() {
+      const c = dtsAll.value.find(x => x.id === f.dt);
+      if (!c || !c.base_url) { dtModels.value = []; return; }
+      try {
+        const data = await API.get('/api/dt-models?base_url=' + encodeURIComponent(c.base_url));
+        dtModels.value = data.models || [];
+      } catch (e) {
+        dtModels.value = [];  // app 未开 gRPC 不阻塞表单：可手动输入模型文件名
+      }
+    }
+    watch(() => f.dt, (id) => {
+      f.dt_model = '';
+      const c = dtsAll.value.find(x => x.id === id);
+      if (!c) return;
+      // 预填配置里的模型（功能级可覆盖）；配置未设模型则保持空 = 必须自选
+      f.dt_model = f.kind === 'comic' ? (c.model_image || '') : (c.model_video || '');
+      fetchModels();
+    });
+    watch(() => f.kind, () => { f.dt_model = ''; });
 
     async function load() {
       const data = await API.get('/api/choices');
@@ -82,11 +116,19 @@ Views.createForm = {
       if (!f.llm) { ElementPlus.ElMessage.warning(I18N.t('cf.wLlm')); return; }
       if (!f.dt) { ElementPlus.ElMessage.warning(I18N.t('cf.wDt')); return; }
       if (!f.origin.trim()) { ElementPlus.ElMessage.warning(I18N.t('cf.wOrigin')); return; }
+      // 功能级模型：未选且配置里也没有 → 前端先拦（后端同样校验）
+      if (!f.dt_model) {
+        const c = dtsAll.value.find(x => x.id === f.dt);
+        const cm = f.kind === 'comic' ? (c && c.model_image) : (c && c.model_video);
+        if (!cm) { ElementPlus.ElMessage.warning(I18N.t('cf.wDtModel')); return; }
+      }
       saving.value = true;
       try {
         const data = await API.post('/api/projects', {
           kind: f.kind, origin: f.origin.trim(), title: f.title.trim(),
           llm_config_id: f.llm, drawthings_config_id: f.dt,
+          dt_model_image: f.kind === 'comic' ? f.dt_model : '',
+          dt_model_video: f.kind === 'drama' ? f.dt_model : '',
           style: f.style === 'custom' ? '' : f.style,
           style_custom: f.style === 'custom' ? f.styleCustom.trim() : '',
         });
@@ -99,7 +141,7 @@ Views.createForm = {
     }
 
     onMounted(load);
-    return { f, llms, dts, presets, saving, submit,
+    return { f, llms, dts, presets, saving, submit, modelChoices,
              toConfigs: () => router.push('/configs?ctype=drawthings') };
   },
 };

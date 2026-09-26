@@ -124,10 +124,12 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ## Configuration fields
 
 - **LLM config**: `supports_vision` (image input) = supports image input (multimodal; can reference the previous frame/first image during scripting) / text-only (no reference images).
-- **Draw Things config** (gRPC only; set the app's API server to gRPC):
-  **image model / video model** (`model_image` / `model_video`; each may be empty but at least one is required; click
-  "Fetch models" to read the downloaded models from the app). The generation preset (steps / sampler / size) is
-  **inferred from the model name**, no input needed. Any project/work can use any Draw Things config.
+- **Draw Things config** (gRPC only; set the app's API server to gRPC): endpoint + caps + the
+  **reference image** capability. **Models are now picked per feature** (the project / micro-creation create form;
+  "Fetch models" reads the downloaded models from the app). The model stored in the config
+  (`model_image` / `model_video`) is kept only as a fallback default (each may be empty). The generation preset
+  (steps / sampler / size) is **inferred from the model name**, no input needed. Any project/work can use any
+  Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
   `max_seconds` (max video duration in seconds; **default 8 = built-in cap**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap).
   **Supports reference image** (`ref_image` / `ref_video`, **unchecked by default**): declares per type whether the model can do
@@ -314,7 +316,7 @@ This app calls real services directly; there is no built-in mock mode:
 1. **LLM**: any OpenAI-protocol endpoint (Ollama `http://127.0.0.1:11434/v1`, vLLM, cloud OpenAI, etc.);
    add a config in **⚙ Settings**; check "image input" per model capability (multimodal / text-only).
 2. **Draw Things**: run the Draw Things app on the Mac and enable its HTTP server (see below);
-   create a Draw Things config in **⚙ Settings** (image/video output is decided by the model loaded in the app).
+   create a Draw Things config in **⚙ Settings** (the generation model is then picked in the create form).
 
 When an endpoint is not running, the relevant step shows a **friendly error** on the project page (e.g. connection failed, service not enabled — localized per language);
 fix it and re-run that step; already-generated content is unaffected.
@@ -339,8 +341,8 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
   (when available): if the audio ends well before the video, the fps is re-derived from the audio duration (`frames ÷
   audio`) and the file is re-muxed once — logged, never silent. (`tools/check_video_fps.py` covers this end to end.)
 - A gRPC request **must carry the full generation config**, so the config specifies:
-  - **image model / video model** (`model_image` / `model_video`): each may be empty, but **at least one is required**
-    (only one set = only that type is supported). Click "Fetch models" to read the **downloaded models** from the app
+  - **image model / video model** (`model_image` / `model_video`): each may be empty — the effective model comes from the feature (project / micro-creation), falling back to the config.
+    Click "Fetch models" to read the **downloaded models** from the app
     (gRPC `get_models`, with names and a video flag).
   - The generation **preset** (steps / sampler / size) is **inferred from the model name** (normalized match against
     drawthings-py preset models, ignoring quantization/version suffixes, e.g. `ltx_2.3_22b_distilled_1.1_q6p` →
