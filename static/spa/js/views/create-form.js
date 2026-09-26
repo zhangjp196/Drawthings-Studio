@@ -28,14 +28,27 @@ Views.createForm = {
         </el-select>
         <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newCfg') }}</el-link></div>
       </el-form-item>
-      <el-form-item v-if="f.dt" :label="I18N.t('cf.dtModel')">
-        <el-select v-model="f.dt_model" filterable allow-create clearable style="width: 100%"
-                   :placeholder="I18N.t('cf.dtModelPh')">
-          <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-          <el-option v-for="m in modelChoices" :key="m.file" :value="m.file" :label="m.label" />
-        </el-select>
-        <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
-      </el-form-item>
+      <el-row :gutter="12" v-if="f.dt">
+        <el-col :span="12">
+          <el-form-item :label="I18N.t('cf.dtModelImage')">
+            <el-select v-model="f.dt_model_i" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+            <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
+          </el-form-item>
+        </el-col>
+        <el-col v-if="f.kind === 'drama'" :span="12">
+          <el-form-item :label="I18N.t('cf.dtModelVideo')">
+            <el-select v-model="f.dt_model_v" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+      </el-row>
       <el-form-item v-if="f.dt" :label="I18N.t('cf.dtRef')">
         <el-checkbox v-model="f.dt_ref">{{ I18N.t(f.kind === 'comic' ? 'cfg.refImage' : 'cfg.refVideo') }}</el-checkbox>
         <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
@@ -66,7 +79,8 @@ Views.createForm = {
       kind: (props.preset && props.preset.kind) || 'comic',
       llm: '',
       dt: '',
-      dt_model: '',
+      dt_model_i: '',
+      dt_model_v: '',
       dt_ref: false,
       title: (props.preset && props.preset.title) || '',
       origin: (props.preset && props.preset.origin) || '',
@@ -76,9 +90,12 @@ Views.createForm = {
 
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
     const dtModels = ref([]);
-    const modelChoices = computed(() => dtModels.value
-      .filter(m => m.file)
-      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
+    const imgChoices = computed(() => dtModels.value
+      .filter(m => m.file && !m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
+    const vidChoices = computed(() => dtModels.value
+      .filter(m => m.file && m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
     async function fetchModels() {
       const c = dtsAll.value.find(x => x.id === f.dt);
       if (!c || !c.base_url) { dtModels.value = []; return; }
@@ -90,16 +107,16 @@ Views.createForm = {
       }
     }
     watch(() => f.dt, (id) => {
-      f.dt_model = '';
-      f.dt_ref = false;
+      f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref = false;
       const c = dtsAll.value.find(x => x.id === id);
       if (!c) return;
       // 预填配置里的模型 / 参考图开关（功能级可覆盖）；配置未设模型则保持空 = 必须自选
-      f.dt_model = f.kind === 'comic' ? (c.model_image || '') : (c.model_video || '');
+      f.dt_model_i = c.model_image || '';
+      f.dt_model_v = c.model_video || '';
       f.dt_ref = f.kind === 'comic' ? !!c.ref_image : !!c.ref_video;
       fetchModels();
     });
-    watch(() => f.kind, () => { f.dt_model = ''; f.dt_ref = false; });
+    watch(() => f.kind, () => { f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref = false; });
 
     async function load() {
       const data = await API.get('/api/choices');
@@ -123,19 +140,22 @@ Views.createForm = {
       if (!f.llm) { ElementPlus.ElMessage.warning(I18N.t('cf.wLlm')); return; }
       if (!f.dt) { ElementPlus.ElMessage.warning(I18N.t('cf.wDt')); return; }
       if (!f.origin.trim()) { ElementPlus.ElMessage.warning(I18N.t('cf.wOrigin')); return; }
-      // 功能级模型：未选且配置里也没有 → 前端先拦（后端同样校验）
-      if (!f.dt_model) {
-        const c = dtsAll.value.find(x => x.id === f.dt);
-        const cm = f.kind === 'comic' ? (c && c.model_image) : (c && c.model_video);
-        if (!cm) { ElementPlus.ElMessage.warning(I18N.t('cf.wDtModel')); return; }
+      // 功能级模型：未选且配置里也没有 → 前端先拦（后端同样校验：漫画=图像、短剧=视频）
+      const c0 = dtsAll.value.find(x => x.id === f.dt);
+      if (f.kind === 'comic') {
+        if (!f.dt_model_i && !(c0 && c0.model_image)) {
+          ElementPlus.ElMessage.warning(I18N.t('cf.wDtModel')); return;
+        }
+      } else if (!f.dt_model_v && !(c0 && c0.model_video)) {
+        ElementPlus.ElMessage.warning(I18N.t('cf.wDtModelV')); return;
       }
       saving.value = true;
       try {
         const data = await API.post('/api/projects', {
           kind: f.kind, origin: f.origin.trim(), title: f.title.trim(),
           llm_config_id: f.llm, drawthings_config_id: f.dt,
-          dt_model_image: f.kind === 'comic' ? f.dt_model : '',
-          dt_model_video: f.kind === 'drama' ? f.dt_model : '',
+          dt_model_image: f.dt_model_i,
+          dt_model_video: f.kind === 'drama' ? f.dt_model_v : '',
           dt_ref_image: f.kind === 'comic' ? (f.dt_ref ? 1 : 0) : '',
           dt_ref_video: f.kind === 'drama' ? (f.dt_ref ? 1 : 0) : '',
           style: f.style === 'custom' ? '' : f.style,
@@ -150,7 +170,7 @@ Views.createForm = {
     }
 
     onMounted(load);
-    return { f, llms, dts, presets, saving, submit, modelChoices,
+    return { f, llms, dts, presets, saving, submit, imgChoices, vidChoices,
              toConfigs: () => router.push('/configs?ctype=drawthings') };
   },
 };

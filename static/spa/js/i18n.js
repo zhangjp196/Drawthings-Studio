@@ -93,6 +93,8 @@ window.I18N = (function () {
       'cf.dtModel': '生成模型',
       'cf.dtRef': '参考图片',
       'cf.dtModelPh': '选择或输入模型文件名',
+      'cf.dtModelImage': '图像模型',
+      'cf.dtModelVideo': '视频模型',
       'cf.dtModelFollow': '跟随配置默认',
       'cf.dtModelHint': '按功能选择模型：同一配置下不同作品可用不同模型；配置里已设模型会预填（可改），未设则必须自选。',
       'cf.dtHint': '出图/出视频由下方选择的模型决定；不选则跟随配置里的模型。',
@@ -116,6 +118,7 @@ window.I18N = (function () {
       'cf.wDt': '请选择 DrawThings 配置',
       'cf.wOrigin': '请填写主题（一句话）',
       'cf.wDtModel': '请选择生成模型（所选 DrawThings 配置里也未设置模型）',
+      'cf.wDtModelV': '请选择视频模型（所选 DrawThings 配置里也未设置）',
 
       'p.metaIdea': '主题：{0}',
       'p.metaLength': '篇幅：{0} 章',
@@ -640,6 +643,8 @@ window.I18N = (function () {
       'cf.dtModel': 'Generation model',
       'cf.dtRef': 'Reference image',
       'cf.dtModelPh': 'Select or type a model file name',
+      'cf.dtModelImage': 'Image model',
+      'cf.dtModelVideo': 'Video model',
       'cf.dtModelFollow': 'Follow config default',
       'cf.dtModelHint': 'Pick the model per feature: different works can use different models under the same config; a model set in the config is pre-filled (changeable), otherwise you must pick one.',
       'cf.dtHint': 'Output depends on the model you pick below; empty = follow the model in the config.',
@@ -663,6 +668,7 @@ window.I18N = (function () {
       'cf.wDt': 'Please select a DrawThings config',
       'cf.wOrigin': 'Please enter the idea (one sentence)',
       'cf.wDtModel': 'Please pick a generation model (none set in the selected Draw Things config)',
+      'cf.wDtModelV': 'Please pick a video model (none set in the selected Draw Things config)',
 
       'p.metaIdea': 'Idea: {0}',
       'p.metaLength': 'Length: {0} ch',
