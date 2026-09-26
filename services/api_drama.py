@@ -18,6 +18,7 @@ from config_store import ConfigStore
 from services.drawthings import norm_ref_flag
 from services.pipeline import _now, chars_from_raw
 from services.runtime import pipeline
+from services import events as E
 from services.api_common import (
     MEDIA_DIR, MAX_IMAGE_UPLOAD, _overlay_opts, _lang, _json_body, _media_url,
     _chapter_view, _dt_ref_field, _project_view, _config_lists, _clamp_page,
@@ -423,11 +424,11 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
     queue: asyncio.Queue = asyncio.Queue()
 
     async def progress_cb(current: int, total: int, title: str):
-        await queue.put(("progress", {"current": current, "total": total, "title": title or ""}))
+        await queue.put((E.PROGRESS, {"current": current, "total": total, "title": title or ""}))
 
     async def chapter_cb(ch):
         # 生成画面：单章两步完成 → 回传提示词/描述/分辨率/媒体/状态，前端逐个刷新（后续章节仍参考它）
-        await queue.put(("chapter", {"index": ch.index,
+        await queue.put((E.CHAPTER, {"index": ch.index,
                                      "description": ch.description or "",
                                      "prompt": ch.prompt or "",
                                      "width": ch.width or 0, "height": ch.height or 0,
@@ -438,14 +439,14 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
     async def score_cb(ch, score, note, rd):
         # 自动评分事件：score 为 None 时 note 携带阶段（scoring/redo），为数字时是评分结果
         phase = "result" if score is not None else str(note or "")
-        await queue.put(("score", {"index": ch.index, "title": ch.title or "",
+        await queue.put((E.SCORE, {"index": ch.index, "title": ch.title or "",
                                     "score": score,
                                     "note": (note or "") if score is not None else "",
                                     "phase": phase, "redo": rd}))
 
     async def plan_cb(ch):
         # 章节规划：单章规划完成 → 回传标题/摘要/状态，前端逐个补入
-        await queue.put(("chapter", {"index": ch.index, "title": ch.title or "",
+        await queue.put((E.CHAPTER, {"index": ch.index, "title": ch.title or "",
                                      "summary": ch.summary or "", "status": ch.status}))
 
     async def _run():
@@ -473,7 +474,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                     try:
                         score, note = await pipeline.drama.vlm_score_chapter(db, project, season, i, lang)
                     except ValueError as e:
-                        await queue.put(("score", {"index": ch.index, "title": ch.title or "",
+                        await queue.put((E.SCORE, {"index": ch.index, "title": ch.title or "",
                                                     "score": None, "note": str(e), "phase": "error", "redo": 0}))
                         continue
                     await score_cb(ch, score, note, 0)
@@ -485,7 +486,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                                              progress_cb=progress_cb, chapter_done_cb=chapter_cb,
                                              score_cb=score_cb)
             fresh = db.get(Project, project.id)
-            await queue.put(("done", {"status": fresh.status if fresh else ""}))
+            await queue.put((E.DONE, {"status": fresh.status if fresh else ""}))
         except Exception as e:
             if step == "chapters":
                 msg, msg_en = "规划章节失败：", "Planning chapters failed: "
@@ -493,9 +494,9 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 msg, msg_en = "批量评分失败：", "Batch scoring failed: "
             else:
                 msg, msg_en = "生成画面失败：", "Generation failed: "
-            await queue.put(("error", {"message": L(lang, msg + str(e), msg_en + str(e))}))
+            await queue.put((E.ERROR, {"message": L(lang, msg + str(e), msg_en + str(e))}))
         finally:
-            await queue.put(("__eof__", None))
+            await queue.put((E.EOF, None))
 
     task = asyncio.create_task(_run())
     try:
@@ -505,7 +506,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
             except asyncio.TimeoutError:
                 yield ": ping\n\n"  # 心跳：逐章生成耗时长，保持 SSE 连接不被空闲断开
                 continue
-            if event == "__eof__":
+            if event == E.EOF:
                 break
             yield _sse(event, data)
     finally:
