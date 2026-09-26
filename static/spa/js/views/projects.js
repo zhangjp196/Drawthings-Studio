@@ -11,8 +11,8 @@ Views.projects = {
         </div>
         <el-button type="primary" @click="openNew">{{ I18N.t('wb.newProject') }}</el-button>
         <el-radio-group v-model="newKind" size="small">
-          <el-radio-button value="comic">{{ I18N.t('proj.comic') }}</el-radio-button>
-          <el-radio-button value="drama">{{ I18N.t('proj.drama') }}</el-radio-button>
+          <el-radio-button v-if="f.kind !== 'drama'" value="comic">{{ I18N.t('proj.comic') }}</el-radio-button>
+          <el-radio-button v-if="f.kind !== 'comic'" value="drama">{{ I18N.t('proj.drama') }}</el-radio-button>
         </el-radio-group>
       </div>
 
@@ -71,7 +71,7 @@ Views.projects = {
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
                      :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
-      <el-dialog v-model="newDlg" :title="I18N.t('proj.newDlg')" width="880px">
+      <el-dialog v-model="newDlg" :title="newDlgTitle" width="880px">
         <create-form :preset="newPreset" @created="created" />
       </el-dialog>
 
@@ -101,9 +101,15 @@ Views.projects = {
     // 新建弹框：从「漫画创作 / 视频创作」菜单进入时，类型预选对应项
     const newDlg = ref(false);
     const newKind = ref('comic');
-    // 类型由按钮旁的漫画/短剧切换决定（选哪个就是哪个）
+    // 弹框标题指明类型（新建漫画 / 新建短剧）
+    const newDlgTitle = computed(() => I18N.t(newKind.value === 'comic' ? 'proj.newDlgComic' : 'proj.newDlgDrama'));
     function openNew() { newDlg.value = true; }
     const newPreset = computed(() => ({ kind: newKind.value }));
+    // 类型筛选联动：界面筛到某类型时，新建切换同步只显示/选中对应项
+    watch(() => f.kind, (k) => {
+      if (k === 'drama') newKind.value = 'drama';
+      else if (k === 'comic') newKind.value = 'comic';
+    });
     const rows = ref([]);
     const total = ref(0);
     const totalPages = ref(1);
@@ -182,7 +188,7 @@ Views.projects = {
     onMounted(load);
     return {
       f, kindTitle, newPreset, rows, total, totalPages, statusLabels, statusTag,
-      newDlg, newKind, openNew, renameDlg, renameTitle, busy,
+      newDlg, newDlgTitle, newKind, openNew, renameDlg, renameTitle, busy,
       load, apply, onSearch, reset, open, askRename, doRename, del, created,
     };
   },
