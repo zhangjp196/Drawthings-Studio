@@ -431,7 +431,8 @@ Views.projectDrama = {
             <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
           </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtRef')">
-            <el-checkbox v-model="cfg.dt_ref">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+            <el-checkbox v-model="cfg.dt_ref_i" style="margin-right: 16px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+            <el-checkbox v-model="cfg.dt_ref_v">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
             <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
         </el-form>
@@ -789,7 +790,7 @@ Views.projectDrama = {
 
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
-    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref: false });
+    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref_i: false, dt_ref_v: false });
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（短剧只列视频模型）
     const dtModels = ref([]);
     const modelChoices = computed(() => dtModels.value
@@ -810,7 +811,8 @@ Views.projectDrama = {
       const p = data.value.project;
       // 项目未显式选过模型时预填配置里的；参考图开关：项目显式值优先，否则跟随配置
       if (!p.dt_model_video) cfg.dt_model = c ? (c.model_video || '') : '';
-      cfg.dt_ref = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
+      cfg.dt_ref_i = (p.dt_ref_image === '1') || (p.dt_ref_image === '' && !!c && !!c.ref_image);
+      cfg.dt_ref_v = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
       fetchModels();
     });
     const lb = reactive({ show: false, list: [], idx: 0 });
@@ -1448,7 +1450,8 @@ Views.projectDrama = {
       const c = data.value.drawthing_configs.find(x => x.id === cfg.dt);
       const p = data.value.project;
       cfg.dt_model = p.dt_model_video || (c ? (c.model_video || '') : '');
-      cfg.dt_ref = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
+      cfg.dt_ref_i = (p.dt_ref_image === '1') || (p.dt_ref_image === '' && !!c && !!c.ref_image);
+      cfg.dt_ref_v = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
       fetchModels();
       cfgDlg.value = true;
     }
@@ -1458,7 +1461,8 @@ Views.projectDrama = {
         await API.post(`/api/projects/${props.id}/config`, {
           llm_config_id: cfg.llm, drawthings_config_id: cfg.dt,
           dt_model_video: cfg.dt_model,
-          dt_ref_video: cfg.dt_ref ? 1 : 0,
+          dt_ref_image: cfg.dt_ref_i ? 1 : 0,
+          dt_ref_video: cfg.dt_ref_v ? 1 : 0,
         });
         ElementPlus.ElMessage.success(I18N.t('p.cfgSaved'));
         cfgDlg.value = false;

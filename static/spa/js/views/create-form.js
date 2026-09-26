@@ -53,7 +53,8 @@ Views.createForm = {
             </el-col>
           </el-row>
           <el-form-item v-if="f.dt" :label="I18N.t('cf.dtRef')">
-            <el-checkbox v-model="f.dt_ref">{{ I18N.t(f.kind === 'comic' ? 'cfg.refImage' : 'cfg.refVideo') }}</el-checkbox>
+            <el-checkbox v-model="f.dt_ref_i" style="margin-right: 16px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+            <el-checkbox v-if="f.kind === 'drama'" v-model="f.dt_ref_v">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
             <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
         </el-col>
@@ -89,7 +90,8 @@ Views.createForm = {
       dt: '',
       dt_model_i: '',
       dt_model_v: '',
-      dt_ref: false,
+      dt_ref_i: false,
+      dt_ref_v: false,
       title: (props.preset && props.preset.title) || '',
       origin: (props.preset && props.preset.origin) || '',
       style: '',
@@ -115,16 +117,17 @@ Views.createForm = {
       }
     }
     watch(() => f.dt, (id) => {
-      f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref = false;
+      f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref_i = false; f.dt_ref_v = false;
       const c = dtsAll.value.find(x => x.id === id);
       if (!c) return;
       // 预填配置里的模型 / 参考图开关（功能级可覆盖）；配置未设模型则保持空 = 必须自选
       f.dt_model_i = c.model_image || '';
       f.dt_model_v = c.model_video || '';
-      f.dt_ref = f.kind === 'comic' ? !!c.ref_image : !!c.ref_video;
+      f.dt_ref_i = !!c.ref_image;
+      f.dt_ref_v = !!c.ref_video;
       fetchModels();
     });
-    watch(() => f.kind, () => { f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref = false; });
+    watch(() => f.kind, () => { f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref_i = false; f.dt_ref_v = false; });
 
     async function load() {
       const data = await API.get('/api/choices');
@@ -164,8 +167,8 @@ Views.createForm = {
           llm_config_id: f.llm, drawthings_config_id: f.dt,
           dt_model_image: f.dt_model_i,
           dt_model_video: f.kind === 'drama' ? f.dt_model_v : '',
-          dt_ref_image: f.kind === 'comic' ? (f.dt_ref ? 1 : 0) : '',
-          dt_ref_video: f.kind === 'drama' ? (f.dt_ref ? 1 : 0) : '',
+          dt_ref_image: f.dt_ref_i ? 1 : 0,
+          dt_ref_video: f.kind === 'drama' ? (f.dt_ref_v ? 1 : 0) : 0,
           style: f.style === 'custom' ? '' : f.style,
           style_custom: f.style === 'custom' ? f.styleCustom.trim() : '',
         });
