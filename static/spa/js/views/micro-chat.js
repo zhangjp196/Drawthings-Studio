@@ -121,31 +121,43 @@ Views.microChat = {
     function applyQuote() { quoted.value = { url: ctx.url, kind: ctx.kind }; ctx.show = false; }
     function closeCtx() { if (ctx.show) ctx.show = false; }
 
-    // VLM 评分：对右键的生成媒体评分，分值/评语写回该内容块并显示（服务端持久化）
-    async function scoreMedia() {
-      const b = ctx.block;
-      if (!b || ctx.busy) return;
-      ctx.busy = true;
+    // 对某个内容块评分（写回 b.score / b.score_note；用于「VLM 评分」与「重做」前置）
+    async function doScore(b) {
       b.scoring = true;
       try {
         const r = await API.post(`/api/micro/${props.id}/${props.sid}/score`,
           { url: b.url, media: b.media || 'image', prompt: b.prompt || '' });
         b.score = r.score;
         b.score_note = r.note;
-        ElementPlus.ElMessage.success(I18N.t('mw.scoreDone', r.score));
+        return r;
+      } finally {
+        b.scoring = false;
+      }
+    }
+    async function scoreMedia() {
+      const b = ctx.block;
+      if (!b || ctx.busy) return;
+      ctx.busy = true;
+      try {
+        await doScore(b);
+        ElementPlus.ElMessage.success(I18N.t('mw.scoreDone', b.score));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       } finally {
-        b.scoring = false;
         ctx.busy = false;
         ctx.show = false;
       }
     }
-    // 评分后重做：按原参数重跑该媒体（与 chip 上「重跑」一致）
-    function redoMedia() {
+    // 重做：先评分（未评分时）→ 结合评分让 LLM 改进提示词后重新生成；新消息，**不删除原来的**
+    async function redoMedia() {
       const b = ctx.block;
       ctx.show = false;
-      if (b) rerun(b);
+      if (!b || !b.prompt) return;
+      if (!b.score) {
+        try { await doScore(b); }
+        catch (e) { ElementPlus.ElMessage.error(e.message); return; }
+      }
+      rerun(b, { improve: true, ref_url: b.url });
     }
 
     // 滚动：贴底自动跟随（含图片陆续加载）；用户上翻后不再打扰，显示「回到底部」
@@ -323,8 +335,10 @@ Views.microChat = {
       }
     }
 
-    // 一键重跑：跳过 LLM，按内容块保存的参数直接重生成（结果可复现）
-    async function rerun(b) {
+    // 一键重跑：跳过 LLM，按内容块保存的参数直接重生成（结果可复现）。
+    // opts.improve=true（重做）：带上评分，后端先用 LLM 结合评语改进提示词再生成；始终新建消息，不删除原内容。
+    async function rerun(b, opts) {
+      opts = opts || {};
       if (busy.value || !props.hasSession || !b || !b.prompt) return;
       busy.value = true;
       startTimer();
@@ -342,7 +356,8 @@ Views.microChat = {
         await API.sse(`/api/micro/${props.id}/${props.sid}/regenerate`, {
           prompt: b.prompt, media: b.media || 'image',
           width: b.width || 0, height: b.height || 0, seconds: b.seconds || 0,
-          ref_url: b.ref_url || '',
+          ref_url: opts.ref_url != null ? opts.ref_url : (b.ref_url || ''),
+          improve: !!opts.improve, score: b.score || 0, note: b.score_note || '',
         }, (ev, d) => {
           if (ev === EVENTS.TOOL) {
             onTool(d);

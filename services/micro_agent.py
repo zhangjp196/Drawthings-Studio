@@ -17,6 +17,7 @@ import time
 from functools import partial
 from pathlib import Path
 
+from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ImageUrl
 
@@ -156,6 +157,31 @@ async def vlm_score_media(llm_cfg, image_path: str, prompt: str = "", lang: str 
     content = [ImageUrl(url=image_data_uri(image_path)), text]
     data = (await agent.run(content)).output
     return int(getattr(data, "score", 0) or 0), str(getattr(data, "note", "") or "")
+
+
+class _PromptOut(BaseModel):
+    prompt: str = ""
+
+
+_REFINE_SYSTEM = ("你是出图/出视频的提示词优化师。根据「原始英文提示词」与「评分评语」，"
+                  "在保持主体、角色与风格一致的前提下，针对评语指出的问题给出改进后的英文提示词。"
+                  "只输出一个 JSON 对象，字段：prompt（改进后的英文提示词）。")
+
+
+async def refine_prompt(llm_cfg, prompt: str, score: int, note: str, lang: str = "zh") -> str:
+    """结合评分评语改进提示词（失败则回退原提示词）。"""
+    if not llm_cfg or not prompt:
+        return prompt
+    try:
+        model = build_model(llm_cfg)
+        agent = make_agent(model, _REFINE_SYSTEM, output_type=_PromptOut)
+        user = (f"原始提示词：{prompt}\n评分：{int(score or 0)}\n评语：{note or '（无）'}\n"
+                f"请给出改进后的英文提示词。")
+        out = (await agent.run(user)).output
+        p = str(getattr(out, "prompt", "") or "").strip()
+        return p or prompt
+    except Exception:
+        return prompt
 
 
 class _MsgPersister:
@@ -431,10 +457,14 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
 async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
                          assistant_id: int, kind: str, prompt: str, width: int = 0,
                          height: int = 0, seconds: int = 0, ref_url: str = "",
-                         lang: str = "zh", cancel_event=None) -> None:
+                         lang: str = "zh", cancel_event=None,
+                         llm_cfg=None, improve: bool = False,
+                         score: int = 0, note: str = "") -> None:
     """一键重跑：跳过 LLM，按内容块保存的参数直接重生成（结果可复现）。
 
     `ref_url` = 原生成所用的参考图（/media/xxx）；空则回退本会话最近生成的媒体。
+    `improve=True`（重做）：先用 LLM 结合评分评语改进提示词，再按原参数重生成；
+    始终新建助手消息，**不删除原来的内容**。
     """
     t0 = time.monotonic()
     parts: list[dict] = []
@@ -461,6 +491,9 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
         if ref is None:
             p = latest_session_media_path(db, session.id)
             ref = p
+        # 重做：结合评分评语用 LLM 改进提示词（失败回退原提示词）
+        if improve:
+            prompt = await refine_prompt(llm_cfg, prompt, score, note, lang)
         await _do_generation(out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                              seconds=seconds, ref=str(ref) if ref else None, tid="t1",
                              lang=lang, parts=parts, last_media=last_media)

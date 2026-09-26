@@ -639,8 +639,12 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str,
             return 0
     width, height, seconds = _int(body.get("width")), _int(body.get("height")), _int(body.get("seconds"))
     ref_url = str(body.get("ref_url") or "")
+    improve = bool(body.get("improve"))
+    score = _int(body.get("score"))
+    note = str(body.get("note") or "")
     cs = ConfigStore(db)
     dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
+    llm_cfg = cs.get_llm(work.llm_config_id or "")
 
     last = db.query(MicroMessage).filter_by(session_id=session_id)\
         .order_by(MicroMessage.index.desc()).first()
@@ -658,7 +662,8 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str,
         return run_regenerate(
             queue, db=db, session=session, work=work, dt_cfg=dt_cfg, assistant_id=assistant_id,
             kind=kind, prompt=prompt, width=width, height=height, seconds=seconds,
-            ref_url=ref_url, lang=lang, cancel_event=cancel_event)
+            ref_url=ref_url, lang=lang, cancel_event=cancel_event,
+            llm_cfg=llm_cfg, improve=improve, score=score, note=note)
 
     return StreamingResponse(
         _sse_transport(_runner, db=db, job_id=job_id),
