@@ -1,7 +1,8 @@
 """漫画项目 API 路由（/api/comics/*）：仅漫画走向。
 
 - 只调用漫画流水线（pipeline.comic），无 kind 分支
-- 与另一类型完全独立：services/api_drama.py"""
+- 与另一类型完全独立：services/api_drama.py
+- 设计约定：漫画 / 短剧刻意分成两条重复的独立线（便于分开开发维护），请勿合并 / 勿抽共享基座（见 AGENTS.md）"""
 import asyncio
 from pathlib import Path
 

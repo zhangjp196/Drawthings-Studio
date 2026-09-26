@@ -33,6 +33,13 @@ Continuity references require **"Supports reference image"** to be enabled for t
 create form; the config value is the fallback) — image-to-image / image-to-video; off = text-to-image / text-to-video.
 With it on, each chapter's prompt is auto-written as an **edit instruction based on the reference image** (keep characters / style / composition consistent, describe only what changes this chapter) instead of a full re-description — so generations follow the reference.
 
+> **Design convention — keep comic and short drama separate.** They are two **independent, parallel tracks**
+> (`api_comic` ↔ `api_drama`, `pipeline_comic` ↔ `pipeline_drama`, `project-comic.js` ↔ `project-drama.js`, …)
+> that intentionally duplicate structure so each can evolve and be maintained on its own. **Do not merge them /
+> do not extract a shared base / do not add a `kind` branch.** Only type-agnostic infrastructure is shared
+> (`api_common`, `events`, `media_files`, `capabilities`, `drawthings`, `agent`, `db`, `i18n`, `config_store`, `runtime`).
+> When you change one track, mirror the change in the other by hand. See `AGENTS.md`.
+
 ## Workspace (home /)
 
 - **Quick actions**: New project / Quick Create / Settings.

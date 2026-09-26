@@ -5,6 +5,9 @@
 - 逐章生成调用 DrawThings **生视频**（generate_video），前章视频抽末帧作参考；
 - 导出仅支持 ZIP（视频不支持拼 PDF）。
 
+设计约定：漫画 / 短剧刻意分成两条重复的独立线（便于分开开发维护），
+改本线时按需在 pipeline_comic.py 对称修改，**请勿合并 / 勿抽共享基座**（见 AGENTS.md）。
+
 数据全部走 SQLite（models.py），媒体文件存 data/media。
 每个项目携带所选 LLMConfig / DrawThingConfig 的 id，运行时现场构建客户端，
 因此不同项目可用不同的端点/模型/模式。
