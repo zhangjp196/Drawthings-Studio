@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectDrama = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar },
+  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'gen-dialog': Views.dramaGenDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -392,18 +392,8 @@ Views.projectDrama = {
         </template>
       </el-dialog>
 
-      <el-dialog v-model="genDlg" :title="genDlgTitle" width="540px">
-        <p class="hint">{{ I18N.t('p.genDlgHint') }}</p>
-        <el-form label-position="top">
-          <el-form-item :label="I18N.t('p.genExtraPrompt')">
-            <el-input v-model="genDlgExtra" type="textarea" :rows="4" :placeholder="I18N.t('p.genExtraPromptPh')" />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="genDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="actBusy" @click="confirmGen">{{ I18N.t('p.genStart') }}</el-button>
-        </template>
-      </el-dialog>
+      <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle"
+                  :busy="actBusy" @confirm="confirmGen" />
 
       <!-- 章节规划（与新增章节融合）：章节数量固定值 + 方式（新增/重做），仅在此弹框内显示 -->
       <el-dialog v-model="planDlg" :title="planDlgTitle" width="480px">

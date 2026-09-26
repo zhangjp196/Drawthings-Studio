@@ -212,7 +212,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 │       ├── index.html   #   shell: left sidebar + toolbar + <router-view> + pre-paint theme/lang
 │       ├── css/app.css  #   app styles (Element Plus theme variable mapping + layout + chat area)
 │       └── js/          #   app.js (entry/router) api.js (fetch+SSE) events.js (event constants) theme.js i18n.js (zh/en dict) md.js (Markdown)
-│                        #   views/ (routed views + sub-components: micro-block / micro-session-list / micro-chat / micro-works-gallery, chapter-card-*, create-form-*)
+│                        #   views/ (routed views + sub-components: micro-block / micro-session-list / micro-chat / micro-works-gallery; per-track comic/drama: chapter-card-*, create-form-*, chapter-list-*, chapter-toolbar-*, season-preview-*, season-export-*, gen-dialog-*, pdf-dialog-comic)
 └── data/                # app.db (SQLite) media/ (images/videos)
 ```
 

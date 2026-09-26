@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar },
+  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -384,18 +384,8 @@ Views.projectComic = {
         </template>
       </el-dialog>
 
-      <el-dialog v-model="genDlg" :title="genDlgTitle" width="540px">
-        <p class="hint">{{ I18N.t('p.genDlgHint') }}</p>
-        <el-form label-position="top">
-          <el-form-item :label="I18N.t('p.genExtraPrompt')">
-            <el-input v-model="genDlgExtra" type="textarea" :rows="4" :placeholder="I18N.t('p.genExtraPromptPh')" />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="genDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="actBusy" @click="confirmGen">{{ I18N.t('p.genStart') }}</el-button>
-        </template>
-      </el-dialog>
+      <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle"
+                  :busy="actBusy" @confirm="confirmGen" />
 
       <!-- 章节规划（与新增章节融合）：章节数量固定值 + 方式（新增/重做），仅在此弹框内显示 -->
       <el-dialog v-model="planDlg" :title="planDlgTitle" width="480px">
@@ -469,13 +459,7 @@ Views.projectComic = {
       </el-dialog>
 
       <!-- PDF 预览：iframe 直接渲染导出端点返回的 inline PDF（关闭弹框即销毁） -->
-      <el-dialog v-model="pdfDlg" :title="I18N.t('p.previewPdf')" width="86%" top="4vh" destroy-on-close
-                 @closed="pdfUrl = ''">
-        <iframe v-if="pdfUrl" :src="pdfUrl" class="pdf-frame" />
-        <template #footer>
-          <el-button @click="pdfDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-        </template>
-      </el-dialog>
+      <pdf-dialog v-model="pdfDlg" :url="pdfUrl" @closed="pdfUrl = ''" />
 
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>

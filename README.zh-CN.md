@@ -196,7 +196,7 @@
 │       ├── index.html   #   外壳：左栏侧边导航 + 工具栏 + <router-view> + 主题/语言预渲染
 │       ├── css/app.css  #   应用样式（Element Plus 主题变量映射 + 布局 + 对话区）
 │       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）events.js（事件常量）theme.js i18n.js（中英词典）md.js（Markdown）
-│                        #   views/（路由视图 + 子组件：micro-block / micro-session-list / micro-chat / micro-works-gallery、chapter-card-*、create-form-*）
+│                        #   views/（路由视图 + 子组件：micro-block / micro-session-list / micro-chat / micro-works-gallery；漫画/短剧各自：chapter-card-*、create-form-*、chapter-list-*、chapter-toolbar-*、season-preview-*、season-export-*、gen-dialog-*、pdf-dialog-comic）
 └── data/                # app.db（SQLite） media/（图片/视频）
 ```
 
