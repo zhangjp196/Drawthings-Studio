@@ -151,8 +151,19 @@ window.API = {
   // 文件下载：GET -> Blob，按 Content-Disposition 命名并触发保存；非 2xx 抛本地化错误。
   // CS 桌面客户端（window.pywebview.api 可用）时改走系统「另存为」对话框；浏览器里保持原下载行为。
   download: async (url) => {
-    const resp = await fetch(url, { headers: { 'Accept-Language': API._lang() } });
+    // 导出（ZIP/PDF）可能较大：给独立超时，避免请求悬挂
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10 * 60 * 1000);
+    let resp;
+    try {
+      resp = await fetch(url, { headers: { 'Accept-Language': API._lang() }, signal: ctrl.signal });
+    } catch (e) {
+      clearTimeout(timer);
+      if (e && e.name === 'AbortError') throw new Error(API._t('common.timeout'));
+      throw new Error(API._t('common.netError', (e && e.message) || ''));
+    }
     if (!resp.ok) {
+      clearTimeout(timer);
       let detail = API._t('common.httpError', resp.status);
       try {
         const j = await resp.json();
@@ -160,7 +171,15 @@ window.API = {
       } catch (e) { /* 非 JSON 错误体 */ }
       throw new Error(detail);
     }
-    const blob = await resp.blob();
+    let blob;
+    try {
+      blob = await resp.blob();
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error(API._t('common.timeout'));
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     const cd = resp.headers.get('content-disposition') || '';
     let name = 'download';
     let m = /filename\*=utf-8''([^;]+)/i.exec(cd);

@@ -24,13 +24,16 @@ import time
 import urllib.request
 from pathlib import Path
 
-from paths import frozen, resource_root, data_dir
+from paths import frozen, resource_root, data_dir, env_int, APP_NAME
+from services.logging_setup import setup_logging
+
+setup_logging()
 
 HOST = os.getenv("HOST", "127.0.0.1")
-PORT = int(os.getenv("PORT", "8010"))
+PORT = env_int("PORT", 8010)
 BASE_URL = f"http://{HOST}:{PORT}"
 HEALTH_URL = f"{BASE_URL}/api/health"
-APP_TITLE = "Drawthings Studio"
+APP_TITLE = APP_NAME
 
 # 单实例锁：记录 PID，供二次启动检测（放数据目录，源码/打包模式位置一致）
 LOCK_FILE = data_dir() / ".client.lock"

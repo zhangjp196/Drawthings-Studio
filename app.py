@@ -58,12 +58,15 @@ def run_server() -> None:
     _redirect_logs()
     try:
         import os
+        from paths import env_int
+        from services.logging_setup import setup_logging
+        setup_logging()
         _watch_parent()
         import uvicorn
         from main import app as fastapi_app
         uvicorn.run(fastapi_app,
                     host=os.getenv("HOST", "127.0.0.1"),
-                    port=int(os.getenv("PORT", "8010")),
+                    port=env_int("PORT", 8010),
                     reload=False)
     except BaseException:
         import traceback

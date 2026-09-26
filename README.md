@@ -293,7 +293,7 @@ What the client does:
   - system notifications, external links open in the system browser;
 - **Single instance**: a PID lock prevents duplicate windows (cleaned up on exit).
 
-Env vars: `HOST` (default `127.0.0.1` — local only, not exposed) / `PORT` (default `8010`) / `RELOAD` (default `0`; use `RELOAD=1` for dev hot-reload).
+Env vars: `HOST` (default `127.0.0.1` — local only, not exposed) / `PORT` (default `8010`) / `RELOAD` (default `0`; use `RELOAD=1` for dev hot-reload) / `LOG_LEVEL` (default `INFO`). A `.env` file is loaded automatically (see "Environment variables").
 
 > This shape is **local single-user only** (no multi-user accounts, no remote access); API keys and data stay on this machine.
 > Packaging: `./build_app.sh` builds `dist/Drawthings Studio.app` in one step (see below).
@@ -336,11 +336,17 @@ Build a **directly distributable** DMG on top of the `.app` (contains the `.app`
 
 ## Environment variables (see .env.example)
 
-> Config items have moved to the UI; the only remaining env variable is the data directory.
+> Config items have moved to the UI; the remaining env variables control storage / serving / logging.
+> A `.env` file (project root, working dir or app support dir) is **loaded automatically at startup**
+> (existing environment variables are not overridden).
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATA_DIR` | Directory for the database and media files | `./data` |
+| `HOST` | Listen address (loopback only by default; `0.0.0.0` for LAN) | `127.0.0.1` |
+| `PORT` | Listen port (non-numeric values fall back to the default with a warning) | `8010` |
+| `RELOAD` | Dev hot-reload (`1` = on; the desktop client always uses `0`) | `0` |
+| `LOG_LEVEL` | Log level: `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
 
 ## Prerequisites (real endpoints)
 

@@ -14,7 +14,12 @@ from config import data_dir
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(data_dir) / "app.db"
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+try:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+except OSError as e:
+    raise RuntimeError(
+        f"无法创建数据目录 {DB_PATH.parent}（{e}）。请检查 DATA_DIR 是否有写权限，"
+        f"或改用一个可写目录（如 DATA_DIR=~/drawthings-data）。") from e
 
 
 def uuid_hex12() -> str:
@@ -51,12 +56,18 @@ Base = declarative_base()
 
 
 def get_db():
-    """FastAPI 依赖：为每个请求提供一个数据库会话；处理中途异常时回滚，结束后关闭。"""
+    """FastAPI 依赖：为每个请求提供一个数据库会话；处理中途异常时回滚，结束后关闭。
+
+    用 BaseException 兜底（含 asyncio.CancelledError / KeyboardInterrupt）：流式响应被客户端
+    中断（取消）时也回滚未提交事务，避免残留半开事务影响后续请求。"""
     db = SessionLocal()
     try:
         yield db
-    except Exception:
-        db.rollback()  # 未提交事务回滚，避免异常后残留未完成事务影响后续请求
+    except BaseException:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         raise
     finally:
         db.close()

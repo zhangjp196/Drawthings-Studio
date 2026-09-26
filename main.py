@@ -18,6 +18,7 @@ import os
 os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "__all__")
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
@@ -26,21 +27,42 @@ from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from paths import resource_root
-from db import get_db, init_db
+from paths import resource_root, env_int, APP_NAME
+from config import data_dir
+from db import engine, get_db, init_db
 from i18n import L
 from config_store import ConfigStore
 from services.agent import make_httpx_client
+from services.logging_setup import setup_logging
 from services.api_common import (
     MEDIA_DIR, _lang, _json_body, _llm_view, _dt_view, _dt_gen_fields,
 )
 from services import api_comic, api_drama, api_micro
 
+setup_logging()  # 统一日志（LOG_LEVEL 控制；重复调用无副作用）
+
 STATIC_ROOT = resource_root() / "static"
 
 MAX_REQUEST_BODY = 64 * 1024 * 1024  # 请求体上限 64MB（容纳多张 base64 附图；超限直接拒绝）
 
-app = FastAPI(title="Drawthings Studio")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """启动/关闭钩子：启动打印关键信息；关闭释放数据库连接池（进程退出更干净）。"""
+    logging.getLogger("drawthings").info(
+        "Drawthings Studio 启动：data=%s host=%s port=%s",
+        data_dir, os.getenv("HOST", "127.0.0.1"), os.getenv("PORT", "8010"))
+    try:
+        yield
+    finally:
+        try:
+            engine.dispose()
+        except Exception:
+            pass
+        logging.getLogger("drawthings").info("Drawthings Studio 已关闭")
+
+
+app = FastAPI(title=APP_NAME, lifespan=_lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)  # HTML/CSS/JS 压缩，减少传输体积
 app.include_router(api_comic.router)   # 漫画 API（/api/comics/*）
 app.include_router(api_drama.router)   # 短剧 API（/api/dramas/*）
@@ -418,5 +440,5 @@ if __name__ == "__main__":
     # 默认只绑 127.0.0.1（本地单用户，不对外；如需局域网访问可显式设 HOST=0.0.0.0）。
     uvicorn.run("main:app",
                 host=_os.getenv("HOST", "127.0.0.1"),
-                port=int(_os.getenv("PORT", "8010")),
+                port=env_int("PORT", 8010),
                 reload=_os.getenv("RELOAD", "0") == "1")
