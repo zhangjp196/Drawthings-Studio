@@ -360,8 +360,6 @@ Views.configs = {
     const fmt = (s) => (s || '').slice(0, 19).replace('T', ' ');
     function dtMeta(r) {
       const p = [];
-      if (r.model_image) p.push(I18N.t(r.ref_image ? 'cfg.dtMetaImageRef' : 'cfg.dtMetaImage', r.model_image));
-      if (r.model_video) p.push(I18N.t(r.ref_video ? 'cfg.dtMetaVideoRef' : 'cfg.dtMetaVideo', r.model_video));
       p.push(I18N.t(r.max_side ? 'cfg.maxSide' : 'cfg.maxSideNone', r.max_side ? r.max_side : ''));
       p.push(r.max_seconds ? I18N.t('cfg.seconds', r.max_seconds) : I18N.t('cfg.secondsNone'));
       return p.join(' · ');
