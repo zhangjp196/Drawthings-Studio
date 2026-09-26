@@ -322,7 +322,7 @@ Views.microWork = {
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
       cfgBusy, cfg, imgChoices, vidChoices, saveCfg, delWork,
       lb, openLb, tagLabel, tagType,
-      router, pick, openSess,
+      router, pick, openSess, load,
     };
   },
 };
