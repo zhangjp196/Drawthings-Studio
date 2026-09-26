@@ -128,6 +128,7 @@ def _migrate():
             "dt_model_video": "VARCHAR(200) DEFAULT ''",
             "dt_ref_image": "VARCHAR(1) DEFAULT ''",
             "dt_ref_video": "VARCHAR(1) DEFAULT ''",
+            "score_mode": "VARCHAR(10) DEFAULT 'image'",
         },
         "micro_messages": {
             "images": "TEXT",

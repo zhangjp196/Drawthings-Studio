@@ -29,7 +29,8 @@ from services.media_files import (
     cleanup_message_media, export_pdf, export_zip, is_video_url,
     media_path_from_url, save_data_uri_images,
 )
-from services.micro_agent import is_video_path, run_micro_chat, run_regenerate, vlm_score_media
+from services.micro_agent import (is_video_path, norm_score_mode, run_micro_chat,
+                                  run_regenerate, vlm_score_media)
 from services.micro_parts import dump_parts, load_parts
 from services.pipeline import _now
 
@@ -103,6 +104,7 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "dt_model_video": work.dt_model_video or "",
             "dt_ref_image": work.dt_ref_image or "",
             "dt_ref_video": work.dt_ref_video or "",
+            "score_mode": work.score_mode or "image",
             "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "",
             "dt_name": dt_cfg.name if dt_cfg else "",
@@ -179,6 +181,7 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
         dt_model_video=str(body.get("dt_model_video") or "").strip()[:200],
         dt_ref_image=_dt_ref_field(body, "dt_ref_image"),
         dt_ref_video=_dt_ref_field(body, "dt_ref_video"),
+        score_mode=norm_score_mode(body.get("score_mode")),
         created_at=_now(), updated_at=_now(),
     )
     db.add(w)
@@ -419,6 +422,7 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     work.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
     work.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
     work.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
+    work.score_mode = norm_score_mode(body.get("score_mode"))
     work.updated_at = _now()
     db.commit()
     return {"ok": True}
@@ -710,7 +714,9 @@ async def micro_score(request: Request, work_id: str, session_id: str,
                                          "Cannot extract a video frame to score (ffmpeg required)"))
         img = frame
     try:
-        score, note = await vlm_score_media(llm_cfg, img, lang)
+        score, note = await vlm_score_media(llm_cfg, img, lang,
+                                            mode=getattr(work, "score_mode", "image"),
+                                            prompt=str(body.get("prompt") or ""))
     except Exception as e:
         logging.getLogger("drawthings").warning("微创作评分失败：%s", e, exc_info=True)
         raise HTTPException(status_code=400,

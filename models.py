@@ -182,6 +182,7 @@ class MicroWork(Base):
     dt_model_video = Column(String(200), default="")         # 功能级模型：本作品出视频模型（空=跟随 DrawThings 配置）
     dt_ref_image = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_ref_video = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
+    score_mode = Column(String(10), default="image")         # 自动评分依据：image=仅画面（忽略提示词）| prompt=结合提示词相符度
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     sessions = relationship("MicroSession", back_populates="work",

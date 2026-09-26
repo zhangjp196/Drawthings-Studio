@@ -87,6 +87,13 @@ Views.microWork = {
               <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
               <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
             </el-form-item>
+            <el-form-item :label="I18N.t('mc.scoreMode')">
+              <el-select v-model="cfg.score_mode" style="width: 100%">
+                <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
+                <el-option value="prompt" :label="I18N.t('mc.scoreModePrompt')" />
+              </el-select>
+              <div class="hint">{{ I18N.t('mc.scoreModeHint') }}</div>
+            </el-form-item>
           </el-form>
           <div class="actions">
             <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
@@ -144,7 +151,7 @@ Views.microWork = {
 
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
-    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false });
+    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, score_mode: 'image' });
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
     const imgChoices = computed(() => dtModels.value
@@ -168,6 +175,7 @@ Views.microWork = {
       cfg.title = w.title;
       cfg.llm = w.llm_config_id;
       cfg.dt = w.drawthings_config_id || '';
+      cfg.score_mode = w.score_mode || 'image';
       const c = (data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
       // 作品级未显式选模型时预填配置里的；参考图开关：作品显式值优先，否则跟随配置
       cfg.mi = w.dt_model_image || (c ? (c.model_image || '') : '');
@@ -295,6 +303,7 @@ Views.microWork = {
           drawthings_config_id: cfg.dt,
           dt_model_image: cfg.mi, dt_model_video: cfg.mv,
           dt_ref_image: cfg.ref_i ? 1 : 0, dt_ref_video: cfg.ref_v ? 1 : 0,
+          score_mode: cfg.score_mode,
         });
         ElementPlus.ElMessage.success(I18N.t('mw.cfgSaved'));
         load();

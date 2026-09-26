@@ -139,12 +139,12 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   "Use as reference"; it becomes the reference for the next generation (video → last frame for image-to-image; image →
   first frame for image-to-video). Works per message and across sessions; the reference is cleared after that generation.
 - **Attachment de-duplication**: adding the same image twice is skipped (no duplicate upload).
-- **Automatic VLM scoring**: every generated image / video is scored **automatically right after generation**
-  (the work's VLM rates it 0–100 with a one-line comment; videos are scored on their last frame); the scoring
-  **judges the image itself only — it deliberately ignores the generation prompt** (composition / lighting / clarity /
-  artifacts). The **score and comment are persisted and shown on the card**. Right-click → **Redo (improve by score)**
-  then has the LLM **rewrite the prompt using that score & comment** and regenerates as a **new message** — the original
-  is always kept. (The card's *Re-run* still reproduces the exact same params without the LLM.)
+- **Automatic VLM scoring (configurable basis)**: every generated image / video is scored **automatically right after
+  generation** (the work's VLM rates it 0–100 with a one-line comment; videos are scored on their last frame). The
+  **scoring basis is chosen per work** in *Settings → Scoring basis*: **image only** (ignore the prompt, default) or
+  **image + prompt match**. The score and comment are persisted and shown on the card. Right-click → **Redo (improve by
+  score)** then has the LLM **rewrite the prompt using that score & comment** and regenerates as a **new message** — the
+  original is always kept. (The card's *Re-run* still reproduces the exact same params without the LLM.)
 - **User image attachments**: when the chosen LLM supports vision (`supports_vision`), the input box lets you click 📎 to upload, **paste**, or **drag**
   images (up to 4 per message; you can send images without text). Attachments are stored with the message and sent back to the model as part of the multi-turn context.
   Non-vision models do not show this entry.

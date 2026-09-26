@@ -142,17 +142,38 @@ def image_ref_path(ref: str | None) -> str | None:
     return ref
 
 
-_SCORE_SYSTEM = ("你是美术/视频审片。**仅根据画面本身评估，不要参考任何文字提示词或描述**。"
-                 "按 100 分制打分，只输出一个 JSON 对象，字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
-                 "评估维度：构图、光影、清晰度、结构与人体合理性、画面/风格一致性、有无明显畸变或伪影、整体观感。")
+_SCORE_SYSTEM_IMAGE = ("你是美术/视频审片。**仅根据画面本身评估，不要参考任何文字提示词或描述**。"
+                       "按 100 分制打分，只输出一个 JSON 对象，字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
+                       "评估维度：构图、光影、清晰度、结构与人体合理性、画面/风格一致性、有无明显畸变或伪影、整体观感。")
+_SCORE_SYSTEM_PROMPT = ("你是美术/视频审片。请**对照生成提示词**评估画面：先判断是否呈现了提示词的关键元素与意图，"
+                        "再看构图、光影、清晰度、一致性、有无畸变。按 100 分制打分，只输出一个 JSON 对象，"
+                        "字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。")
 
 
-async def vlm_score_media(llm_cfg, image_path: str, lang: str = "zh") -> tuple[int, str]:
-    """用作品所选 VLM **仅按画面本身**评分（忽略生成提示词）：返回 (score, note)。视频请先取末帧再传入。"""
+def norm_score_mode(v) -> str:
+    """评分依据：'prompt'=结合提示词相符度；其余（含空）=仅评画面（忽略提示词）。"""
+    return "prompt" if str(v or "").strip().lower() == "prompt" else "image"
+
+
+async def vlm_score_media(llm_cfg, image_path: str, lang: str = "zh",
+                          mode: str = "image", prompt: str = "") -> tuple[int, str]:
+    """用作品所选 VLM 评分：返回 (score, note)。
+
+    mode='image'（默认）：仅评画面本身（忽略生成提示词）；mode='prompt'：结合提示词评相符度。
+    视频请先取末帧再传入。
+    """
+    use_prompt = norm_score_mode(mode) == "prompt"
     model = build_model(llm_cfg)
-    agent = make_agent(model, _SCORE_SYSTEM, output_type=ScoreOut)
-    text = ("Evaluate the image quality by the image alone (do not consider any prompt/text), then give a score "
-            "and a one-line comment.") if lang == "en" else "请仅根据画面本身评价质量并给出评分与一句话评语。"
+    agent = make_agent(model, _SCORE_SYSTEM_PROMPT if use_prompt else _SCORE_SYSTEM_IMAGE,
+                       output_type=ScoreOut)
+    if use_prompt:
+        text = (f"Prompt: {prompt or '(none)'}\nEvaluate how well the image matches the prompt and its quality; "
+                f"give a score and a one-line comment." if lang == "en"
+                else f"生成提示词：{prompt or '（无）'}\n请对照提示词评估画面并给出评分与一句话评语。")
+    else:
+        text = ("Evaluate the image quality by the image alone (do not consider any prompt/text), then give a score "
+                "and a one-line comment." if lang == "en"
+                else "请仅根据画面本身评价质量并给出评分与一句话评语。")
     content = [ImageUrl(url=image_data_uri(image_path)), text]
     data = (await agent.run(content)).output
     s = int(getattr(data, "score", 0) or 0)
@@ -302,12 +323,14 @@ class _MsgPersister:
 
 async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, height: int = 0,
                          seconds: int = 0, ref: str | None, tid: str, lang: str,
-                         parts: list, last_media: dict, llm_cfg=None) -> str:
+                         parts: list, last_media: dict, llm_cfg=None,
+                         score_mode: str = "image") -> str:
     """执行一次生成（图/视频），把 tool/tool_status/media/tool_error 事件写入 out。
 
     - 生成参数快照写入内容块；
-    - 成功且提供了 llm_cfg 时**自动用该 VLM 评分**（图/视频；视频取末帧），
-      评分写入内容块并经 `media_score` 事件下发（失败静默忽略，不影响生成）。
+    - 成功且提供了 llm_cfg 时**自动用该 VLM 评分**（图/视频；视频取末帧），评分依据由 `score_mode` 决定
+      （'image'=仅画面忽略提示词；'prompt'=结合提示词相符度），评分写入内容块并经 `media_score` 事件下发
+      （失败静默忽略，不影响生成）。
     返回给 LLM 的结果文本（成功/失败），与提示词内容无关。
     """
     if kind == "image":
@@ -356,7 +379,7 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
     if llm_cfg:
         try:
             score_path = image_ref_path(path)  # 视频 → 末帧
-            s, n = await vlm_score_media(llm_cfg, score_path, lang)
+            s, n = await vlm_score_media(llm_cfg, score_path, lang, mode=score_mode, prompt=prompt)
             block["score"] = s
             block["score_note"] = n
             await out.put((E.MEDIA_SCORE, {"id": tid, "score": s, "note": n}))
@@ -453,7 +476,8 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                     result = await _do_generation(
                         out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                         seconds=seconds, ref=ref, tid=tid, lang=lang,
-                        parts=parts, last_media=last_media, llm_cfg=llm_cfg)
+                        parts=parts, last_media=last_media, llm_cfg=llm_cfg,
+                        score_mode=norm_score_mode(getattr(work, "score_mode", "image")))
                     persister.save("streaming")  # 生成的里程碑立即落库（断连可恢复）
                     return result
 
@@ -530,7 +554,8 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
             prompt = await refine_prompt(llm_cfg, prompt, score, note, lang)
         await _do_generation(out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                              seconds=seconds, ref=str(ref) if ref else None, tid="t1",
-                             lang=lang, parts=parts, last_media=last_media, llm_cfg=llm_cfg)
+                             lang=lang, parts=parts, last_media=last_media, llm_cfg=llm_cfg,
+                             score_mode=norm_score_mode(getattr(work, "score_mode", "image")))
         persister.save("done" if last_media.get("url") else "interrupted")
         persister.final = True
         await out.put((E.DONE, {}))
