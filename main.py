@@ -1123,6 +1123,13 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
             f"当前只能生成：{avail}。调用 generate_media 时必须用 media 参数指明类型"
             f"（图片传 media=\"image\"，视频传 media=\"video\"）；用户未明确时默认用 {default_media}。"
             + sec_hint + ratio)
+        # 参考图模式：勾选「支持参考图片」后，附图 / 最近生成的媒体会作为参考图 →
+        # 提示词写成基于参考图的修改指令，而不是从头完整描述
+        if bool(getattr(dt_cfg, "ref_image", 0)) or bool(getattr(dt_cfg, "ref_video", 0)):
+            instructions += (
+                "参考图模式：附图（无附图时为本会话最近一次生成的媒体）将作为图生图 / 图生视频的参考图。"
+                "此时 prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
+                "（角色、服装、画风、光照、构图），再具体描述用户本次要求的改动；不要从头重新描述整个画面。")
     else:
         instructions = MC_SYSTEM + "当前未配置生成服务，无法出图/出视频：用户要求生成时，请说明暂时无法生成，" \
                                    "但可以代为撰写详细的英文提示词供其后续使用。"
@@ -1132,7 +1139,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
     # 有序内容块：text / tool（含生成结果与提示词）/ error，按发生顺序保存
     parts: list[dict] = []
     tool_ids = itertools.count(1)
-    last_media: dict = {}
+    last_media: dict = {}  # 上次成功生成的媒体：{url, prompt, path}（path 供后续生成作参考图回退）
 
     def _add_text(delta: str) -> None:
         """追加文本增量：与上一块同为文本则合并，否则新起一个文本块（保证与生成块的相对顺序）。"""
@@ -1149,6 +1156,9 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                     async def generate_media(ctx: RunContext, prompt: str, media: str = "",
                                              width: int = 0, height: int = 0, seconds: int = 0) -> str:
                         """生成图片或视频：根据详细英文提示词产出单张图或单个视频。
+
+                        若用户当前消息附带了图片，会自动作为参考图做图生图 / 图生视频（受配置「支持参考图片」开关
+                        控制，未开启时按文生图 / 文生视频）；无附图时回退使用本会话最近一次生成的媒体作参考。
 
                         Args:
                             prompt: 详细英文提示词（主体、场景、构图、光线、风格；视频补充运镜与动态）
@@ -1185,11 +1195,15 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                             params = {"width": int(width), "height": int(height)}
                         if kind == "video" and seconds:
                             params["seconds"] = int(seconds)
+                        # 参考图：当前消息附图优先，回退会话内上次生成的媒体（用不用由客户端按「支持参考图片」勾选决定）
+                        ref = img_paths[-1] if img_paths else last_media.get("path")
                         try:
                             if kind == "image":
-                                path = await run_sync(partial(dt.generate_image, prompt, params=params))
+                                path = await run_sync(partial(dt.generate_image, prompt,
+                                                             ref_path=ref, params=params))
                             else:
-                                path = await run_sync(partial(dt.generate_video, prompt, params=params))
+                                path = await run_sync(partial(dt.generate_video, prompt,
+                                                              ref_video_path=ref, params=params))
                         except Exception as e:
                             block["status"] = "error"
                             block["message"] = str(e)
@@ -1200,6 +1214,7 @@ async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
                         block["url"] = url
                         last_media["url"] = url
                         last_media["prompt"] = prompt
+                        last_media["path"] = path
                         await out.put(("media", {"id": tid, "media": kind, "url": url, "prompt": prompt}))
                         return f"生成成功，媒体地址：{url}"
 

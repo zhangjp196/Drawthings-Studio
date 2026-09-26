@@ -889,9 +889,9 @@ class DramaPipeline:
 
     # ---------------- 阶段 4：剧本编写（按章 / 批量） ----------------
     def _script_agent_context(self, db, project: Project, lang: str):
-        """剧本生成所需的上下文：LLM 配置 / 风格。"""
-        llm_cfg, _ = self._configs(db, project, lang)
-        return llm_cfg, (project.scope or {})
+        """剧本生成所需的上下文：LLM 配置 / DrawThings 配置（判断是否图生视频提示词风格）/ 风格。"""
+        llm_cfg, dt_cfg = self._configs(db, project, lang)
+        return llm_cfg, dt_cfg, (project.scope or {})
 
     def _script_system(self, project: Project) -> str:
         """剧本/提示词写作的系统提示词（短剧）。"""
@@ -908,7 +908,7 @@ class DramaPipeline:
                                chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:
         """为第 i 章（季内序号）单独写剧本/提示词（供「按章生成」与「批量生成」复用）。
         chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。"""
-        llm_cfg, scope = self._script_agent_context(db, project, lang)
+        llm_cfg, dt_cfg, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
         agent = make_agent(model or build_model(llm_cfg), self._script_system(project),
@@ -962,6 +962,13 @@ class DramaPipeline:
             + (f"全局要点（务必遵循）：{gprompt}\n" if gprompt else "")
             + f"本章主题摘要：{base}\n\n{context}"
         )
+        # 图生视频模式（勾选「支持参考图片」且本章有参考帧）：提示词写成基于参考帧的修改指令，
+        # 避免从头完整描述导致重绘覆盖参考画面
+        if ref_img and bool(getattr(dt_cfg, "ref_video", 0)):
+            user += ("\n【图生视频模式】附图是本次生成的参考帧（上一章画面），视频将基于它生成。"
+                     "prompt 必须写成针对参考帧的修改指令：先用一句话点明需与参考帧保持一致的元素"
+                     "（角色外形、服装、场景、画风、光照、机位），再具体描述本章的变化（新动作 / 新情节 / 新运镜）；"
+                     "不要从头重新描述整个画面。")
         prompt_content: str | list = user
         if ref_img:
             # 读图 + base64 放线程池（大图编码耗时可观）
