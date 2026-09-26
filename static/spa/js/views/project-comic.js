@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog },
+  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'plan-dialog': Views.comicPlanDialog, 'cfg-dialog': Views.comicCfgDialog, 'reset-dialog': Views.comicResetDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -328,135 +328,25 @@ Views.projectComic = {
         </el-tab-pane>
       </el-tabs>
 
-      <el-dialog v-model="cfgDlg" :title="I18N.t('p.cfgTitle')" width="540px">
-        <p class="hint">{{ I18N.t('p.cfgHint') }}</p>
-        <el-form label-position="top">
-          <el-form-item :label="I18N.t('cf.llm')">
-            <el-select v-model="cfg.llm" style="width: 100%">
-              <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
-                         :label="c.name + '（' + c.model + '）'" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="I18N.t('cf.dt')">
-            <el-select v-model="cfg.dt" style="width: 100%">
-              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
-              <el-option v-if="!data.drawthing_configs.length" value="" :label="I18N.t('cf.dtNone')" />
-            </el-select>
-            <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="router.push('/configs?ctype=drawthings')">{{ I18N.t('cf.newCfg') }}</el-link></div>
-          </el-form-item>
-          <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtModelImage')">
-            <el-select v-model="cfg.dt_model" filterable allow-create clearable style="width: 100%"
-                       :placeholder="I18N.t('cf.dtModelPh')">
-              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-              <el-option v-for="m in modelChoices" :key="m.file" :value="m.file" :label="m.label" />
-            </el-select>
-            <el-checkbox v-model="cfg.dt_ref" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="cfgDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('p.cfgSave') }}</el-button>
-        </template>
-      </el-dialog>
+      <cfg-dialog v-model="cfgDlg" :cfg="cfg" :llm-configs="data.llm_configs" :dt-configs="data.drawthing_configs"
+                  :model-choices="modelChoices" :busy="cfgBusy" @save="saveCfg"
+                  @new-config="router.push('/configs?ctype=drawthings')" />
 
-      <el-dialog v-model="resetDlg" :title="I18N.t('p.reset')" width="540px">
-        <p class="hint">{{ I18N.t('p.resetHint') }}</p>
-        <el-form label-position="top">
-          <el-form-item :label="I18N.t('p.resetTitle')">
-            <el-input v-model="rtitle" maxlength="200" />
-          </el-form-item>
-          <el-form-item :label="I18N.t('p.resetOrigin')">
-            <el-input v-model="rogin" type="textarea" :rows="2" />
-          </el-form-item>
-          <el-form-item :label="I18N.t('p.resetStyle')">
-            <el-select v-model="rstyle" style="width: 100%">
-              <el-option value="" :label="I18N.t('cf.styleAuto')" />
-              <el-option v-for="s in stylePresets" :key="s" :value="s" :label="s" />
-              <el-option value="custom" :label="I18N.t('cf.styleCustom')" />
-            </el-select>
-            <el-input v-if="rstyle === 'custom'" v-model="rstyleCustom" class="mt8" :placeholder="I18N.t('cf.styleCustomPh')" />
-          </el-form-item>
-        </el-form>
-        <el-checkbox v-model="rclear" style="margin-bottom: 4px;">{{ I18N.t('p.resetClear') }}</el-checkbox>
-        <template #footer>
-          <el-button @click="resetDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" @click="saveReset">{{ I18N.t('p.resetSave') }}</el-button>
-        </template>
-      </el-dialog>
+      <reset-dialog v-model="resetDlg" v-model:title="rtitle" v-model:origin="rogin" v-model:style="rstyle"
+                    v-model:custom="rstyleCustom" v-model:clear="rclear" :style-presets="stylePresets"
+                    @save="saveReset" />
 
       <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle"
                   :busy="actBusy" @confirm="confirmGen" />
 
-      <!-- 章节规划（与新增章节融合）：章节数量固定值 + 方式（新增/重做），仅在此弹框内显示 -->
-      <el-dialog v-model="planDlg" :title="planDlgTitle" width="480px">
-        <el-form label-position="top">
-          <el-form-item :label="I18N.t('p.countMode')">
-            <el-input-number v-model="planCount" :min="1" :max="99" size="small" style="width:96px" />
-          </el-form-item>
-          <el-form-item :label="I18N.t('p.planMode')">
-            <el-radio-group v-model="planMode">
-              <el-radio value="append">{{ I18N.t('p.planModeAppend') }}</el-radio>
-              <el-radio value="replan">{{ I18N.t('p.planModeRedo') }}</el-radio>
-            </el-radio-group>
-          </el-form-item>
-        </el-form>
-        <p class="hint">{{ planModeHint }}</p>
-        <template #footer>
-          <el-button @click="planDlg = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="actBusy" @click="confirmPlan">{{ I18N.t('p.planStart') }}</el-button>
-        </template>
-      </el-dialog>
+      <plan-dialog v-model="planDlg" v-model:count="planCount" v-model:mode="planMode"
+                   :title="planDlgTitle" :hint="planModeHint" :busy="actBusy" @confirm="confirmPlan" />
 
       <!-- 生成封面：勾选「包含标题」= 生成后自动叠加作品标题 / 季名 -->
-      <el-dialog v-model="coverGenDlg.show"
-                 :title="coverGenDlg.target === 'season' ? I18N.t('p.genSeasonFirst') : I18N.t('p.genFirst')"
-                 width="440px">
-        <el-checkbox v-model="coverGenDlg.includeTitle">{{ I18N.t('p.includeTitle') }}</el-checkbox>
-        <p class="hint" style="margin-top:8px;">{{ I18N.t('p.includeTitleHint') }}</p>
-        <template #footer>
-          <el-button @click="coverGenDlg.show = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="busyFirst || busySeasonFirst" @click="confirmCoverGen">{{ I18N.t('p.genStart') }}</el-button>
-        </template>
-      </el-dialog>
+      <cover-dialog :dlg="coverGenDlg" :busy="busyFirst || busySeasonFirst" @confirm="confirmCoverGen" />
 
       <!-- 叠加标题：位置（自由拖动）+ 字号 / 样式 / 颜色 / 底条 -->
-      <el-dialog v-model="ovlDlg.show" :title="I18N.t('p.overlayDlgTitle')" width="640px">
-        <div class="ovl-dlg">
-          <div class="ovl-row">
-            <div class="ovl-label">{{ I18N.t('p.overlayPos') }}</div>
-            <div ref="ovlBox" class="ovl-stage" @pointerdown="ovlDragStart" @pointermove="ovlDragMove"
-                 @pointerup="ovlDragEnd" @pointercancel="ovlDragEnd">
-              <img :src="ovlDlg.coverUrl" draggable="false" alt="" />
-              <div class="ovl-text" :style="ovlTextStyle">{{ ovlDlg.titleText }}</div>
-            </div>
-          </div>
-          <div class="ovl-row">
-            <div class="ovl-label">{{ I18N.t('p.overlaySize') }}</div>
-            <el-slider v-model="ovlDlg.sizePct" :min="4" :max="20" :step="1" style="flex:1" />
-            <span class="muted small" style="width:46px;text-align:right;">{{ ovlDlg.sizePct }}%</span>
-          </div>
-          <div class="ovl-row">
-            <div class="ovl-label">{{ I18N.t('p.overlayStyle') }}</div>
-            <el-select v-model="ovlDlg.style" style="width:150px">
-              <el-option value="bold_outline" :label="I18N.t('p.overlayStyleBold')" />
-              <el-option value="outline" :label="I18N.t('p.overlayStyleOutline')" />
-              <el-option value="shadow" :label="I18N.t('p.overlayStyleShadow')" />
-              <el-option value="plain" :label="I18N.t('p.overlayStylePlain')" />
-            </el-select>
-            <el-checkbox v-model="ovlDlg.band" style="margin-left:16px;">{{ I18N.t('p.overlayBand') }}</el-checkbox>
-          </div>
-          <div class="ovl-row">
-            <div class="ovl-label">{{ I18N.t('p.overlayColor') }}</div>
-            <el-color-picker v-model="ovlDlg.color" />
-            <span class="muted small">{{ I18N.t('p.overlayDragHint') }}</span>
-          </div>
-          <p class="hint">{{ I18N.t('p.overlayBaseHint') }}</p>
-        </div>
-        <template #footer>
-          <el-button @click="ovlDlg.show = false">{{ I18N.t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="ovlBusy" @click="applyOvl">{{ I18N.t('p.overlayApply') }}</el-button>
-        </template>
-      </el-dialog>
+      <overlay-dialog :dlg="ovlDlg" :busy="ovlBusy" @apply="applyOvl" />
 
       <!-- PDF 预览：iframe 直接渲染导出端点返回的 inline PDF（关闭弹框即销毁） -->
       <pdf-dialog v-model="pdfDlg" :url="pdfUrl" @closed="pdfUrl = ''" />
@@ -486,10 +376,7 @@ Views.projectComic = {
     const ovlDlg = reactive({ show: false, target: 'project', titleText: '', coverUrl: '',
                               x: 0.5, y: 1 / 3, sizePct: 8, style: 'bold_outline',
                               color: '#ffffff', band: true });
-    const ovlBox = ref(null);      // 预览容器（拖动坐标系）
-    const ovlBoxW = ref(300);      // 预览宽度（按比例换算预览字号）
     const ovlBusy = ref(false);
-    let ovlDragging = false;
     const genDescBusy = ref(null);  // 正在 AI 生成描述的字符 id（null = 空闲）
     const coverPrompt = ref('');   // 封面生成提示词（first-image 子组件持有输入，顶部「生成封面」按钮使用）
     const seasonCoverPrompt = ref('');   // 季封面生成提示词（season-cover 子组件持有输入，季封面子页「生成季封面」按钮使用）
@@ -1010,49 +897,7 @@ Views.projectComic = {
       ovlDlg.x = 0.5; ovlDlg.y = 1 / 3; ovlDlg.sizePct = 8;
       ovlDlg.style = 'bold_outline'; ovlDlg.color = '#ffffff'; ovlDlg.band = true;
       ovlDlg.show = true;
-      // 弹框渲染后量取预览宽度，用于把字号百分比换算成预览像素
-      setTimeout(syncOvlBoxW, 0);
     }
-    function syncOvlBoxW() {
-      if (ovlBox.value) ovlBoxW.value = ovlBox.value.clientWidth || ovlBoxW.value;
-    }
-    function ovlDragStart(e) {
-      ovlDragging = true;
-      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { /* 忽略 */ }
-      ovlDragMove(e);
-      e.preventDefault();
-    }
-    function ovlDragMove(e) {
-      if (!ovlDragging || !ovlBox.value) return;
-      const r = ovlBox.value.getBoundingClientRect();
-      if (!r.width || !r.height) return;
-      ovlDlg.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-      ovlDlg.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-    }
-    function ovlDragEnd(e) {
-      ovlDragging = false;
-      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { /* 忽略 */ }
-    }
-    const ovlTextStyle = computed(() => {
-      const fs = Math.max(9, Math.round(ovlBoxW.value * ovlDlg.sizePct / 100));
-      const s = {
-        left: (ovlDlg.x * 100) + '%',
-        top: (ovlDlg.y * 100) + '%',
-        color: ovlDlg.color,
-        fontSize: fs + 'px',
-        transform: 'translate(-50%, -50%)',
-      };
-      if (ovlDlg.style === 'bold_outline') {
-        s.fontWeight = 900;
-        s.textShadow = '0 0 2px #000, 0 0 3px #000, 1px 1px 2px #000, -1px -1px 2px #000';
-      } else if (ovlDlg.style === 'outline') {
-        s.textShadow = '1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000, '
-                     + '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000';
-      } else if (ovlDlg.style === 'shadow') {
-        s.textShadow = '3px 3px 4px rgba(0,0,0,.75)';
-      }
-      return s;
-    });
     async function applyOvl() {
       ovlBusy.value = true;
       const body = { x: ovlDlg.x, y: ovlDlg.y, size_pct: ovlDlg.sizePct,
@@ -1415,10 +1260,10 @@ Views.projectComic = {
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
-      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvItems, pvUrls, gotoChapter, pickChapter,
+      coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan,
       cfgDlg, cfgBusy, cfg, modelChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded,
       openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
