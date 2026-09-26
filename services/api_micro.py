@@ -23,12 +23,13 @@ from services.api_common import (
     _llm_view, _sse,
 )
 from services import events as E
+from services.drawthings import extract_last_frame
 from services.media_files import (
     cleanup_message_media, export_pdf, export_zip, is_video_url,
     media_path_from_url, save_data_uri_images,
 )
-from services.micro_agent import run_micro_chat, run_regenerate
-from services.micro_parts import load_parts
+from services.micro_agent import is_video_path, run_micro_chat, run_regenerate, vlm_score_media
+from services.micro_parts import dump_parts, load_parts
 from services.pipeline import _now
 
 router = APIRouter(prefix="/api/micro", tags=["micro"])
@@ -663,6 +664,64 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str,
         _sse_transport(_runner, db=db, job_id=job_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/{work_id}/{session_id}/score")
+async def micro_score(request: Request, work_id: str, session_id: str,
+                      db: Session = Depends(get_db)):
+    """VLM 评分：对某条生成媒体（图/视频）按 0–100 评分（视频取末帧），返回 {score, note}，
+    并把分值/评语写回该会话内对应内容块（持久化，刷新后仍显示）。"""
+    lang = _lang(request)
+    session = db.get(MicroSession, session_id)
+    if not session or session.micro_id != work_id:
+        raise HTTPException(status_code=404,
+                            detail=L(lang, "会话不存在", "Session not found"))
+    work = session.work
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请求体需为 JSON", "Body must be JSON"))
+    url = str(body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "缺少媒体地址", "Missing media URL"))
+    kind = str(body.get("media") or "image").strip().lower()
+    prompt = str(body.get("prompt") or "")
+    llm_cfg = ConfigStore(db).get_llm(work.llm_config_id or "")
+    if not llm_cfg:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config"))
+    p = media_path_from_url(url)
+    if p is None:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "媒体不存在", "Media not found"))
+    img = str(p)
+    if kind == "video" or is_video_path(img):
+        img = extract_last_frame(img, MEDIA_DIR) or img
+    try:
+        score, note = await vlm_score_media(llm_cfg, img, prompt, lang)
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"评分失败：{e}", f"Scoring failed: {e}"))
+    # 写回该会话内对应内容块（按媒体 url 匹配）
+    changed = False
+    for m in db.query(MicroMessage).filter(MicroMessage.session_id == session_id).all():
+        if not m.parts:
+            continue
+        blocks = load_parts(m.parts)
+        hit = False
+        for b in blocks:
+            if b.get("type") == "tool" and b.get("url") == url:
+                b["score"] = score
+                b["score_note"] = note
+                hit = True
+        if hit:
+            m.parts = dump_parts(blocks)
+            changed = True
+    if changed:
+        db.commit()
+    return {"score": score, "note": note}
 
 
 async def _sse_transport(runner, db: Session | None = None, job_id: str | None = None):

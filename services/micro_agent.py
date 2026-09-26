@@ -18,11 +18,13 @@ from functools import partial
 from pathlib import Path
 
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ImageUrl
 
 from config import data_dir
 from i18n import L
 from models import Asset, MicroMessage
-from services.agent import build_model, to_message_history, user_prompt
+from services.agent import (build_model, image_data_uri, make_agent,
+                            to_message_history, user_prompt, ScoreOut)
 from services.api_common import _media_url
 from services.capabilities import caps, dt_client
 from services.drawthings import MAX_VIDEO_SECONDS, extract_last_frame
@@ -136,6 +138,24 @@ def image_ref_path(ref: str | None) -> str | None:
     if is_video_path(ref):
         return extract_last_frame(ref, Path(data_dir) / "media") or ref
     return ref
+
+
+_SCORE_SYSTEM = ("你是美术/视频审片。对给定的生成画面按 100 分制评估，只输出一个 JSON 对象，"
+                 "字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
+                 "评估维度：与提示词的相符度、构图与清晰度、风格/角色一致性、有无明显畸变或伪影。")
+
+
+async def vlm_score_media(llm_cfg, image_path: str, prompt: str = "", lang: str = "zh") -> tuple[int, str]:
+    """用作品所选 VLM 对一张生成画面评分：返回 (score, note)。视频请先取末帧再传入。"""
+    model = build_model(llm_cfg)
+    agent = make_agent(model, _SCORE_SYSTEM, output_type=ScoreOut)
+    if lang == "en":
+        text = f"Prompt: {prompt or '(none)'}\nScore the image and give a one-line comment."
+    else:
+        text = f"生成提示词：{prompt or '（无）'}\n请评分并给出一句话评语。"
+    content = [ImageUrl(url=image_data_uri(image_path)), text]
+    data = (await agent.run(content)).output
+    return int(getattr(data, "score", 0) or 0), str(getattr(data, "note", "") or "")
 
 
 class _MsgPersister:
@@ -468,4 +488,4 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
 
 
 __all__ = ["MC_SYSTEM", "build_instructions", "latest_session_media_path",
-           "run_micro_chat", "run_regenerate"]
+           "run_micro_chat", "run_regenerate", "vlm_score_media"]

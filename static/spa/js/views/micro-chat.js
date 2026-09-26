@@ -80,7 +80,14 @@ Views.microChat = {
       </div>
 
       <div v-if="ctx.show" class="mc-ctxmenu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
-        <button type="button" class="mc-ctxitem" @click="applyQuote">{{ I18N.t('mw.quoteRef') }}</button>
+        <button type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="applyQuote">{{ I18N.t('mw.quoteRef') }}</button>
+        <button v-if="ctx.block" type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="scoreMedia">
+          {{ ctx.busy ? I18N.t('mw.scoring') : I18N.t('mw.scoreAction') }}
+        </button>
+        <button v-if="ctx.block" type="button" class="mc-ctxitem" :disabled="ctx.busy" @click="redoMedia">{{ I18N.t('mw.redoAction') }}</button>
+        <template v-if="ctx.block && ctx.block.score">
+          <div class="mc-ctxscore">{{ I18N.t('mw.scoreLabel') }} {{ ctx.block.score }}<span v-if="ctx.block.score_note"> · {{ ctx.block.score_note }}</span></div>
+        </template>
       </div>
     </section>
   `,
@@ -102,15 +109,44 @@ Views.microChat = {
 
     // 右键「引用」：把任意媒体（上传的图 / 生成的图 / 生成的视频）作为下一轮生成的参考
     const quoted = ref(null);  // { url, kind }
-    const ctx = reactive({ show: false, x: 0, y: 0, url: '', kind: 'image' });
-    function openQuote(x, y, url, kind) {
+    const ctx = reactive({ show: false, x: 0, y: 0, url: '', kind: 'image', block: null, busy: false });
+    function openQuote(x, y, url, kind, block) {
       if (!url) return;
       ctx.x = x; ctx.y = y; ctx.url = url; ctx.kind = kind || 'image';
+      ctx.block = block || null;
+      ctx.busy = false;
       ctx.show = true;
     }
-    function onReference(p) { openQuote(p && p.x, p && p.y, p && p.url, p && p.kind); }
+    function onReference(p) { openQuote(p && p.x, p && p.y, p && p.url, p && p.kind, p && p.block); }
     function applyQuote() { quoted.value = { url: ctx.url, kind: ctx.kind }; ctx.show = false; }
     function closeCtx() { if (ctx.show) ctx.show = false; }
+
+    // VLM 评分：对右键的生成媒体评分，分值/评语写回该内容块并显示（服务端持久化）
+    async function scoreMedia() {
+      const b = ctx.block;
+      if (!b || ctx.busy) return;
+      ctx.busy = true;
+      b.scoring = true;
+      try {
+        const r = await API.post(`/api/micro/${props.id}/${props.sid}/score`,
+          { url: b.url, media: b.media || 'image', prompt: b.prompt || '' });
+        b.score = r.score;
+        b.score_note = r.note;
+        ElementPlus.ElMessage.success(I18N.t('mw.scoreDone', r.score));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        b.scoring = false;
+        ctx.busy = false;
+        ctx.show = false;
+      }
+    }
+    // 评分后重做：按原参数重跑该媒体（与 chip 上「重跑」一致）
+    function redoMedia() {
+      const b = ctx.block;
+      ctx.show = false;
+      if (b) rerun(b);
+    }
 
     // 滚动：贴底自动跟随（含图片陆续加载）；用户上翻后不再打扰，显示「回到底部」
     const atBottom = ref(true);
@@ -465,7 +501,7 @@ Views.microChat = {
       ph, input, attached, busy, status, drag, streaming, stream, streamElapsed,
       chatBox, chatInner, inputEl, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter,
       send, rerun, activeJob, stopJob, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
-      quoted, ctx, openQuote, onReference, applyQuote,
+      quoted, ctx, openQuote, onReference, applyQuote, scoreMedia, redoMedia,
     };
   },
 };

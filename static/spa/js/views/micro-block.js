@@ -31,24 +31,29 @@ Views.microBlock = {
           </div>
           <div v-if="showPrompt && b.prompt" class="tool-prompt">{{ b.prompt }}</div>
           <div v-if="b.status === 'running' && b.message" class="tool-note">{{ b.message }}</div>
+          <div v-if="b.scoring" class="tool-note">{{ I18N.t('mw.scoring') }}</div>
           <div v-if="b.status === 'error' && b.message" class="tool-err">{{ b.message }}</div>
+        </div>
+        <div class="tool-score" v-if="b.score">
+          <span class="ts-val">{{ I18N.t('mw.scoreLabel') }} {{ b.score }}</span>
+          <span class="ts-note" v-if="b.score_note">{{ b.score_note }}</span>
         </div>
         <div class="msg-media" v-if="b.status === 'ok' && b.url">
           <video v-if="isVideo(b.url)" :src="b.url" controls preload="metadata"
-                 @contextmenu.prevent="$emit('reference', { url: b.url, kind: b.media || 'video', x: $event.clientX, y: $event.clientY })"></video>
+                 @contextmenu.prevent="$emit('reference', { url: b.url, kind: b.media || 'video', x: $event.clientX, y: $event.clientY, block: b })"></video>
           <img v-else :src="b.url" :alt="I18N.t('mw.resultAlt')" loading="lazy" decoding="async"
                @click="$emit('preview', [b.url], 0)"
-               @contextmenu.prevent="$emit('reference', { url: b.url, kind: b.media || 'image', x: $event.clientX, y: $event.clientY })">
+               @contextmenu.prevent="$emit('reference', { url: b.url, kind: b.media || 'image', x: $event.clientX, y: $event.clientY, block: b })">
         </div>
       </template>
 
       <template v-else-if="b.type === 'media'">
         <div class="msg-media" v-if="b.url">
           <video v-if="isVideo(b.url)" :src="b.url" controls preload="metadata"
-                 @contextmenu.prevent="$emit('reference', { url: b.url, kind: 'video', x: $event.clientX, y: $event.clientY })"></video>
+                 @contextmenu.prevent="$emit('reference', { url: b.url, kind: 'video', x: $event.clientX, y: $event.clientY, block: b })"></video>
           <img v-else :src="b.url" :alt="I18N.t('mw.resultAlt')" loading="lazy" decoding="async"
                @click="$emit('preview', [b.url], 0)"
-               @contextmenu.prevent="$emit('reference', { url: b.url, kind: 'image', x: $event.clientX, y: $event.clientY })">
+               @contextmenu.prevent="$emit('reference', { url: b.url, kind: 'image', x: $event.clientX, y: $event.clientY, block: b })">
           <div class="media-cap" v-if="b.prompt">{{ b.prompt }}</div>
         </div>
       </template>
