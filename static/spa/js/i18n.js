@@ -40,7 +40,8 @@ window.I18N = (function () {
       'home.flow6': '完成',
 
       'wb.sub': '继续最近的创作，或开始一个新的。',
-      'wb.newProject': '＋ 新建创作',
+      'wb.newComic': '＋ 新建漫画',
+      'wb.newDrama': '＋ 新建短剧',
       'wb.newMicro': '✨ 新建微创作',
       'wb.settings': '⚙ 配置',
       'wb.recent': '最近创作',
@@ -49,7 +50,6 @@ window.I18N = (function () {
 
       'proj.title': '创作中心',
       'proj.total': '共 {0} 个',
-      'proj.new': '＋ 新建创作',
       'proj.type': '类型',
       'proj.all': '全部',
       'proj.comic': '漫画',
@@ -79,9 +79,6 @@ window.I18N = (function () {
 
       'new.title': '新建创作',
 
-      'cf.type': '选择类型',
-      'cf.comic': '漫画走向（连续生图）',
-      'cf.drama': '短剧走向（连续出视频）',
       'cf.llm': 'VLM 配置',
       'cf.llmPh': '选择 VLM 配置',
       'cf.llmNone': '（无 VLM 配置，请先创建）',
@@ -588,7 +585,8 @@ window.I18N = (function () {
       'home.flow6': 'Complete',
 
       'wb.sub': 'Pick up where you left off, or start something new.',
-      'wb.newProject': '＋ New project',
+      'wb.newComic': '＋ New comic',
+      'wb.newDrama': '＋ New short drama',
       'wb.newMicro': '✨ New Quick Create',
       'wb.settings': '⚙ Settings',
       'wb.recent': 'Recent',
@@ -597,7 +595,6 @@ window.I18N = (function () {
 
       'proj.title': 'Studio',
       'proj.total': '{0} total',
-      'proj.new': '＋ New Project',
       'proj.type': 'Type',
       'proj.all': 'All',
       'proj.comic': 'Comic',
@@ -627,9 +624,6 @@ window.I18N = (function () {
 
       'new.title': 'New Project',
 
-      'cf.type': 'Type',
-      'cf.comic': 'Comic (continuous images)',
-      'cf.drama': 'Short drama (continuous video)',
       'cf.llm': 'VLM config',
       'cf.llmPh': 'Select VLM config',
       'cf.llmNone': '(No VLM config — create one first)',

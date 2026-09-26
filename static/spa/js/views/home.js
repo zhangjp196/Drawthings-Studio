@@ -9,7 +9,8 @@ Views.home = {
       </div>
 
       <div class="wb-actions">
-        <router-link to="/new" class="wb-action primary">{{ I18N.t('wb.newProject') }}</router-link>
+        <router-link to="/new?kind=comic" class="wb-action primary">{{ I18N.t('wb.newComic') }}</router-link>
+        <router-link to="/new?kind=drama" class="wb-action primary">{{ I18N.t('wb.newDrama') }}</router-link>
         <router-link to="/micro" class="wb-action">{{ I18N.t('wb.newMicro') }}</router-link>
         <router-link to="/configs" class="wb-action">{{ I18N.t('wb.settings') }}</router-link>
       </div>

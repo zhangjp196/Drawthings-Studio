@@ -11,6 +11,12 @@ Views.newProject = {
   `,
   components: { 'create-form': Views.createForm },
   setup() {
-    return { go: (id, kind) => router.push((kind === 'comic' ? '/comic/' : '/drama/') + id) };
+    const route = router.currentRoute;
+    // 类型由入口决定：/new?kind=comic|drama（首页两个入口按钮）
+    const preset = computed(() => {
+      const k = route.value.query.kind;
+      return (k === 'comic' || k === 'drama') ? { kind: k } : null;
+    });
+    return { preset, go: (id, kind) => router.push((kind === 'comic' ? '/comic/' : '/drama/') + id) };
   },
 };

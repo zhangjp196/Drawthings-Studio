@@ -1,4 +1,4 @@
-// 新建创作表单（创作中心弹框与 /new 页共用）：类型 / LLM / DrawThings / 标题 / 主题 / 风格
+// 新建创作表单（创作中心弹框与 /new 页共用）：类型由入口决定，LLM / DrawThings / 模型 / 参考图 / 标题 / 主题 / 风格
 window.Views = window.Views || {};
 Views.createForm = {
   props: {
@@ -9,13 +9,7 @@ Views.createForm = {
     <el-form label-position="top">
       <el-row :gutter="24">
         <el-col :span="10">
-          <!-- 左：配置（类型 / LLM / DrawThings / 模型 / 参考图） -->
-          <el-form-item :label="I18N.t('cf.type')">
-            <el-radio-group v-model="f.kind" @change="f.dt = ''">
-              <el-radio value="comic">{{ I18N.t('cf.comic') }}</el-radio>
-              <el-radio value="drama">{{ I18N.t('cf.drama') }}</el-radio>
-            </el-radio-group>
-          </el-form-item>
+          <!-- 左：配置（LLM / DrawThings / 模型 / 参考图）；类型由入口决定 -->
           <el-form-item :label="I18N.t('cf.llm')" required>
             <el-select v-model="f.llm" :placeholder="I18N.t('cf.llmPh')" style="width: 100%">
               <el-option v-for="c in llms" :key="c.id" :value="c.id"
@@ -123,7 +117,6 @@ Views.createForm = {
       f.dt_ref_v = !!c.ref_video;
       fetchModels();
     });
-    watch(() => f.kind, () => { f.dt_model_i = ''; f.dt_model_v = ''; f.dt_ref_i = false; f.dt_ref_v = false; });
 
     async function load() {
       const data = await API.get('/api/choices');

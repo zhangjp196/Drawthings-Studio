@@ -9,7 +9,8 @@ Views.projects = {
           <h1>{{ kindTitle }}</h1>
           <span class="muted">{{ I18N.t('proj.total', total) }}</span>
         </div>
-        <el-button type="primary" @click="newDlg = true">{{ I18N.t('proj.new') }}</el-button>
+        <el-button type="primary" @click="openNew('comic')">{{ I18N.t('wb.newComic') }}</el-button>
+        <el-button type="primary" @click="openNew('drama')">{{ I18N.t('wb.newDrama') }}</el-button>
       </div>
 
       <el-card class="filter-card" shadow="never">
@@ -95,11 +96,14 @@ Views.projects = {
         : f.kind === 'drama' ? I18N.t('nav.studioDrama')
         : I18N.t('proj.title'));
     // 新建弹框：从「漫画创作 / 视频创作」菜单进入时，类型预选对应项
-    const newPreset = computed(() => (f.kind === 'comic' || f.kind === 'drama') ? { kind: f.kind } : null);
+    const newDlg = ref(false);
+    const newKind = ref('comic');
+    // 类型由入口按钮决定（选择哪个就是哪个）
+    function openNew(kind) { newKind.value = kind; newDlg.value = true; }
+    const newPreset = computed(() => ({ kind: newKind.value }));
     const rows = ref([]);
     const total = ref(0);
     const totalPages = ref(1);
-    const newDlg = ref(false);
     const renameDlg = ref(false);
     const renameTitle = ref('');
     const renameId = ref('');
@@ -175,7 +179,7 @@ Views.projects = {
     onMounted(load);
     return {
       f, kindTitle, newPreset, rows, total, totalPages, statusLabels, statusTag,
-      newDlg, renameDlg, renameTitle, busy,
+      newDlg, openNew, renameDlg, renameTitle, busy,
       load, apply, onSearch, reset, open, askRename, doRename, del, created,
     };
   },
