@@ -50,7 +50,7 @@ Views.home = {
     const loading = ref(true);
     // 新建创作类型：按钮旁切换（选哪个就是哪个）
     const newKind = ref('comic');
-    function goNew() { router.push('/new?kind=' + newKind.value); }
+    function goNew() { router.push('/new/' + newKind.value); }
     async function load() {
       loading.value = true;
       try {

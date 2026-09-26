@@ -6,7 +6,9 @@ window.router = VueRouter.createRouter({
   routes: [
     { path: '/', component: Views.home },
     { path: '/projects', component: Views.projects },
-    { path: '/new', component: Views.newProject },
+    { path: '/new/comic', component: Views.newComic },
+    { path: '/new/drama', component: Views.newDrama },
+    { path: '/new', redirect: '/new/comic' },
     // 漫画 / 短剧（视频）：完全独立的两套详情页
     { path: '/comic/:id', component: Views.projectComic, props: true },
     { path: '/drama/:id', component: Views.projectDrama, props: true },

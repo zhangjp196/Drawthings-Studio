@@ -1,7 +1,7 @@
 // 创作中心：列表（筛选/分页/缩略图）+ 新建弹框 + 重命名 + 删除
 window.Views = window.Views || {};
 Views.projects = {
-  components: { 'create-form': Views.createForm },
+  components: { 'create-form-comic': Views.createFormComic, 'create-form-drama': Views.createFormDrama },
   template: `
     <div class="page">
       <div class="list-toolbar">
@@ -67,8 +67,12 @@ Views.projects = {
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
                      :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
-      <el-dialog v-model="newDlg" :title="newDlgTitle" width="880px">
-        <create-form :preset="newPreset" @created="created" />
+      <!-- 新建弹框：漫画 / 短剧完全分开，各自独立组件 -->
+      <el-dialog v-model="newComicDlg" :title="I18N.t('proj.newDlgComic')" width="880px">
+        <create-form-comic @created="created" />
+      </el-dialog>
+      <el-dialog v-model="newDramaDlg" :title="I18N.t('proj.newDlgDrama')" width="880px">
+        <create-form-drama @created="created" />
       </el-dialog>
 
       <el-dialog v-model="renameDlg" :title="I18N.t('proj.renameDlg')" width="440px">
@@ -94,14 +98,10 @@ Views.projects = {
       f.kind === 'comic' ? I18N.t('nav.studioComic')
         : f.kind === 'drama' ? I18N.t('nav.studioDrama')
         : I18N.t('proj.title'));
-    // 新建弹框：从「漫画创作 / 视频创作」菜单进入时，类型预选对应项
-    const newDlg = ref(false);
-    // 新建类型跟随页面类型筛选（创作中心已按类型分区，不再重复切换）；未筛选时默认漫画
-    const newKind = computed(() => f.kind || 'comic');
-    // 弹框标题指明类型（新建漫画 / 新建短剧）
-    const newDlgTitle = computed(() => I18N.t(newKind.value === 'comic' ? 'proj.newDlgComic' : 'proj.newDlgDrama'));
-    function openNew() { newDlg.value = true; }
-    const newPreset = computed(() => ({ kind: newKind.value }));
+    // 新建弹框：漫画 / 短剧各一个独立弹框（各自组件）；类型跟随页面类型筛选，未筛选默认漫画
+    const newComicDlg = ref(false);
+    const newDramaDlg = ref(false);
+    function openNew() { (f.kind === 'drama' ? newDramaDlg : newComicDlg).value = true; }
     const rows = ref([]);
     const total = ref(0);
     const totalPages = ref(1);
@@ -173,14 +173,15 @@ Views.projects = {
       }
     }
     function created(id, kind) {
-      newDlg.value = false;
+      newComicDlg.value = false;
+      newDramaDlg.value = false;
       router.push((kind === 'comic' ? '/comic/' : '/drama/') + id);
     }
 
     onMounted(load);
     return {
-      f, kindTitle, newPreset, rows, total, totalPages, statusLabels, statusTag,
-      newDlg, newDlgTitle, newKind, openNew, renameDlg, renameTitle, busy,
+      f, kindTitle, rows, total, totalPages, statusLabels, statusTag,
+      newComicDlg, newDramaDlg, openNew, renameDlg, renameTitle, busy,
       load, apply, onSearch, reset, open, askRename, doRename, del, created,
     };
   },

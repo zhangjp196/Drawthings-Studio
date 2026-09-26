@@ -64,7 +64,6 @@ window.I18N = (function () {
       'proj.delete': '删除',
       'proj.delConfirm': '删除该创作？全部章节与已生成的图/视频将一并删除，不可恢复。',
       'proj.empty': '还没有创作。点击「＋ 新建创作」，从一句话开始。',
-      'proj.newDlg': '新建创作',
       'proj.newDlgComic': '新建漫画',
       'proj.newDlgDrama': '新建短剧',
       'proj.renameDlg': '重命名创作',
@@ -78,7 +77,8 @@ window.I18N = (function () {
       'proj.status.scripted': '剧本已定',
       'proj.status.done': '已完成',
 
-      'new.title': '新建创作',
+      'new.comicTitle': '新建漫画',
+      'new.dramaTitle': '新建短剧',
 
       'cf.llm': 'VLM 配置',
       'cf.llmPh': '选择 VLM 配置',
@@ -610,7 +610,6 @@ window.I18N = (function () {
       'proj.delete': 'Delete',
       'proj.delConfirm': 'Delete this project? All chapters and generated images/videos will be removed permanently.',
       'proj.empty': 'No projects yet. Click "＋ New Project" to start from a single sentence.',
-      'proj.newDlg': 'New Project',
       'proj.newDlgComic': 'New comic',
       'proj.newDlgDrama': 'New short drama',
       'proj.renameDlg': 'Rename Project',
@@ -624,7 +623,8 @@ window.I18N = (function () {
       'proj.status.scripted': 'Scripted',
       'proj.status.done': 'Done',
 
-      'new.title': 'New Project',
+      'new.comicTitle': 'New comic',
+      'new.dramaTitle': 'New short drama',
 
       'cf.llm': 'VLM config',
       'cf.llmPh': 'Select VLM config',
