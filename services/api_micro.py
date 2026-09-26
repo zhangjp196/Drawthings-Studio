@@ -534,7 +534,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     message = str(body.get("message") or "").strip()
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(work.llm_config_id or "")
-    dt_cfg = cs.get_drawthings(work.drawthings_config_id) if work.drawthings_config_id else None
+    dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
 
     # 用户附图：VLM 一律支持图片输入（存 MEDIA_DIR，随消息落库）
     image_urls = []
