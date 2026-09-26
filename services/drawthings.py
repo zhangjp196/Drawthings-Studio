@@ -22,6 +22,7 @@ import logging
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -31,6 +32,18 @@ from PIL import Image
 logger = logging.getLogger("drawthings")
 
 DEFAULT_GRPC_PORT = 7859
+
+# Draw Things 已知缺陷：图生图（带 init_image）时 app 可能闪退（官方社区 issue #121，未修复）。
+# 连接中断后自动等待用户重启 app（端口恢复），再自动重试一次生成。
+RECOVERY_POLL = 3.0        # 秒：等待恢复期间的端口探测间隔
+RECOVERY_TIMEOUT = 120.0   # 秒：等待 app 恢复的最长时间
+
+
+def _looks_disconnected(e: Exception) -> bool:
+    """按异常文本判断是否为连接类错误（app 可能闪退 / 被关闭）。"""
+    s = str(e)
+    return any(k in s for k in ("UNAVAILABLE", "closed", "Connection", "Reset",
+                                 "Cancelled", "Broken pipe", "EOF", "incomplete"))
 
 # 视频模型名关键词：子串匹配（无歧义）+ 词元匹配（易混短词，按 _/-/数字 切分后整词比较）。
 # 覆盖 Draw Things 常见视频模型：LTX-Video(ltx)、SVD、Wan、HunyuanVideo、CogVideoX、Mochi、
@@ -399,6 +412,29 @@ class DrawThingsClient:
             cfg["model"] = model
         return cfg
 
+    async def _port_open(self, timeout: float = 2.0) -> bool:
+        """探测 DrawThings gRPC 端口是否可达（快速判断 app 存活 / 已闪退）。"""
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), timeout)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
+    async def _wait_recovery(self) -> bool:
+        """app 断连后等待用户重启 DrawThings（端口恢复）。True=已恢复，False=超时。"""
+        deadline = time.monotonic() + RECOVERY_TIMEOUT
+        while time.monotonic() < deadline:
+            if await self._port_open():
+                return True
+            await asyncio.sleep(RECOVERY_POLL)
+        return False
+
     async def _generate(self, prompt: str, video: bool, ref_path: str | None, params: dict) -> str:
         from drawthings_py import DrawThings, RequestBuilder
         model = self._model_for(video)
@@ -471,35 +507,60 @@ class DrawThingsClient:
             except Exception as e:
                 raise RuntimeError(f"加载参考图失败：{e} / Failed to load reference image: {e}")
 
-        svc = DrawThings.grpc(host=self.host, port=self.port,
-                              progressbar=False, disable_messages=True)
-        await svc.connect()
+        async def _attempt():
+            """一次完整生成：连接 → 校验模型 → 生成（finally 保证关闭连接）。"""
+            svc = DrawThings.grpc(host=self.host, port=self.port,
+                                  progressbar=False, disable_messages=True)
+            await svc.connect()
+            try:
+                # 同一连接内先校验模型已下载（避免因模型不存在而让 app 退出）
+                try:
+                    files = _model_files(await svc.get_models(refresh_cache=True))
+                    if files and model not in files:
+                        raise RuntimeError(
+                            f"模型「{model}」不在 Draw Things 已下载列表中（可用：{', '.join(sorted(files))}）。"
+                            "请改为已下载的模型文件名后重试。"
+                            f" / Model '{model}' is not among the models downloaded in Draw Things.")
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass  # 取不到模型清单时不阻塞
+                return await svc.generate(req)
+            finally:
+                try:
+                    await svc.close()
+                except Exception:
+                    pass
+
         try:
-            # 同一连接内先校验模型已下载（避免因模型不存在而让 app 退出）
-            try:
-                files = _model_files(await svc.get_models(refresh_cache=True))
-                if files and model not in files:
-                    raise RuntimeError(
-                        f"模型「{model}」不在 Draw Things 已下载列表中（可用：{', '.join(sorted(files))}）。"
-                        "请改为已下载的模型文件名后重试。"
-                        f" / Model '{model}' is not among the models downloaded in Draw Things.")
-            except RuntimeError:
-                raise
-            except Exception:
-                pass  # 取不到模型清单时不阻塞
-            result = await svc.generate(req)
-        except RuntimeError:
-            raise
+            result = await _attempt()
         except Exception as e:
-            raise RuntimeError(
-                f"Draw Things gRPC 生成失败：{e}。请确认 app 已开启 gRPC API server（端口 {self.port}），"
-                f"且模型「{model}」确实存在。"
-                f" / Draw Things gRPC generation failed: {e}")
-        finally:
+            if not _looks_disconnected(e) and await self._port_open():
+                # app 仍在：普通生成错误，按原样抛出
+                if isinstance(e, RuntimeError):
+                    raise
+                raise RuntimeError(
+                    f"Draw Things gRPC 生成失败：{e}。请确认 app 已开启 gRPC API server（端口 {self.port}），"
+                    f"且模型「{model}」确实存在。"
+                    f" / Draw Things gRPC generation failed: {e}")
+            # 连接中断 / app 已掉线：Draw Things 图生图闪退的已知缺陷（社区 issue #121）
+            # → 等待用户重启 app，再自动重试一次
+            logger.warning("DrawThings 连接中断（app 可能已闪退），等待恢复：%s", e)
+            if not await self._wait_recovery():
+                raise RuntimeError(
+                    f"与 Draw Things 应用的连接中断（app 可能已闪退），等待 {RECOVERY_TIMEOUT:.0f} 秒后仍未恢复。"
+                    "请重启 Draw Things 后重试本次生成。"
+                    f" / Draw Things connection was interrupted (the app may have crashed); "
+                    f"it did not recover within {RECOVERY_TIMEOUT:.0f}s. Please restart Draw Things and retry.")
+            logger.info("DrawThings 已恢复，自动重试生成")
             try:
-                await svc.close()
-            except Exception:
-                pass
+                result = await _attempt()
+            except Exception as e2:
+                if isinstance(e2, RuntimeError):
+                    raise
+                raise RuntimeError(
+                    f"Draw Things 生成失败（恢复后自动重试）：{e2}"
+                    f" / Draw Things generation failed (auto-retry after recovery): {e2}")
 
         if video:
             out = self.media_dir / f"gen_{uuid.uuid4().hex[:8]}.mp4"

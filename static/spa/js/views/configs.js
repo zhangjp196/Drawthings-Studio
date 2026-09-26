@@ -189,6 +189,7 @@ Views.configs = {
               <el-checkbox v-model="f.ref_video" :disabled="!f.model_video" style="margin-top:2px;">
                 {{ I18N.t('cfg.refVideo') }}
               </el-checkbox>
+              <div class="hint" style="margin-top:2px;">{{ I18N.t('cfg.refCrashHint') }}</div>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxSideOpt')">
               <el-select v-model="f.max_side" style="width: 220px;">
