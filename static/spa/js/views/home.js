@@ -9,8 +9,11 @@ Views.home = {
       </div>
 
       <div class="wb-actions">
-        <router-link to="/new?kind=comic" class="wb-action primary">{{ I18N.t('wb.newComic') }}</router-link>
-        <router-link to="/new?kind=drama" class="wb-action primary">{{ I18N.t('wb.newDrama') }}</router-link>
+        <span class="wb-action primary" @click="goNew">{{ I18N.t('wb.newProject') }}</span>
+        <el-radio-group v-model="newKind" size="small">
+          <el-radio-button value="comic">{{ I18N.t('proj.comic') }}</el-radio-button>
+          <el-radio-button value="drama">{{ I18N.t('proj.drama') }}</el-radio-button>
+        </el-radio-group>
         <router-link to="/micro" class="wb-action">{{ I18N.t('wb.newMicro') }}</router-link>
         <router-link to="/configs" class="wb-action">{{ I18N.t('wb.settings') }}</router-link>
       </div>
@@ -45,6 +48,9 @@ Views.home = {
   setup() {
     const projects = ref([]);
     const loading = ref(true);
+    // 新建创作类型：按钮旁切换（选哪个就是哪个）
+    const newKind = ref('comic');
+    function goNew() { router.push('/new?kind=' + newKind.value); }
     async function load() {
       loading.value = true;
       try {
@@ -58,6 +64,6 @@ Views.home = {
     }
     function open(p) { router.push(p.kind === 'comic' ? '/comic/' + p.id : '/drama/' + p.id); }
     onMounted(load);
-    return { projects, loading, open };
+    return { projects, loading, open, newKind, goNew };
   },
 };

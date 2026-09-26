@@ -40,8 +40,7 @@ window.I18N = (function () {
       'home.flow6': '完成',
 
       'wb.sub': '继续最近的创作，或开始一个新的。',
-      'wb.newComic': '＋ 新建漫画',
-      'wb.newDrama': '＋ 新建短剧',
+      'wb.newProject': '＋ 新建创作',
       'wb.newMicro': '✨ 新建微创作',
       'wb.settings': '⚙ 配置',
       'wb.recent': '最近创作',
@@ -585,8 +584,7 @@ window.I18N = (function () {
       'home.flow6': 'Complete',
 
       'wb.sub': 'Pick up where you left off, or start something new.',
-      'wb.newComic': '＋ New comic',
-      'wb.newDrama': '＋ New short drama',
+      'wb.newProject': '＋ New project',
       'wb.newMicro': '✨ New Quick Create',
       'wb.settings': '⚙ Settings',
       'wb.recent': 'Recent',
