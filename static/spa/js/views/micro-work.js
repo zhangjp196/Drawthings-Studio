@@ -24,9 +24,6 @@ Views.microWork = {
         <div class="proj-head-actions">
           <el-button @click="tab = 'settings'">{{ I18N.t('mw.options') }}</el-button>
           <el-button @click="router.push('/micro')">{{ I18N.t('p.back') }}</el-button>
-          <el-popconfirm :title="I18N.t('mw.delWorkConfirm')" @confirm="delWork">
-            <template #reference><el-button type="danger" plain>{{ I18N.t('mw.delWork') }}</el-button></template>
-          </el-popconfirm>
         </div>
       </div>
 
@@ -314,16 +311,6 @@ Views.microWork = {
       }
     }
 
-    async function delWork() {
-      try {
-        await API.post(`/api/micro/${props.id}/delete`);
-        ElementPlus.ElMessage.success(I18N.t('mw.workDeleted'));
-        router.push('/micro');
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      }
-    }
-
     // 切换作品 / 会话：重新加载数据（消息流由 micro-chat 自身在 sid 变化时重置）
     watch(() => [props.id, props.sid], () => {
       lb.show = false;  // 切换后关闭灯箱，避免残留遮罩盖住新会话
@@ -334,7 +321,7 @@ Views.microWork = {
     return {
       data, msgs, hasSession, sideHidden, setSide, tab,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgBusy, cfg, imgChoices, vidChoices, saveCfg, delWork,
+      cfgBusy, cfg, imgChoices, vidChoices, saveCfg,
       lb, openLb, tagLabel, tagType,
       router, pick, openSess, load,
     };
