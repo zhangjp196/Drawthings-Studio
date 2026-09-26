@@ -22,7 +22,7 @@ Views.microWork = {
           <p class="meta muted">{{ I18N.t('p.metaLlm', data.work.llm_name) }} · {{ I18N.t('p.metaDt', data.work.dt_name || I18N.t('mw.dtNone')) }}</p>
         </div>
         <div class="proj-head-actions">
-          <el-button @click="tab = 'settings'">{{ I18N.t('mw.options') }}</el-button>
+          <el-button @click="openCfg">{{ I18N.t('mw.options') }}</el-button>
           <el-button @click="router.push('/micro')">{{ I18N.t('p.back') }}</el-button>
         </div>
       </div>
@@ -45,60 +45,57 @@ Views.microWork = {
         <micro-works-gallery v-if="tab === 'works'" :id="id" @preview="openLb" @changed="load" />
       </el-tab-pane>
 
-      <!-- ============ 设置（作品选项，作用于全部会话）============ -->
-      <el-tab-pane :label="I18N.t('mw.tabSettings')" name="settings">
-        <div class="mc-pane mc-pane-scroll">
-        <el-card shadow="never" style="max-width: 640px">
-          <p class="hint">{{ I18N.t('mw.cfgHint') }}</p>
-          <el-form label-position="top">
-            <el-form-item :label="I18N.t('mc.fTitle')">
-              <el-input v-model="cfg.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
-            </el-form-item>
-            <el-form-item :label="I18N.t('mc.llm')">
-              <el-select v-model="cfg.llm" style="width: 100%">
-                <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
-                           :label="c.name + '（' + c.model + '）'" />
-              </el-select>
-            </el-form-item>
-            <el-form-item :label="I18N.t('mc.dt')">
-              <el-select v-model="cfg.dt" clearable style="width: 100%">
-                <el-option value="" :label="I18N.t('mw.dtNone')" />
-                <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
-              </el-select>
-              <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
-            </el-form-item>
-            <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelImage')">
-              <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
-                         :placeholder="I18N.t('cf.dtModelPh')">
-                <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-                <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
-              </el-select>
-              <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
-            </el-form-item>
-            <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelVideo')">
-              <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
-                         :placeholder="I18N.t('cf.dtModelPh')">
-                <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-                <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
-              </el-select>
-              <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
-              <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
-            </el-form-item>
-            <el-form-item :label="I18N.t('mc.scoreMode')">
-              <el-select v-model="cfg.score_mode" style="width: 100%">
-                <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
-                <el-option value="prompt" :label="I18N.t('mc.scoreModePrompt')" />
-              </el-select>
-              <div class="hint">{{ I18N.t('mc.scoreModeHint') }}</div>
-            </el-form-item>
-          </el-form>
-          <div class="actions">
-            <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
-          </div>
-        </el-card>
-        </div>
-      </el-tab-pane>
       </el-tabs>
+
+      <el-dialog v-model="cfgDlg" :title="I18N.t('mw.options')" width="560px">
+        <p class="hint">{{ I18N.t('mw.cfgHint') }}</p>
+        <el-form label-position="top">
+          <el-form-item :label="I18N.t('mc.fTitle')">
+            <el-input v-model="cfg.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
+          </el-form-item>
+          <el-form-item :label="I18N.t('mc.llm')">
+            <el-select v-model="cfg.llm" style="width: 100%">
+              <el-option v-for="c in data.llm_configs" :key="c.id" :value="c.id"
+                         :label="c.name + '（' + c.model + '）'" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="I18N.t('mc.dt')">
+            <el-select v-model="cfg.dt" clearable style="width: 100%">
+              <el-option value="" :label="I18N.t('mw.dtNone')" />
+              <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
+            </el-select>
+            <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
+          </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelImage')">
+            <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+            <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+          </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelVideo')">
+            <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+            <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
+          </el-form-item>
+          <el-form-item :label="I18N.t('mc.scoreMode')">
+            <el-select v-model="cfg.score_mode" style="width: 100%">
+              <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
+              <el-option value="prompt" :label="I18N.t('mc.scoreModePrompt')" />
+            </el-select>
+            <div class="hint">{{ I18N.t('mc.scoreModeHint') }}</div>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="cfgDlg = false">{{ I18N.t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
+        </template>
+      </el-dialog>
 
       <el-dialog v-model="sessDlg" :title="I18N.t('mw.dlgSess')" width="440px">
         <el-input v-model="sessTitle" :placeholder="I18N.t('mw.sessTitlePh')" maxlength="200" />
@@ -148,7 +145,9 @@ Views.microWork = {
 
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
+    const cfgDlg = ref(false);
     const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, score_mode: 'image' });
+    function openCfg() { syncCfg(); cfgDlg.value = true; }  // 作品选项弹框：打开前同步当前值
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
     const imgChoices = computed(() => dtModels.value
@@ -303,6 +302,7 @@ Views.microWork = {
           score_mode: cfg.score_mode,
         });
         ElementPlus.ElMessage.success(I18N.t('mw.cfgSaved'));
+        cfgDlg.value = false;
         load();
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -321,7 +321,7 @@ Views.microWork = {
     return {
       data, msgs, hasSession, sideHidden, setSide, tab,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgBusy, cfg, imgChoices, vidChoices, saveCfg,
+      cfgBusy, cfgDlg, openCfg, cfg, imgChoices, vidChoices, saveCfg,
       lb, openLb, tagLabel, tagType,
       router, pick, openSess, load,
     };
