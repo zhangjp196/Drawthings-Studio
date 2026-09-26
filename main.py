@@ -166,12 +166,15 @@ def _dt_view(c) -> dict:
         "model_video": getattr(c, "model_video", "") or "",
         "max_side": c.max_side or 0,
         "max_seconds": getattr(c, "max_seconds", 0) or 0,
+        "ref_image": int(getattr(c, "ref_image", 0) or 0),   # 图像支持参考图片（图生图）
+        "ref_video": int(getattr(c, "ref_video", 0) or 0),   # 视频支持参考图片（图生视频）
         "created_at": c.created_at,
     }
 
 
 def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
-    """DrawThings 个性化参数：0/空 = 跟随 app 当前值。非法值直接 400。"""
+    """DrawThings 个性化参数：0/空 = 跟随 app 当前值。非法值直接 400。
+    ref_image / ref_video：「支持参考图片」（图生图 / 图生视频）勾选，仅在配了对应模型时才生效。"""
     def num(key, cast, max_v: int) -> int | float:
         v = body.get(key)
         if v in (None, ""):
@@ -192,11 +195,20 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         raise HTTPException(status_code=400,
                             detail=L(lang, "至少需要指定一个模型（图像或视频）",
                                      "At least one model (image or video) is required"))
+    def flag(key: str) -> int:
+        """勾选类字段：true/1/yes/on → 1，其余（含缺省）→ 0。"""
+        v = body.get(key)
+        if isinstance(v, bool):
+            return 1 if v else 0
+        return 1 if str(v or "").strip().lower() in ("1", "true", "yes", "on") else 0
     return {
         "model_image": model_image,
         "model_video": model_video,
         "max_side": int(num("max_side", int, 2048)),
         "max_seconds": int(num("max_seconds", int, MAX_VIDEO_SECONDS)),
+        # 勾选仅在配了对应模型时才生效：无该类型模型 → 开关一并归零（避免残留）
+        "ref_image": flag("ref_image") if model_image else 0,
+        "ref_video": flag("ref_video") if model_video else 0,
     }
 def _project_view(p: Project, chapter_count: int = 0) -> dict:
     scope = p.scope or {}

@@ -16,7 +16,8 @@ Start from **one sentence** and run it through a single pipeline to produce a **
 > one sentence → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP/PDF)
 
 The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
-Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent.
+Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent
+(enable "Supports reference image" in the Draw Things config; otherwise it is text-to-image / text-to-video).
 
 The UI **supports both Chinese and English**; toggle with one click in the toolbar (frontend `I18N` switch + the backend localizes error messages via `Accept-Language`).
 
@@ -26,6 +27,8 @@ The UI **supports both Chinese and English**; toggle with one click in the toolb
 |---------|------|--------|----------------------|
 | Comic | Continuous image generation | one image per chapter | ch.1 = first image; the rest = the previous image |
 | Short drama | Continuous video generation | one clip per chapter | ch.1 = first image (first frame); the rest = the last frame of the previous clip |
+
+Continuity references require **"Supports reference image"** to be checked in the work's Draw Things config (image-to-image / image-to-video); unchecked = text-to-image / text-to-video.
 
 ## Workspace (home /)
 
@@ -45,7 +48,8 @@ The UI **supports both Chinese and English**; toggle with one click in the toolb
 The project page is organized into **three tabs — Outline / Chapters / Complete** — you can switch between them at any time (the Chapters tab has a one-click "Back to outline").
 
 - **First image**: the project page lets you **upload a first image** or **generate one from a prompt** (leave the prompt empty and the LLM writes one from the idea + style).
-  The first image is the reference for chapter 1 (comic = img2img reference; drama = the first video frame),
+  The first image is the reference for chapter 1 (comic = img2img reference; drama = the first video frame;
+  requires "Supports reference image" in the config),
   and serves as the character/style baseline for the whole work during scripting (visible to a multimodal LLM).
 - **Style selection (with custom)**: when creating a project, pick a preset style (Japanese manga / Chinese ink wash / chibi /
   realistic cinematic / Pixar 3D / cyberpunk) or choose "Custom…" and type any description;
@@ -122,6 +126,9 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   **inferred from the model name**, no input needed. Any project/work can use any Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
   `max_seconds` (max video duration in seconds; **default 8 = built-in cap**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap).
+  **Supports reference image** (`ref_image` / `ref_video`, **unchecked by default**): declares per type whether the model can do
+  image-to-image / image-to-video. When checked, comics pass the previous image and dramas the last frame of the previous clip as
+  `init_image`; unchecked = plain text-to-image / text-to-video (greyed out and zeroed when that model is empty).
   There is also a **hard 8-second cap** on a single video (frames = fps × 8).
 
 ## Directory structure
@@ -337,7 +344,8 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
   → 768×448, ~90 s for 25 frames).
 - Duration: the config's `max_seconds` (**default 8 = built-in cap**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), then bounded by the preset frame count and the **built-in 8s cap**. (E.g. with the LTX preset at fps=25: 2s = 49 frames, 4s = 97 frames ≈ 3.9s; longer requests are capped by the preset's 121 frames ≈ 4.84s.)
-- Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically).
+- Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically);
+  requires "Supports reference image" (`ref_image` / `ref_video`) in the config — unchecked = text-to-image / text-to-video.
 
 Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's
 per-scene choice during scripting (`ScriptOut.width/height`, multiples of 64); then capped by `max_side`.

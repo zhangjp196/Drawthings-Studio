@@ -44,6 +44,9 @@ class DrawThingConfig(Base):
     （`model_image` / `model_video`，可只填其一 = 只支持该类型）与各自的
     **预设**（`preset_image` / `preset_video`，提供 steps/sampler 等；留空则按模型名自动推断）。
     其余为个性化参数，0/空 = 跟随预设。
+
+    「支持参考图片」（`ref_image` / `ref_video`）分别声明图像/视频模型能否图生图 / 图生视频：
+    勾选后才会把上一章媒体作为参考图传给 Draw Things，未勾选一律按文生图 / 文生视频。
     """
 
     __tablename__ = "drawthing_configs"
@@ -55,6 +58,8 @@ class DrawThingConfig(Base):
     model_video = Column(String(200), default="")        # 视频模型文件名（可空）
     max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随预设）
     max_seconds = Column(Integer, default=8)             # 视频最大时长（秒，0=用内置上限 8s；实际时长可由生成请求决定，不超过上限）
+    ref_image = Column(Integer, default=0)               # 图像模型支持参考图片（图生图）；0=纯文生图
+    ref_video = Column(Integer, default=0)               # 视频模型支持参考图片（图生视频）；0=纯文生视频
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 

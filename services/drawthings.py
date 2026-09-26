@@ -7,6 +7,8 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
 - gRPC 请求必须自带完整生成配置（FlatBuffer）：用 `drawthings-py` 的**预设**（preset）提供
   steps / sampler / guidance / 尺寸等，再用本配置里的**图像模型 / 视频模型**覆盖 model
   （可只填其一 = 只支持该类型）。
+- 参考图（图生图 / 图生视频）需在配置里**勾选「支持参考图片」**（ref_image / ref_video）：
+  勾选后把上一章媒体作为 init_image 传入；未勾选一律文生图 / 文生视频（参考图被忽略）。
 - 模型清单可从 app 读取（`get_models`，需 refresh_cache），生成前会校验模型已下载。
 
 图像分辨率：调用方 params > 预设，受 max_side（最长边）限幅。
@@ -295,6 +297,8 @@ class DrawThingsClient:
         self.model_video = str(getattr(cfg, "model_video", "") or "").strip()
         self.max_side = int(getattr(cfg, "max_side", 0) or 0)
         self.max_seconds = int(getattr(cfg, "max_seconds", 0) or 0)
+        self.ref_image = bool(getattr(cfg, "ref_image", 0))   # 图像模型支持参考图片（图生图）
+        self.ref_video = bool(getattr(cfg, "ref_video", 0))   # 视频模型支持参考图片（图生视频）
         self.media_dir = Path(data_dir) / "media"
         self.media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -304,6 +308,14 @@ class DrawThingsClient:
 
     def supports_video(self) -> bool:
         return bool(self.model_video)
+
+    def supports_image_ref(self) -> bool:
+        """图像模型是否支持参考图片（图生图）：勾选「支持参考图片」且配了图像模型才生效。"""
+        return bool(self.model_image) and self.ref_image
+
+    def supports_video_ref(self) -> bool:
+        """视频模型是否支持参考图片（图生视频）：勾选「支持参考图片」且配了视频模型才生效。"""
+        return bool(self.model_video) and self.ref_video
 
     def current_model(self) -> str:
         return self.model_video or self.model_image
@@ -318,14 +330,20 @@ class DrawThingsClient:
     # ---------------- 对外接口 ----------------
     def generate_image(self, prompt: str, ref_path: str | None = None,
                        params: dict | None = None) -> str:
-        """返回生成图片的绝对路径。ref_path 为空/None = 文生图，否则图生图（参考上一章）。"""
+        """返回生成图片的绝对路径。
+        开启「支持参考图片」（ref_image）且 ref_path 非空 = 图生图（参考上一章）；未开启则忽略参考图，按文生图。"""
+        if not self.supports_image_ref():
+            ref_path = None
         return asyncio.run(self._generate(prompt, video=False, ref_path=ref_path, params=params or {}))
 
     def generate_video(self, prompt: str, ref_video_path: str | None = None,
                        params: dict | None = None) -> str:
         """返回生成视频的绝对路径。
-        ref_video_path = 上一章视频：先抽末帧作为参考（短剧帧连续的关键）。"""
-        ref_frame = extract_last_frame(ref_video_path, self.media_dir) if ref_video_path else None
+        开启「支持参考图片」（ref_video）时 ref_video_path = 上一章视频，先抽末帧作为参考（短剧帧连续的关键）；
+        未开启则忽略参考图，按文生视频（不抽帧、不传 init_image）。"""
+        ref_frame = None
+        if ref_video_path and self.supports_video_ref():
+            ref_frame = extract_last_frame(ref_video_path, self.media_dir)
         return asyncio.run(self._generate(prompt, video=True, ref_path=ref_frame, params=params or {}))
 
     # ---------------- 音画同步自检 ----------------

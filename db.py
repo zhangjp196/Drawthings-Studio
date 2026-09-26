@@ -73,6 +73,8 @@ def _migrate():
             "max_seconds": "INTEGER DEFAULT 8",
             "model_image": "VARCHAR(200) DEFAULT ''",
             "model_video": "VARCHAR(200) DEFAULT ''",
+            "ref_image": "INTEGER DEFAULT 0",
+            "ref_video": "INTEGER DEFAULT 0",
         },
         "chapters": {
             "width": "INTEGER DEFAULT 0",

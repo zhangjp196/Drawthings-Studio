@@ -46,7 +46,6 @@ Views.configs = {
                     <el-option v-for="c in llmItems" :key="c.id" :value="c.id"
                                :label="c.name + '（' + c.model + '）'" />
                   </el-select>
-                  <div class="hint">{{ I18N.t('cfg.defLlmHint') }}</div>
                 </el-form-item>
               </el-col>
               <el-col :xs="24" :md="12">
@@ -54,7 +53,6 @@ Views.configs = {
                   <el-select v-model="s.default_dt_config_id" clearable style="width: 100%" :placeholder="I18N.t('cfg.defNone')">
                     <el-option v-for="c in dtItems" :key="c.id" :value="c.id" :label="c.name" />
                   </el-select>
-                  <div class="hint">{{ I18N.t('cfg.defDtHint') }}</div>
                 </el-form-item>
               </el-col>
             </el-row>
@@ -82,7 +80,7 @@ Views.configs = {
             <div class="cfg-card" v-for="row in llmItems" :key="row.id">
               <div class="wc-top"><span class="cfg-name">{{ row.name }}</span></div>
               <div class="cfg-meta muted">
-                {{ I18N.t('cfg.model', row.model) }} · {{ I18N.t('cfg.vision') }}<template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
+                {{ I18N.t('cfg.modelName', row.model) }} · {{ I18N.t('cfg.vision') }}<template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
               </div>
               <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
               <div class="wc-meta muted">{{ I18N.t('cfg.created', fmt(row.created_at)) }}</div>
@@ -179,12 +177,18 @@ Views.configs = {
                 <el-button :loading="loadingDtModels" @click="fetchDtModels">{{ I18N.t('cfg.fetchModels') }}</el-button>
               </div>
               <div class="hint">{{ I18N.t('cfg.dtModelGrpcHint') }}</div>
+              <el-checkbox v-model="f.ref_image" :disabled="!f.model_image" style="margin-top:2px;">
+                {{ I18N.t('cfg.refImage') }}
+              </el-checkbox>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.dtModelVideo')">
               <el-select v-model="f.model_video" filterable allow-create clearable style="width: 100%"
                          :placeholder="I18N.t('cfg.dtModelPh')">
                 <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
               </el-select>
+              <el-checkbox v-model="f.ref_video" :disabled="!f.model_video" style="margin-top:2px;">
+                {{ I18N.t('cfg.refVideo') }}
+              </el-checkbox>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.maxSideOpt')">
               <el-select v-model="f.max_side" style="width: 220px;">
@@ -226,7 +230,11 @@ Views.configs = {
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
       thinking: 'default', thinking_param: 'auto',
       model_image: '', model_video: '', max_side: 0, max_seconds: 8,
+      ref_image: false, ref_video: false,   // 勾选后才图生图 / 图生视频（默认不勾选 = 文生图 / 文生视频）
     });
+    // 清空模型 → 同步取消对应「支持参考图片」（无模型就无参考图可言，避免残留脏勾选）
+    watch(() => f.model_image, v => { if (!v) f.ref_image = false; });
+    watch(() => f.model_video, v => { if (!v) f.ref_video = false; });
     const dtModels = ref([]);       // gRPC 已下载模型（/api/dt-models）
     const loadingDtModels = ref(false);
     // 模型下拉候选：只列 app 里实际已下载的模型（点「获取模型」从 gRPC 读取）
@@ -320,6 +328,7 @@ Views.configs = {
         config_type: type, name: '', base_url: '', api_key: '', model: '',
         thinking: 'default', thinking_param: 'auto',
         model_image: '', model_video: '', max_side: 0, max_seconds: 8,
+        ref_image: false, ref_video: false,
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -333,6 +342,7 @@ Views.configs = {
           model_image: row.model_image || '', model_video: row.model_video || '',
           max_side: row.max_side || 0,
           max_seconds: row.max_seconds == null ? 8 : row.max_seconds,
+          ref_image: !!row.ref_image, ref_video: !!row.ref_video,
         });
         if (row.base_url) fetchDtModels();  // 预取已下载模型
       } else {
@@ -398,8 +408,8 @@ Views.configs = {
     const fmt = (s) => (s || '').slice(0, 19).replace('T', ' ');
     function dtMeta(r) {
       const p = [];
-      if (r.model_image) p.push(I18N.t('cfg.dtMetaImage', r.model_image));
-      if (r.model_video) p.push(I18N.t('cfg.dtMetaVideo', r.model_video));
+      if (r.model_image) p.push(I18N.t(r.ref_image ? 'cfg.dtMetaImageRef' : 'cfg.dtMetaImage', r.model_image));
+      if (r.model_video) p.push(I18N.t(r.ref_video ? 'cfg.dtMetaVideoRef' : 'cfg.dtMetaVideo', r.model_video));
       p.push(I18N.t(r.max_side ? 'cfg.maxSide' : 'cfg.maxSideNone', r.max_side ? r.max_side : ''));
       p.push(r.max_seconds ? I18N.t('cfg.seconds', r.max_seconds) : I18N.t('cfg.secondsNone'));
       return p.join(' · ');
