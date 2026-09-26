@@ -478,7 +478,7 @@ window.I18N = (function () {
       'mc.reset': '重置',
 
       'mw.unnamedWork': '（未命名作品）',
-      'mw.options': '⚙ 作品选项',
+      'mw.options': '配置设置',
       'mw.tabChat': '对话',
       'mw.tabWorks': '作品',
       'mw.tabSettings': '设置',
@@ -1039,7 +1039,7 @@ window.I18N = (function () {
       'mc.reset': 'Reset',
 
       'mw.unnamedWork': '(Untitled work)',
-      'mw.options': '⚙ Work options',
+      'mw.options': 'Config settings',
       'mw.tabChat': 'Chat',
       'mw.tabWorks': 'Works',
       'mw.tabSettings': 'Settings',

@@ -22,7 +22,7 @@ Views.microWork = {
           <p class="meta muted">{{ I18N.t('p.metaLlm', data.work.llm_name) }} · {{ I18N.t('p.metaDt', data.work.dt_name || I18N.t('mw.dtNone')) }}</p>
         </div>
         <div class="proj-head-actions">
-          <el-button @click="openCfg">{{ I18N.t('mw.options') }}</el-button>
+          <el-button @click="openCfg">⚙ {{ I18N.t('mw.options') }}</el-button>
           <el-button @click="router.push('/micro')">{{ I18N.t('p.back') }}</el-button>
         </div>
       </div>
