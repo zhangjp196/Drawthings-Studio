@@ -48,6 +48,7 @@ from .agent import (
     make_agent,
 )
 from .drawthings import extract_last_frame
+from .jobs import JobCancelled
 from .capabilities import dt_client, ref_image_enabled
 from .media_files import save_images_pdf
 from .pipeline_common import (
@@ -798,7 +799,8 @@ class ComicPipeline:
 
     async def step_chapters_stream(self, db, project: Project, season: Season, lang: str = "zh",
                                     count_min: int = 0, count_max: int = 0, indices: list[int] | None = None,
-                                    mode: str = "replan", progress_cb=None, chapter_done_cb=None) -> Project:
+                                    mode: str = "replan", progress_cb=None, chapter_done_cb=None,
+                                    cancel_event=None) -> Project:
         """「章节规划」逐章版（章节数量：固定值，count_min=count_max=N）：
         - mode='replan'（默认，重做）：indices 省略/空 = 全季重规划（清空该季已有章节/媒体后逐章规划 1..N）；
           indices 非空 = 多选重规划：只重写选中章节的「标题 + 主题摘要」，其余章节与已生成媒体保持不变；
@@ -809,21 +811,21 @@ class ComicPipeline:
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         if mode == "append":
             await self._append_chapters(db, project, season, lang, model, season.count_max,
-                                        progress_cb, chapter_done_cb)
+                                        progress_cb, chapter_done_cb, cancel_event)
             project.status = "chaptered"
             self._save(db, project)
             return project
         targets = sorted({int(i) for i in (indices or [])})
         if targets:
-            await self._replan_selected(db, project, season, lang, targets, model, progress_cb, chapter_done_cb)
+            await self._replan_selected(db, project, season, lang, targets, model, progress_cb, chapter_done_cb, cancel_event)
         else:
-            await self._replan_season(db, project, season, lang, model, progress_cb, chapter_done_cb)
+            await self._replan_season(db, project, season, lang, model, progress_cb, chapter_done_cb, cancel_event)
         project.status = "chaptered"
         self._save(db, project)
         return project
 
     async def _replan_season(self, db, project: Project, season: Season, lang: str, model,
-                              progress_cb, chapter_done_cb) -> None:
+                              progress_cb, chapter_done_cb, cancel_event=None) -> None:
         """全季重规划：清空该季旧章节/媒体后按大纲重新拆章（先定总章数，再逐章规划）。"""
         self._rebuild_chapters(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
         n = await self._plan_chapter_count(db, project, season, lang,
@@ -833,6 +835,8 @@ class ComicPipeline:
         base = self._season_base_index(db, project, season)
         prior: list[tuple[str, str]] = []
         for i in range(1, n + 1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelled()
             if progress_cb:
                 await progress_cb(i, n, f"第{i}章")
             title, summary = await self._plan_one_chapter(db, project, season, lang, i, n, prior, model=model)
@@ -849,12 +853,14 @@ class ComicPipeline:
         self._reindex_flat(db, project)
 
     async def _replan_selected(self, db, project: Project, season: Season, lang: str, indices: list[int],
-                                model, progress_cb, chapter_done_cb) -> None:
+                                model, progress_cb, chapter_done_cb, cancel_event=None) -> None:
         """多选重规划：按季内序号就地重写选中章节的标题 + 主题摘要；其余章节、提示词与已生成媒体都不动。"""
         chapters = self._season_chapters(db, project, season)
         n = len(chapters)
         targets = [i for i in indices if 0 <= i < n]
         for pos, idx in enumerate(targets, start=1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelled()
             if progress_cb:
                 await progress_cb(pos, len(targets), f"第{idx + 1}章")
             # 承接上下文：前面章节（含未选中的）按序传入，规划结果与全季剧情保持连贯
@@ -869,13 +875,15 @@ class ComicPipeline:
                 await chapter_done_cb(ch)
 
     async def _append_chapters(self, db, project: Project, season: Season, lang: str, model,
-                                count: int, progress_cb, chapter_done_cb) -> None:
+                                count: int, progress_cb, chapter_done_cb, cancel_event=None) -> None:
         """新增章节：保留现有章节与其媒体，在现有章节末尾之后续规划 count 章（每章承接前序剧情）。"""
         chapters = self._season_chapters(db, project, season)
         existing = len(chapters)
         base = self._season_base_index(db, project, season)
         prior: list[tuple[str, str]] = [(c.title, c.summary) for c in chapters]
         for k in range(1, count + 1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelled()
             if progress_cb:
                 await progress_cb(k, count, f"第{existing + k}章")
             title, summary = await self._plan_one_chapter(db, project, season, lang,
@@ -1057,13 +1065,15 @@ class ComicPipeline:
     async def step_generate(self, db, project: Project, season: Season,
                              indices: list[int] | None = None,
                              lang: str = "zh", progress_cb=None,
-                             chapter_done_cb=None, score_cb=None) -> Project:
+                             chapter_done_cb=None, score_cb=None, cancel_event=None) -> Project:
         """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
         开启「自动评分」时追加第 3 步：0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）。
         indices: 季内章节序号列表（0 起）；None=该季全部章节。
         季内第 1 章参考：开启「本季封面作为第 1 章参考」→ 本季封面；否则非第一季→上一季末章，第一季→无参考（文生图）。
         其余章沿用上一章媒体。"""
         dt = self._clients(db, project, lang)
+        if cancel_event is not None:
+            dt.cancel_event = cancel_event  # 协作式取消：正在跑的生图/生视频尽快停止
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         chapters = self._season_chapters(db, project, season)
         if indices is None:
@@ -1072,6 +1082,8 @@ class ComicPipeline:
             targets = [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
         try:
             for pos, (i, ch) in enumerate(targets, start=1):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise JobCancelled()
                 if progress_cb:
                     await progress_cb(pos, len(targets), ch.title)
                 # 自动评分：生成画面后按 0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）

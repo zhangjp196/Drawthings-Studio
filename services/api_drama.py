@@ -4,6 +4,7 @@
 - 与另一类型完全独立：services/api_comic.py
 - 设计约定：漫画 / 短剧刻意分成两条重复的独立线（便于分开开发维护），请勿合并 / 勿抽共享基座（见 AGENTS.md）"""
 import asyncio
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -13,12 +14,14 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from i18n import L
-from models import Chapter, Project, Season
+from models import Chapter, Project, ProjectJob, Season
 from config_store import ConfigStore
 from services.drawthings import norm_ref_flag
 from services.pipeline import _now, chars_from_raw
 from services.runtime import pipeline
 from services import events as E
+from services import jobs
+from services.jobs import JobCancelled
 from services.api_common import (
     MEDIA_DIR, MAX_IMAGE_UPLOAD, _overlay_opts, _lang, _json_body, _media_url,
     _chapter_view, _dt_ref_field, _project_view, _config_lists, _clamp_page,
@@ -413,17 +416,66 @@ async def project_action_stream(request: Request, project_id: str, db: Session =
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
     return StreamingResponse(
-        _project_action_stream(db, project, season, lang, step, body),
+        _project_action_stream(db, project, season, lang, step, body, _new_project_job(db, project, step)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+def _new_project_job(db: Session, project: Project, kind: str) -> tuple[ProjectJob, "jobs.JobControl"]:
+    """创建项目生成任务（running）并登记取消句柄。"""
+    job = ProjectJob(id=uuid.uuid4().hex[:12], project_id=project.id, kind=kind,
+                     status="running", created_at=_now(), updated_at=_now())
+    db.add(job)
+    db.commit()
+    return job, jobs.register(job.id)
+
+
+def _finish_project_job(db: Session, job: ProjectJob, status: str, error: str = "") -> None:
+    job.status = status
+    if error:
+        job.error = error[:2000]
+    job.updated_at = _now()
+    job.finished_at = _now()
+    try:
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 async def _project_action_stream(db: Session, project: Project, season: Season,
-                                  lang: str, step: str, body: dict):
-    """后台执行逐章推进（生成画面 / 章节规划）并逐事件下发：进度/单章回调入队 → SSE 帧；结束发 done，异常发 error。"""
+                                  lang: str, step: str, body: dict,
+                                  job_and_control: tuple):
+    """后台执行逐章推进（生成画面 / 章节规划）并逐事件下发：进度/单章回调入队 → SSE 帧；结束发 done，异常发 error。
+
+    同步更新项目生成任务（note/状态）；客户端断开时协作式取消正在跑的生成。
+    """
     queue: asyncio.Queue = asyncio.Queue()
+    job, control = job_and_control
+    cancel_event = control.event
+
+    def _job(status=None, note=None, error=None, finished=False):
+        try:
+            if status:
+                job.status = status
+            if note is not None:
+                job.note = str(note)[:500]
+            if error is not None:
+                job.error = str(error)[:2000]
+            job.updated_at = _now()
+            if finished:
+                job.finished_at = _now()
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     async def progress_cb(current: int, total: int, title: str):
+        _job(note=f"{current}/{total} {title or ''}".strip())
         await queue.put((E.PROGRESS, {"current": current, "total": total, "title": title or ""}))
 
     async def chapter_cb(ch):
@@ -460,7 +512,8 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                     count_max=int(body.get("count_max") or 0),
                     indices=indices,
                     mode=str(body.get("mode") or "replan"),  # replan=重做 / append=新增
-                    progress_cb=progress_cb, chapter_done_cb=plan_cb)
+                    progress_cb=progress_cb, chapter_done_cb=plan_cb,
+                    cancel_event=cancel_event)
             elif step == "score":
                 # VLM 批量评分：逐章评分（季内），单章失败不阻塞后续章节（error 阶段事件单独提示）
                 raw = body.get("indices")
@@ -469,6 +522,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 targets = list(enumerate(chapters)) if indices is None \
                     else [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
                 for pos, (i, ch) in enumerate(targets, start=1):
+                    control.check()  # 取消则抛 JobCancelled
                     await progress_cb(pos, len(targets), ch.title)
                     await score_cb(ch, None, "scoring", 0)
                     try:
@@ -484,9 +538,13 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全部
                 await pipeline.drama.step_generate(db, project, season, indices=indices, lang=lang,
                                              progress_cb=progress_cb, chapter_done_cb=chapter_cb,
-                                             score_cb=score_cb)
+                                             score_cb=score_cb, cancel_event=cancel_event)
             fresh = db.get(Project, project.id)
+            _job(status="done", note="完成", finished=True)
             await queue.put((E.DONE, {"status": fresh.status if fresh else ""}))
+        except JobCancelled:
+            _job(status="cancelled", note="已取消", finished=True)
+            await queue.put((E.DONE, {"status": "", "cancelled": True}))
         except Exception as e:
             if step == "chapters":
                 msg, msg_en = "规划章节失败：", "Planning chapters failed: "
@@ -494,6 +552,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 msg, msg_en = "批量评分失败：", "Batch scoring failed: "
             else:
                 msg, msg_en = "生成画面失败：", "Generation failed: "
+            _job(status="error", error=str(e), finished=True)
             await queue.put((E.ERROR, {"message": L(lang, msg + str(e), msg_en + str(e))}))
         finally:
             await queue.put((E.EOF, None))
@@ -510,12 +569,53 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 break
             yield _sse(event, data)
     finally:
+        control.cancel()  # 客户端断开：请求取消（正在跑的生图尽快停止）
         if not task.done():
             task.cancel()
             try:
                 await task  # 等任务清理（逐章提交进度）完成再结束请求（数据库会话此时才关闭）
             except asyncio.CancelledError:
                 pass
+        jobs.pop(job.id)
+        if job.status == "running":
+            _job(status="interrupted", note="中断", finished=True)
+
+
+@router.get("/{project_id}/jobs")
+def project_jobs(request: Request, project_id: str, active: int = 0, limit: int = 20,
+                 db: Session = Depends(get_db)):
+    """项目生成任务列表（Job）：可按 active=1 只看运行中；用于可观测与「停止生成」。"""
+    lang = _lang(request)
+    project = _drama_project(db, project_id, lang)
+    q = db.query(ProjectJob).filter(ProjectJob.project_id == project.id)
+    if active:
+        q = q.filter(ProjectJob.status == "running")
+    rows = q.order_by(ProjectJob.created_at.desc()).limit(min(max(limit, 1), 100)).all()
+    return {"jobs": [{
+        "id": j.id, "kind": j.kind, "status": j.status, "note": j.note or "",
+        "error": j.error or "", "created_at": j.created_at or "",
+        "updated_at": j.updated_at or "", "finished_at": j.finished_at or "",
+    } for j in rows], "total": len(rows)}
+
+
+@router.post("/{project_id}/jobs/{job_id}/cancel")
+def project_job_cancel(request: Request, project_id: str, job_id: str,
+                       db: Session = Depends(get_db)):
+    """取消运行中的生成任务：置位取消句柄（协作式停止，不依赖客户端连接）。"""
+    lang = _lang(request)
+    project = _drama_project(db, project_id, lang)
+    job = db.get(ProjectJob, job_id)
+    if not job or job.project_id != project.id:
+        raise HTTPException(status_code=404, detail=L(lang, "任务不存在", "Job not found"))
+    if job.status != "running":
+        return {"ok": True, "status": job.status}
+    if not jobs.cancel(job_id):
+        job.status = "cancelled"
+        job.updated_at = _now()
+        job.finished_at = _now()
+        db.commit()
+        return {"ok": True, "status": "cancelled"}
+    return {"ok": True, "status": "cancelling"}
 
 
 @router.post("/{project_id}/gen/{index}")
@@ -535,12 +635,21 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
     chapters = pipeline.drama._season_chapters(db, project, season)
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+    job, control = _new_project_job(db, project, "single")
     try:
-        project = await pipeline.drama.step_generate(db, project, season, indices=[index], lang=lang)
+        project = await pipeline.drama.step_generate(db, project, season, indices=[index], lang=lang,
+                                                     cancel_event=control.event)
+        _finish_project_job(db, job, "done")
+    except JobCancelled:
+        _finish_project_job(db, job, "cancelled")
+        raise HTTPException(status_code=400, detail=L(lang, "已取消", "Cancelled"))
     except Exception as e:
+        _finish_project_job(db, job, "error", str(e))
         raise HTTPException(status_code=400,
                              detail=L(lang, f"【生成第{index+1}章】失败：{e}",
                                       f"[Generate chapter {index+1}] failed: {e}"))
+    finally:
+        jobs.pop(job.id)
     return {"ok": True}
 
 

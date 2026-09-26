@@ -276,3 +276,23 @@ class GenerationJob(Base):
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     finished_at = Column(String(40), default="")
+
+
+class ProjectJob(Base):
+    """项目生成任务（Job）：把「一次长生成/规划/批评分」建模为可观测、可取消的任务。
+
+    与微创作的 GenerationJob 分开（作用域不同）；kind: chapters | generate | score | single。
+    运行中的取消句柄存进程内注册表（services/jobs），取消接口据此置位。
+    """
+
+    __tablename__ = "project_jobs"
+
+    id = Column(String(12), primary_key=True)
+    project_id = Column(String(12), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(12), default="generate")         # chapters | generate | score | single
+    status = Column(String(12), default="running")        # running | done | error | interrupted | cancelled
+    note = Column(Text, default="")                       # 最新状态文案（如进度）
+    error = Column(Text, default="")
+    created_at = Column(String(40), default=_now)
+    updated_at = Column(String(40), default=_now)
+    finished_at = Column(String(40), default="")

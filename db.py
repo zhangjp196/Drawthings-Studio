@@ -229,6 +229,8 @@ def _indexes():
         "CREATE INDEX IF NOT EXISTS idx_assets_session ON assets(session_id)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_micro ON generation_jobs(micro_id)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON generation_jobs(status)",
+        "CREATE INDEX IF NOT EXISTS idx_project_jobs_project ON project_jobs(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_project_jobs_status ON project_jobs(status)",
     ]
     with engine.connect() as conn:
         for s in stmts:
@@ -271,6 +273,10 @@ def _mark_interrupted_streams():
             conn.execute(text("UPDATE generation_jobs SET status='interrupted' WHERE status='running'"))
         except Exception:
             pass  # 表尚未创建（首次启动）
+        try:
+            conn.execute(text("UPDATE project_jobs SET status='interrupted' WHERE status='running'"))
+        except Exception:
+            pass
         conn.commit()
 
 

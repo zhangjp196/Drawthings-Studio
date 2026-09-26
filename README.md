@@ -83,6 +83,11 @@ The project page is organized into **three tabs — Outline / Chapters / Complet
 - **Per-chapter progress for long steps (SSE)**: "Generate all scripts / Generate all media / Regenerate all frames" are long steps
   (the LLM writes chapter by chapter / media renders chapter by chapter; blocking calls run in a thread pool so the event loop stays responsive),
   streamed over SSE with per-chapter progress (chapter x/y "title"), then auto-refreshes; a single chapter can still generate its script/media or regenerate from its own card buttons.
+- **Generation jobs (observable / cancellable)**: each long step (chapter planning / generation / batch scoring / single-chapter generation)
+  runs as a **job** (`running → done | error | interrupted | cancelled`) with a progress note; `GET /api/comics|dramas/{id}/jobs`
+  lists them and `POST .../jobs/{id}/cancel` stops a running one **without relying on the client connection**. The page's existing
+  "Stop" button aborts the SSE stream, which now also stops the in-flight Draw Things render (cooperative cancel).
+  (Comic and short drama each implement this on their own track.)
 
 ## Quick Create (/micro, work → independent sessions)
 
