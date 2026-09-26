@@ -547,6 +547,13 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
         raise HTTPException(status_code=400,
                             detail=L(lang, "消息不能为空", "Message cannot be empty"))
 
+    # 右键「引用」的媒体（图/视频均可）：本轮生成的最高优先级参考
+    quoted_ref = ""
+    ref_url = str(body.get("ref_url") or "").strip()
+    if ref_url:
+        p = media_path_from_url(ref_url)
+        quoted_ref = str(p) if p else ""
+
     # 用户消息先落库；空标题会话（及空标题作品）用首条用户消息命名
     last = db.query(MicroMessage).filter_by(session_id=session_id)\
         .order_by(MicroMessage.index.desc()).first()
@@ -590,7 +597,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
             queue, db=db, session=session, work=work, llm_cfg=llm_cfg, dt_cfg=dt_cfg,
             img_paths=image_paths, user_message=message, history=history,
             assistant_idx=user_idx + 1, lang=lang, cancel_event=cancel_event,
-            assistant_id=assistant_id)
+            assistant_id=assistant_id, quoted_ref=quoted_ref)
 
     return StreamingResponse(
         _sse_transport(_runner, db=db, job_id=job_id),

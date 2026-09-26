@@ -784,6 +784,28 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 /* 输入条 */
 .mc-inputbar { border-top: 1px solid var(--line); padding: 10px 12px 8px; }
 .mc-inputbar.drag { outline: 2px dashed var(--primary); outline-offset: -4px; border-radius: 12px; }
+/* 右键「引用」参考条：显示当前引用的媒体缩略图，可移除 */
+.mc-refbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  padding: 6px 8px; border: 1px dashed var(--primary); border-radius: 10px;
+  background: rgba(91, 91, 214, .06);
+}
+.mc-ref-thumb { width: 40px; height: 40px; display: inline-block; position: relative; }
+.mc-ref-thumb img, .mc-ref-thumb video {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--line);
+}
+.mc-refbar .mc-prev-x { position: static; margin-left: 2px; }
+/* 媒体右键菜单 */
+.mc-ctxmenu {
+  position: fixed; z-index: 3000; min-width: 132px; padding: 4px;
+  background: var(--panel, #fff); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.mc-ctxitem {
+  display: block; width: 100%; text-align: left; border: none; background: none;
+  padding: 7px 10px; border-radius: 7px; font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.mc-ctxitem:hover { background: var(--chat-bubble); }
 .mc-previews { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .mc-prev { position: relative; width: 56px; height: 56px; }
 .mc-prev img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }

@@ -15,6 +15,7 @@ import asyncio
 import itertools
 import time
 from functools import partial
+from pathlib import Path
 
 from pydantic_ai import Agent, RunContext
 
@@ -24,7 +25,7 @@ from models import Asset, MicroMessage
 from services.agent import build_model, to_message_history, user_prompt
 from services.api_common import _media_url
 from services.capabilities import caps, dt_client
-from services.drawthings import MAX_VIDEO_SECONDS
+from services.drawthings import MAX_VIDEO_SECONDS, extract_last_frame
 from services.media_files import media_path_from_url
 from services.micro_parts import dump_parts
 from services.pipeline import _now, run_sync
@@ -119,6 +120,22 @@ def asset_path_by_recency(db, session_id: str, n: int) -> str | None:
         return None
     p = media_path_from_url(a.url or "")
     return str(p) if p else None
+
+
+_VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".gif")
+
+
+def is_video_path(path: str | None) -> bool:
+    return bool(path) and Path(path).suffix.lower() in _VIDEO_SUFFIXES
+
+
+def image_ref_path(ref: str | None) -> str | None:
+    """图片生成用的参考路径：视频 → 取末帧图；图片 → 原样（供「引用」任意媒体后做图生图）。"""
+    if not ref:
+        return None
+    if is_video_path(ref):
+        return extract_last_frame(ref, Path(data_dir) / "media") or ref
+    return ref
 
 
 class _MsgPersister:
@@ -271,10 +288,12 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
 async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_cfg,
                          img_paths: list[str], user_message: str, history: list[dict],
                          assistant_idx: int, lang: str = "zh", cancel_event=None,
-                         assistant_id: int | None = None) -> None:
+                         assistant_id: int | None = None, quoted_ref: str | None = None) -> None:
     """执行一次微创作对话：事件写入 `out`，增量落库，结束发 `(E.EOF, None)`。
 
     `assistant_id` = 已建好的助手草稿消息 id（可恢复流）；None 时首次写入自动创建。
+    `quoted_ref` = 用户在会话里右键「引用」的媒体磁盘路径（图/视频均可）；作为本轮生成的
+    最高优先级参考（视频在生成图片时自动取末帧）。
     """
     t0 = time.monotonic()
     parts: list[dict] = []
@@ -343,12 +362,14 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                         await out.put((E.TOOL_ERROR, {"id": f"t{next(tool_ids)}", "message": msg, "prompt": prompt}))
                         return f"生成失败：{msg}"
                     tid = f"t{next(tool_ids)}"
-                    # 参考图优先级：本条消息附图 > 显式指定的历史资产（ref_index）> 本会话最近生成的媒体
-                    ref = img_paths[-1] if img_paths else None
+                    # 参考优先级：右键「引用」的媒体 > 本条消息附图 > 历史资产(ref_index) > 本会话最近生成的媒体
+                    ref = quoted_ref or (img_paths[-1] if img_paths else None)
                     if ref is None and ref_index and int(ref_index) > 1:
                         ref = asset_path_by_recency(db, session.id, int(ref_index))
                     if ref is None:
                         ref = last_media.get("path") or latest_session_media_path(db, session.id)
+                    if kind == "image":
+                        ref = image_ref_path(ref)  # 引用视频做图生图 → 取末帧
                     result = await _do_generation(
                         out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
                         seconds=seconds, ref=ref, tid=tid, lang=lang,

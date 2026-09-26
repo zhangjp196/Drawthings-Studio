@@ -24,18 +24,20 @@ Views.microChat = {
             <template v-if="m.role === 'user'">
               <div class="msg-text" v-if="m.content">{{ m.content }}</div>
               <div class="msg-imgs" v-if="m.images.length">
-                <img v-for="(u, i) in m.images" :key="i" :src="u" :alt="I18N.t('mw.attachAlt')" loading="lazy" decoding="async" @click="$emit('preview', m.images, i)">
+                <img v-for="(u, i) in m.images" :key="i" :src="u" :alt="I18N.t('mw.attachAlt')" loading="lazy" decoding="async"
+                     @click="$emit('preview', m.images, i)"
+                     @contextmenu.prevent="openQuote($event.clientX, $event.clientY, u, 'image')">
               </div>
             </template>
             <template v-else>
-              <micro-block v-for="(b, bi) in m.blocks" :key="bi" :b="b" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" />
+              <micro-block v-for="(b, bi) in m.blocks" :key="bi" :b="b" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" @reference="onReference" />
               <div v-if="m.status && m.status !== 'done'" class="tool-note">{{ I18N.t('mw.interrupted') }}</div>
               <div class="msg-time" v-if="m.duration">{{ m.duration }}s</div>
             </template>
           </div>
 
           <div v-if="streaming" class="msg assistant">
-            <micro-block v-for="(b, bi) in stream.parts" :key="bi" :b="b" :cursor="streamCursor(bi)" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" />
+            <micro-block v-for="(b, bi) in stream.parts" :key="bi" :b="b" :cursor="streamCursor(bi)" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" @reference="onReference" />
             <div v-if="showTyping" class="md streaming-tail"><span class="typing"><i></i><i></i><i></i></span></div>
             <div class="msg-time">{{ streamElapsed }}s</div>
           </div>
@@ -52,6 +54,14 @@ Views.microChat = {
 
       <div class="mc-inputbar" v-if="hasSession" :class="{ drag }"
            @dragover.prevent="drag = true" @dragleave="drag = false" @drop.prevent="onDrop">
+        <div class="mc-refbar" v-if="quoted">
+          <span class="muted small">{{ I18N.t('mw.quoteRefChip') }}</span>
+          <span class="mc-ref-thumb">
+            <video v-if="quoted.kind === 'video'" :src="quoted.url" muted></video>
+            <img v-else :src="quoted.url" :alt="I18N.t('mw.quoteRefChip')">
+          </span>
+          <button type="button" class="mc-prev-x" :title="I18N.t('mw.delete')" @click="quoted = null">×</button>
+        </div>
         <div class="mc-previews" v-if="attached.length">
           <div v-for="(d, i) in attached" :key="i" class="mc-prev">
             <img :src="d" :alt="I18N.t('mw.attachAlt')">
@@ -67,6 +77,10 @@ Views.microChat = {
           <el-button type="primary" :disabled="busy" @click="send">{{ I18N.t('mw.send') }}</el-button>
         </div>
         <div class="mc-status" v-if="status">{{ status }}</div>
+      </div>
+
+      <div v-if="ctx.show" class="mc-ctxmenu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
+        <button type="button" class="mc-ctxitem" @click="applyQuote">{{ I18N.t('mw.quoteRef') }}</button>
       </div>
     </section>
   `,
@@ -86,6 +100,18 @@ Views.microChat = {
     const stream = reactive({ parts: [] });
     const ph = computed(() => (props.vision ? I18N.t('mw.phVision') : I18N.t('mw.phPlain')));
 
+    // 右键「引用」：把任意媒体（上传的图 / 生成的图 / 生成的视频）作为下一轮生成的参考
+    const quoted = ref(null);  // { url, kind }
+    const ctx = reactive({ show: false, x: 0, y: 0, url: '', kind: 'image' });
+    function openQuote(x, y, url, kind) {
+      if (!url) return;
+      ctx.x = x; ctx.y = y; ctx.url = url; ctx.kind = kind || 'image';
+      ctx.show = true;
+    }
+    function onReference(p) { openQuote(p && p.x, p && p.y, p && p.url, p && p.kind); }
+    function applyQuote() { quoted.value = { url: ctx.url, kind: ctx.kind }; ctx.show = false; }
+    function closeCtx() { if (ctx.show) ctx.show = false; }
+
     // 滚动：贴底自动跟随（含图片陆续加载）；用户上翻后不再打扰，显示「回到底部」
     const atBottom = ref(true);
     let pinned = true;   // 跟随底部：为 true 时内容增高（图片/视频加载、流式输出）自动贴底
@@ -102,6 +128,12 @@ Views.microChat = {
         const el = chatBox.value;
         if (el) el.scrollTop = el.scrollHeight;
       });
+    }
+    // 输出期间始终贴底跟随（用户上翻也不打断，输出完成仍是底部）
+    function stickBottom() {
+      atBottom.value = true;
+      pinned = true;
+      scrollBottom(true);
     }
     function setupObserver() {
       if (!window.ResizeObserver) return;
@@ -211,19 +243,20 @@ Views.microChat = {
       let failed = false;
       const ctrl = new AbortController();
       sseCtrl = ctrl;
+      const refUrl = quoted.value ? quoted.value.url : '';
       try {
-        await API.sse(`/api/micro/${props.id}/${props.sid}/chat`, { message, images: shot }, (ev, d) => {
+        await API.sse(`/api/micro/${props.id}/${props.sid}/chat`, { message, images: shot, ref_url: refUrl }, (ev, d) => {
           if (ev === EVENTS.TOKEN) {
             pushText(d.text);
             status.value = '';
-            scrollBottom(false);
+            stickBottom();
           } else if (ev === EVENTS.TOOL) {
             onTool(d);
             status.value = '';
-            scrollBottom(false);
+            stickBottom();
           } else if (ev === EVENTS.MEDIA) {
             onMedia(d);
-            scrollBottom(false);
+            stickBottom();
           } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
           } else if (ev === EVENTS.TOOL_ERROR) {
@@ -236,6 +269,7 @@ Views.microChat = {
         if (failed) {
           status.value = I18N.t('mw.errRetry');
         } else {
+          quoted.value = null;  // 引用已用于本轮生成，成功后清除
           // 落库完成：由父组件重新拉取持久化历史（含左侧列表/标题同步）
           emit('sent');
         }
@@ -277,10 +311,10 @@ Views.microChat = {
           if (ev === EVENTS.TOOL) {
             onTool(d);
             status.value = '';
-            scrollBottom(false);
+            stickBottom();
           } else if (ev === EVENTS.MEDIA) {
             onMedia(d);
-            scrollBottom(false);
+            stickBottom();
           } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
           } else if (ev === EVENTS.TOOL_ERROR) {
@@ -350,7 +384,13 @@ Views.microChat = {
         if (!f.type || !f.type.startsWith('image/')) continue;
         if (attached.value.length >= 4) { status.value = I18N.t('mw.maxAttach'); break; }
         const r = new FileReader();
-        r.onload = () => { attached.value.push(r.result); };
+        r.onload = () => {
+          const url = r.result;
+          if (attached.value.includes(url)) { status.value = I18N.t('mw.dupAttach'); return; }  // 去重：同一张图不重复添加
+          if (attached.value.length >= 4) { status.value = I18N.t('mw.maxAttach'); return; }
+          attached.value.push(url);
+          status.value = '';
+        };
         r.readAsDataURL(f);
       }
     }
@@ -404,6 +444,8 @@ Views.microChat = {
       scrollBottom(true);
       setupObserver();
       checkJob();
+      document.addEventListener('click', closeCtx);
+      document.addEventListener('scroll', closeCtx, true);
       nextTick(() => {
         const el = chatBox.value;
         if (el) el.addEventListener('click', onChatClick);
@@ -415,12 +457,15 @@ Views.microChat = {
       if (ro) { ro.disconnect(); ro = null; }
       const el = chatBox.value;
       if (el) el.removeEventListener('click', onChatClick);
+      document.removeEventListener('click', closeCtx);
+      document.removeEventListener('scroll', closeCtx, true);
     });
 
     return {
       ph, input, attached, busy, status, drag, streaming, stream, streamElapsed,
       chatBox, chatInner, inputEl, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter,
       send, rerun, activeJob, stopJob, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
+      quoted, ctx, openQuote, onReference, applyQuote,
     };
   },
 };

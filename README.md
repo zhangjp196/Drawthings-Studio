@@ -133,6 +133,12 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
 - **Reference orchestration**: the model can target an **earlier asset** of the session via the `ref_index` argument of
   `generate_media` (1 = most recent, 2 = second most recent…), so multi-step "use the 2nd image as reference" flows are
   deterministic instead of always chaining the latest.
+- **Always scrolls while generating**: the chat pins to the bottom as the reply streams (scrolling up mid-stream no longer
+  stops the follow), so output is always visible at the bottom.
+- **Quote any media as reference**: **right-click** an uploaded image, a generated image or a generated video in the chat →
+  "Use as reference"; it becomes the reference for the next generation (video → last frame for image-to-image; image →
+  first frame for image-to-video). Works per message and across sessions; the reference is cleared after that generation.
+- **Attachment de-duplication**: adding the same image twice is skipped (no duplicate upload).
 - **User image attachments**: when the chosen LLM supports vision (`supports_vision`), the input box lets you click 📎 to upload, **paste**, or **drag**
   images (up to 4 per message; you can send images without text). Attachments are stored with the message and sent back to the model as part of the multi-turn context.
   Non-vision models do not show this entry.
