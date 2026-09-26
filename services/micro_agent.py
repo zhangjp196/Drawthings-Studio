@@ -142,19 +142,17 @@ def image_ref_path(ref: str | None) -> str | None:
     return ref
 
 
-_SCORE_SYSTEM = ("你是美术/视频审片。对给定的生成画面按 100 分制评估，只输出一个 JSON 对象，"
-                 "字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
-                 "评估维度：与提示词的相符度、构图与清晰度、风格/角色一致性、有无明显畸变或伪影。")
+_SCORE_SYSTEM = ("你是美术/视频审片。**仅根据画面本身评估，不要参考任何文字提示词或描述**。"
+                 "按 100 分制打分，只输出一个 JSON 对象，字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
+                 "评估维度：构图、光影、清晰度、结构与人体合理性、画面/风格一致性、有无明显畸变或伪影、整体观感。")
 
 
-async def vlm_score_media(llm_cfg, image_path: str, prompt: str = "", lang: str = "zh") -> tuple[int, str]:
-    """用作品所选 VLM 对一张生成画面评分：返回 (score, note)。视频请先取末帧再传入。"""
+async def vlm_score_media(llm_cfg, image_path: str, lang: str = "zh") -> tuple[int, str]:
+    """用作品所选 VLM **仅按画面本身**评分（忽略生成提示词）：返回 (score, note)。视频请先取末帧再传入。"""
     model = build_model(llm_cfg)
     agent = make_agent(model, _SCORE_SYSTEM, output_type=ScoreOut)
-    if lang == "en":
-        text = f"Prompt: {prompt or '(none)'}\nScore the image and give a one-line comment."
-    else:
-        text = f"生成提示词：{prompt or '（无）'}\n请评分并给出一句话评语。"
+    text = ("Evaluate the image quality by the image alone (do not consider any prompt/text), then give a score "
+            "and a one-line comment.") if lang == "en" else "请仅根据画面本身评价质量并给出评分与一句话评语。"
     content = [ImageUrl(url=image_data_uri(image_path)), text]
     data = (await agent.run(content)).output
     s = int(getattr(data, "score", 0) or 0)
@@ -358,7 +356,7 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
     if llm_cfg:
         try:
             score_path = image_ref_path(path)  # 视频 → 末帧
-            s, n = await vlm_score_media(llm_cfg, score_path, prompt, lang)
+            s, n = await vlm_score_media(llm_cfg, score_path, lang)
             block["score"] = s
             block["score_note"] = n
             await out.put((E.MEDIA_SCORE, {"id": tid, "score": s, "note": n}))

@@ -693,7 +693,6 @@ async def micro_score(request: Request, work_id: str, session_id: str,
         raise HTTPException(status_code=400,
                             detail=L(lang, "缺少媒体地址", "Missing media URL"))
     kind = str(body.get("media") or "image").strip().lower()
-    prompt = str(body.get("prompt") or "")
     llm_cfg = ConfigStore(db).get_llm(work.llm_config_id or "")
     if not llm_cfg:
         raise HTTPException(status_code=400,
@@ -711,7 +710,7 @@ async def micro_score(request: Request, work_id: str, session_id: str,
                                          "Cannot extract a video frame to score (ffmpeg required)"))
         img = frame
     try:
-        score, note = await vlm_score_media(llm_cfg, img, prompt, lang)
+        score, note = await vlm_score_media(llm_cfg, img, lang)
     except Exception as e:
         logging.getLogger("drawthings").warning("微创作评分失败：%s", e, exc_info=True)
         raise HTTPException(status_code=400,
