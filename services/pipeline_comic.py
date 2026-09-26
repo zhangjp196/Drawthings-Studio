@@ -16,6 +16,7 @@
 - 剧本/生成上下文 = 全局风格 + 核心角色 + 季大纲 + 季角色 + 全局要点；
 - 连续性：首章（第 1 季第 1 章）用封面（若开启），其余章用上一章媒体（跨季承接上季末章）。
 """
+import logging
 import shutil
 import uuid
 import zipfile
@@ -55,6 +56,8 @@ from .pipeline_common import (
     run_sync,
 )
 
+
+logger = logging.getLogger("drawthings")
 
 class ComicPipeline:
     def __init__(self, data_dir):
@@ -972,17 +975,21 @@ class ComicPipeline:
         )
         # 图生图模式（勾选「支持参考图片」且本章有参考图）：提示词写成基于参考图的修改指令，
         # 避免从头完整描述导致重绘覆盖参考画面（功能级开关优先，配置兜底）
+        # 冗余防错：先把参考图读成 data URI（文件丢失 / 损坏 → 退化为纯文本续写，不中断本章）
+        ref_uri = None
+        if ref_img:
+            # 读图 + base64 放线程池（大图编码耗时可观）
+            try:
+                ref_uri = await run_sync(image_data_uri, ref_img)
+            except Exception as e:
+                logger.warning("参考图读取失败，本次不带参考图（%s）：%s", ref_img, e)
         _r = norm_ref_flag(getattr(project, "dt_ref_image", ""))
-        if ref_img and (bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_image", 0))):
+        if ref_uri and (bool(_r) if _r is not None else bool(getattr(dt_cfg, "ref_image", 0))):
             user += ("\n【图生图模式】附图是本次生成的参考图，画面将基于它生成。"
                      "prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
                      "（角色外形、服装、画风、光照、构图），再具体描述本章的变化（新动作 / 新场景 / 新物件）；"
                      "不要从头重新描述整个画面。")
-        prompt_content: str | list = user
-        if ref_img:
-            # 读图 + base64 放线程池（大图编码耗时可观）
-            uri = await run_sync(image_data_uri, ref_img)
-            prompt_content = [ImageUrl(url=uri), user]
+        prompt_content: str | list = [ImageUrl(url=ref_uri), user] if ref_uri else user
         data = (await agent.run(prompt_content)).output
         ch.description = data.description
         ch.prompt = data.prompt

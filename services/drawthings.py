@@ -352,20 +352,37 @@ class DrawThingsClient:
     def generate_image(self, prompt: str, ref_path: str | None = None,
                        params: dict | None = None) -> str:
         """返回生成图片的绝对路径。
-        开启「支持参考图片」（ref_image）且 ref_path 非空 = 图生图（参考上一章）；未开启则忽略参考图，按文生图。"""
+        开启「支持参考图片」（ref_image）且 ref_path 非空 = 图生图（参考上一章）；未开启则忽略参考图，按文生图。
+        冗余防错：参考图相关的失败（含 Draw Things 图生图闪退缺陷）→ 自动降级为「无参考图」重试一次，
+        避免单张参考图问题导致整章失败。"""
         if not self.supports_image_ref():
             ref_path = None
-        return asyncio.run(self._generate(prompt, video=False, ref_path=ref_path, params=params or {}))
+        try:
+            return asyncio.run(self._generate(prompt, video=False, ref_path=ref_path, params=params or {}))
+        except Exception:
+            if not ref_path:
+                raise
+            logger.warning("图生图（参考图 %s）生成失败，自动降级为无参考图重试", ref_path, exc_info=True)
+            self._report("参考图生成失败，已自动改为「无参考图」重试一次…")
+            return asyncio.run(self._generate(prompt, video=False, ref_path=None, params=params or {}))
 
     def generate_video(self, prompt: str, ref_video_path: str | None = None,
                        params: dict | None = None) -> str:
         """返回生成视频的绝对路径。
         开启「支持参考图片」（ref_video）时 ref_video_path = 上一章视频，先抽末帧作为参考（短剧帧连续的关键）；
-        未开启则忽略参考图，按文生视频（不抽帧、不传 init_image）。"""
+        未开启则忽略参考图，按文生视频（不抽帧、不传 init_image）。
+        冗余防错：参考图相关的失败 → 自动降级为「无参考图」重试一次。"""
         ref_frame = None
         if ref_video_path and self.supports_video_ref():
             ref_frame = extract_last_frame(ref_video_path, self.media_dir)
-        return asyncio.run(self._generate(prompt, video=True, ref_path=ref_frame, params=params or {}))
+        try:
+            return asyncio.run(self._generate(prompt, video=True, ref_path=ref_frame, params=params or {}))
+        except Exception:
+            if not ref_frame:
+                raise
+            logger.warning("图生视频（参考帧 %s）生成失败，自动降级为无参考图重试", ref_frame, exc_info=True)
+            self._report("参考图生成失败，已自动改为「无参考图」重试一次…")
+            return asyncio.run(self._generate(prompt, video=True, ref_path=None, params=params or {}))
 
     # ---------------- 音画同步自检 ----------------
     def _remux_if_av_desynced(self, result, out: Path, fps: int, model: str) -> int:
@@ -526,9 +543,14 @@ class DrawThingsClient:
         req = RequestBuilder(cfg, prompt)
         if ref_path:
             try:
+                if not Path(ref_path).is_file():
+                    raise FileNotFoundError(f"参考图不存在：{ref_path}")
                 req.init_image(ref_path)
             except Exception as e:
-                raise RuntimeError(f"加载参考图失败：{e} / Failed to load reference image: {e}")
+                # 冗余防错：参考图不可用（文件丢失 / 格式异常 / 加载失败）→ 本次按无参考图生成，不中断整章
+                logger.warning("参考图不可用，本次改为无参考图生成（%s）：%s", ref_path, e)
+                self._report("参考图不可用，已自动改为「无参考图」生成…")
+                req = RequestBuilder(cfg, prompt)
 
         async def _attempt():
             """一次完整生成：连接 → 校验模型 → 生成（finally 保证关闭连接）。"""
