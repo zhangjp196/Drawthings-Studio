@@ -10,10 +10,6 @@ Views.projects = {
           <span class="muted">{{ I18N.t('proj.total', total) }}</span>
         </div>
         <el-button type="primary" @click="openNew">{{ I18N.t('wb.newProject') }}</el-button>
-        <el-radio-group v-model="newKind" size="small">
-          <el-radio-button v-if="f.kind !== 'drama'" value="comic">{{ I18N.t('proj.comic') }}</el-radio-button>
-          <el-radio-button v-if="f.kind !== 'comic'" value="drama">{{ I18N.t('proj.drama') }}</el-radio-button>
-        </el-radio-group>
       </div>
 
       <el-card class="filter-card" shadow="never">
@@ -100,16 +96,12 @@ Views.projects = {
         : I18N.t('proj.title'));
     // 新建弹框：从「漫画创作 / 视频创作」菜单进入时，类型预选对应项
     const newDlg = ref(false);
-    const newKind = ref('comic');
+    // 新建类型跟随页面类型筛选（创作中心已按类型分区，不再重复切换）；未筛选时默认漫画
+    const newKind = computed(() => f.kind || 'comic');
     // 弹框标题指明类型（新建漫画 / 新建短剧）
     const newDlgTitle = computed(() => I18N.t(newKind.value === 'comic' ? 'proj.newDlgComic' : 'proj.newDlgDrama'));
     function openNew() { newDlg.value = true; }
     const newPreset = computed(() => ({ kind: newKind.value }));
-    // 类型筛选联动：界面筛到某类型时，新建切换同步只显示/选中对应项
-    watch(() => f.kind, (k) => {
-      if (k === 'drama') newKind.value = 'drama';
-      else if (k === 'comic') newKind.value = 'comic';
-    });
     const rows = ref([]);
     const total = ref(0);
     const totalPages = ref(1);
