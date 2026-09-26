@@ -1553,6 +1553,11 @@ async def project_config_update(request: Request, project_id: str, db: Session =
                                      "Please select valid VLM and DrawThings configs"))
     project.llm_config_id = llm_cfg.id
     project.drawthings_config_id = dt_cfg.id
+    # 功能级模型 / 参考图开关（可随时调整；留空 / 未传 = 跟随配置默认值）
+    project.dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
+    project.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
+    project.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
+    project.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
     project.updated_at = _now()
     db.commit()
     return {"ok": True}

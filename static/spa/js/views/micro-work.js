@@ -234,6 +234,23 @@ Views.microWork = {
               </el-select>
               <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
             </el-form-item>
+            <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelImage')">
+              <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
+                         :placeholder="I18N.t('cf.dtModelPh')">
+                <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+                <el-option v-for="m in modelChoices" :key="'i' + m.file" :value="m.file" :label="m.label" />
+              </el-select>
+              <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+            </el-form-item>
+            <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelVideo')">
+              <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
+                         :placeholder="I18N.t('cf.dtModelPh')">
+                <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+                <el-option v-for="m in modelChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
+              </el-select>
+              <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+              <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
+            </el-form-item>
           </el-form>
           <div class="actions">
             <el-button type="primary" :loading="cfgBusy" @click="saveCfg">{{ I18N.t('common.save') }}</el-button>
@@ -290,12 +307,44 @@ Views.microWork = {
 
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
-    const cfg = reactive({ title: '', llm: '', dt: '' });
-    function syncCfg() {
-      cfg.title = data.value.work.title;
-      cfg.llm = data.value.work.llm_config_id;
-      cfg.dt = data.value.work.drawthings_config_id || '';
+    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false });
+    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型
+    const dtModels = ref([]);
+    const modelChoices = computed(() => dtModels.value
+      .filter(m => m.file)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') + (m.video ? ' · video' : '') })));
+    async function fetchModels() {
+      const c = (data.value && data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
+      if (!c || !c.base_url) { dtModels.value = []; return; }
+      try {
+        const r = await API.get('/api/dt-models?base_url=' + encodeURIComponent(c.base_url));
+        dtModels.value = r.models || [];
+      } catch (e) {
+        dtModels.value = [];  // app 未开 gRPC 不阻塞：可手动输入模型文件名
+      }
     }
+    function syncCfg() {
+      const w = data.value.work;
+      cfg.title = w.title;
+      cfg.llm = w.llm_config_id;
+      cfg.dt = w.drawthings_config_id || '';
+      const c = (data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
+      // 作品级未显式选模型时预填配置里的；参考图开关：作品显式值优先，否则跟随配置
+      cfg.mi = w.dt_model_image || (c ? (c.model_image || '') : '');
+      cfg.mv = w.dt_model_video || (c ? (c.model_video || '') : '');
+      cfg.ref_i = (w.dt_ref_image === '1') || (w.dt_ref_image === '' && !!c && !!c.ref_image);
+      cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
+      fetchModels();
+    }
+    watch(() => cfg.dt, (id) => {
+      const w = data.value.work;
+      const c = (data.value.drawthing_configs || []).find(x => x.id === id);
+      cfg.mi = w.dt_model_image || (c ? (c.model_image || '') : '');
+      cfg.mv = w.dt_model_video || (c ? (c.model_video || '') : '');
+      cfg.ref_i = (w.dt_ref_image === '1') || (w.dt_ref_image === '' && !!c && !!c.ref_image);
+      cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
+      fetchModels();
+    });
 
     // 作品（该作品下所有会话生成的媒体：图/视频）画廊：多选批量删除
     const works = ref([]);
@@ -543,6 +592,8 @@ Views.microWork = {
         await API.post(`/api/micro/${props.id}/settings`, {
           title: cfg.title, llm_config_id: cfg.llm,
           drawthings_config_id: cfg.dt,
+          dt_model_image: cfg.mi, dt_model_video: cfg.mv,
+          dt_ref_image: cfg.ref_i ? 1 : 0, dt_ref_video: cfg.ref_v ? 1 : 0,
         });
         ElementPlus.ElMessage.success(I18N.t('mw.cfgSaved'));
         load();
@@ -768,7 +819,7 @@ Views.microWork = {
     return {
       data, msgs, hasSession, sideHidden, setSide, tab,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgBusy, cfg, saveCfg, delWork,
+      cfgBusy, cfg, modelChoices, saveCfg, delWork,
       works, worksBusy, worksKind, selWorks, isWSel, toggleWSel, delWorks,
       sections, toggleAllKind, exportWorks, exporting,
       lb, openLb, input, attached, busy, status, drag, streaming, stream,

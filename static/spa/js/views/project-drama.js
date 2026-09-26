@@ -422,6 +422,18 @@ Views.projectDrama = {
             </el-select>
             <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="router.push('/configs?ctype=drawthings')">{{ I18N.t('cf.newCfg') }}</el-link></div>
           </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtModel')">
+            <el-select v-model="cfg.dt_model" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in modelChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+            <div class="hint">{{ I18N.t('cf.dtModelHint') }}</div>
+          </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtRef')">
+            <el-checkbox v-model="cfg.dt_ref">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
+          </el-form-item>
         </el-form>
         <template #footer>
           <el-button @click="cfgDlg = false">{{ I18N.t('common.cancel') }}</el-button>
@@ -777,7 +789,30 @@ Views.projectDrama = {
 
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
-    const cfg = reactive({ llm: '', dt: '' });
+    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref: false });
+    // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（短剧只列视频模型）
+    const dtModels = ref([]);
+    const modelChoices = computed(() => dtModels.value
+      .filter(m => m.file && m.video)
+      .map(m => ({ file: m.file, label: m.file + (m.name ? ' · ' + m.name : '') })));
+    async function fetchModels() {
+      const c = (data.value && data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
+      if (!c || !c.base_url) { dtModels.value = []; return; }
+      try {
+        const r = await API.get('/api/dt-models?base_url=' + encodeURIComponent(c.base_url));
+        dtModels.value = r.models || [];
+      } catch (e) {
+        dtModels.value = [];  // app 未开 gRPC 不阻塞：可手动输入模型文件名
+      }
+    }
+    watch(() => cfg.dt, (id) => {
+      const c = (data.value && data.value.drawthing_configs || []).find(x => x.id === id);
+      const p = data.value.project;
+      // 项目未显式选过模型时预填配置里的；参考图开关：项目显式值优先，否则跟随配置
+      if (!p.dt_model_video) cfg.dt_model = c ? (c.model_video || '') : '';
+      cfg.dt_ref = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
+      fetchModels();
+    });
     const lb = reactive({ show: false, list: [], idx: 0 });
     const resetDlg = ref(false);
     const rtitle = ref('');
@@ -1410,6 +1445,11 @@ Views.projectDrama = {
     function openCfg() {
       cfg.llm = data.value.project.llm_config_id;
       cfg.dt = data.value.project.drawthings_config_id;
+      const c = data.value.drawthing_configs.find(x => x.id === cfg.dt);
+      const p = data.value.project;
+      cfg.dt_model = p.dt_model_video || (c ? (c.model_video || '') : '');
+      cfg.dt_ref = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
+      fetchModels();
       cfgDlg.value = true;
     }
     async function saveCfg() {
@@ -1417,6 +1457,8 @@ Views.projectDrama = {
       try {
         await API.post(`/api/projects/${props.id}/config`, {
           llm_config_id: cfg.llm, drawthings_config_id: cfg.dt,
+          dt_model_video: cfg.dt_model,
+          dt_ref_video: cfg.dt_ref ? 1 : 0,
         });
         ElementPlus.ElMessage.success(I18N.t('p.cfgSaved'));
         cfgDlg.value = false;
@@ -1455,7 +1497,7 @@ Views.projectDrama = {
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan,
-      cfgDlg, cfgBusy, cfg, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
+      cfgDlg, cfgBusy, cfg, modelChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, delChapter, onChapterReloaded,
