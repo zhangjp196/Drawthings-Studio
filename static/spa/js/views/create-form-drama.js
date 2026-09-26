@@ -26,28 +26,22 @@ Views.createFormDrama = {
             </el-select>
             <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="toConfigs">{{ I18N.t('cf.newCfg') }}</el-link></div>
           </el-form-item>
-          <el-row :gutter="12" v-if="f.dt">
-            <el-col :span="12">
-              <el-form-item :label="I18N.t('cf.dtModelImage')">
-                <el-select v-model="f.dt_model_i" filterable allow-create clearable style="width: 100%"
-                           :placeholder="I18N.t('cf.dtModelPh')">
-                  <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-                  <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
-                </el-select>
-                <el-checkbox v-model="f.dt_ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item :label="I18N.t('cf.dtModelVideo')">
-                <el-select v-model="f.dt_model_v" filterable allow-create clearable style="width: 100%"
-                           :placeholder="I18N.t('cf.dtModelPh')">
-                  <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
-                  <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
-                </el-select>
-                <el-checkbox v-model="f.dt_ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
-              </el-form-item>
-            </el-col>
-          </el-row>
+          <el-form-item v-if="f.dt" :label="I18N.t('cf.dtModelImage')">
+            <el-select v-model="f.dt_model_i" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+            <el-checkbox v-model="f.dt_ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+          </el-form-item>
+          <el-form-item v-if="f.dt" :label="I18N.t('cf.dtModelVideo')">
+            <el-select v-model="f.dt_model_v" filterable allow-create clearable style="width: 100%"
+                       :placeholder="I18N.t('cf.dtModelPh')">
+              <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
+            </el-select>
+            <el-checkbox v-model="f.dt_ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+          </el-form-item>
         </el-col>
         <el-col :span="14">
           <!-- 右：创作内容（标题 / 主题 / 风格） -->

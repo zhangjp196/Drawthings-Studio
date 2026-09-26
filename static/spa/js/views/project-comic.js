@@ -426,7 +426,7 @@ Views.projectComic = {
             </el-select>
             <div class="hint">{{ I18N.t('cf.dtHint') }}<el-link :underline="false" type="primary" @click="router.push('/configs?ctype=drawthings')">{{ I18N.t('cf.newCfg') }}</el-link></div>
           </el-form-item>
-          <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtModel')">
+          <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtModelImage')">
             <el-select v-model="cfg.dt_model" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
