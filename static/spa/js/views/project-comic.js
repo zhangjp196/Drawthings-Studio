@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic },
+  components: { 'first-image': Views.firstImage, 'season-cover': Views.seasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -363,50 +363,16 @@ Views.projectComic = {
               <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="54" />
             </div>
 
-            <!-- 右：本季预览（按章节顺序、不分页；缺图占位；点击切到对应章节） -->
-            <div class="pv-side">
-              <div class="pv-side-head">
-                <b>{{ I18N.t('p.tabPreview') }}</b>
-                <el-radio-group v-model="pvMode" size="small">
-                  <el-radio-button value="tile">{{ I18N.t('p.pvTile') }}</el-radio-button>
-                  <el-radio-button value="gallery">{{ I18N.t('p.pvGallery') }}</el-radio-button>
-                </el-radio-group>
-              </div>
-              <div class="muted small">{{ I18N.t('p.pvHint', pvUrls.length, seasonChapters.length) }}</div>
-              <div class="pv-side-body">
-                <div class="pv-grid" :class="'pv-' + pvMode">
-                  <div v-for="(it, i) in pvItems" :key="'pv' + it.index" class="pv-cell"
-                       :class="{ cur: i === cur }" @click="gotoChapter(i)">
-                    <div class="pv-media">
-                      <img v-if="it.has" :src="it.url" :alt="it.title || I18N.t('p.ch', it.index + 1)"
-                           loading="lazy" decoding="async">
-                      <div v-else class="pv-ph" :title="I18N.t('p.pvMissing')">{{ it.index + 1 }}</div>
-                      <button v-if="it.has" type="button" class="pv-zoom" :title="I18N.t('p.pvZoom')"
-                              @click.stop="openLb(pvUrls, it.k)">⤢</button>
-                    </div>
-                    <div class="pv-cap">{{ i + 1 }}. {{ it.title || I18N.t('p.ch', it.index + 1) }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <!-- 右：本季预览（漫画专属子组件） -->
+            <season-preview :items="pvItems" :urls="pvUrls" :current="cur" :total="seasonChapters.length"
+                            @select="gotoChapter" @preview="openLb" />
           </div>
         </el-tab-pane>
 
         <el-tab-pane :label="I18N.t('p.tabExport')" name="done">
-          <el-card shadow="never">
-            <template #header><b>{{ I18N.t('p.tabExport') }}</b></template>
-            <template v-if="seasonChapters.length">
-              <p class="muted small mb8">{{ I18N.t('p.seasonDoneProgress', seasonDoneCount, seasonChapters.length) }}</p>
-              <el-alert v-if="seasonCompleted" type="success" :closable="false"
-                        :title="I18N.t('p.seasonDoneMsg')" class="mb8" />
-            </template>
-            <p class="muted small mb8" v-else>{{ I18N.t('p.seasonNoChapters') }}</p>
-            <div class="actions">
-              <el-button type="primary" :loading="exporting" :disabled="!seasonDoneCount" @click="exportZip">{{ I18N.t('p.exportZip') }}</el-button>
-              <el-button type="primary" :loading="exporting" :disabled="!seasonDoneCount" @click="exportPdf">{{ I18N.t('p.exportPdf') }}</el-button>
-              <el-button type="primary" plain :loading="exporting" :disabled="!seasonDoneCount" @click="previewPdf">{{ I18N.t('p.previewPdf') }}</el-button>
-            </div>
-          </el-card>
+          <season-export :done="seasonDoneCount" :total="seasonChapters.length"
+                         :completed="seasonCompleted" :exporting="exporting"
+                         @zip="exportZip" @pdf="exportPdf" @preview="previewPdf" />
         </el-tab-pane>
       </el-tabs>
 
@@ -630,7 +596,6 @@ Views.projectComic = {
       return a.filter(c => c.score >= th);
     });
     // 预览页签：平铺 / 画廊；pvItems 带「有图序号 k」（无图章节不进放大列表），缺图白色占位
-    const pvMode = ref('tile');
     const pvItems = computed(() => {
       let k = -1;
       return seasonChapters.value.map(c => {
@@ -1511,7 +1476,7 @@ Views.projectComic = {
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
-      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvMode, pvItems, pvUrls, gotoChapter,
+      coverGenDlg, ovlDlg, ovlBox, ovlBusy, ovlTextStyle, pvItems, pvUrls, gotoChapter,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan,
       cfgDlg, cfgBusy, cfg, modelChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, ovlDragStart, ovlDragMove, ovlDragEnd, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
