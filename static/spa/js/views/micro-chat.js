@@ -28,13 +28,14 @@ Views.microChat = {
               </div>
             </template>
             <template v-else>
-              <micro-block v-for="(b, bi) in m.blocks" :key="bi" :b="b" @preview="(l, i) => $emit('preview', l, i)" />
+              <micro-block v-for="(b, bi) in m.blocks" :key="bi" :b="b" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" />
+              <div v-if="m.status && m.status !== 'done'" class="tool-note">{{ I18N.t('mw.interrupted') }}</div>
               <div class="msg-time" v-if="m.duration">{{ m.duration }}s</div>
             </template>
           </div>
 
           <div v-if="streaming" class="msg assistant">
-            <micro-block v-for="(b, bi) in stream.parts" :key="bi" :b="b" :cursor="streamCursor(bi)" @preview="(l, i) => $emit('preview', l, i)" />
+            <micro-block v-for="(b, bi) in stream.parts" :key="bi" :b="b" :cursor="streamCursor(bi)" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" />
             <div v-if="showTyping" class="md streaming-tail"><span class="typing"><i></i><i></i><i></i></span></div>
             <div class="msg-time">{{ streamElapsed }}s</div>
           </div>
@@ -246,6 +247,61 @@ Views.microChat = {
       }
     }
 
+    // 一键重跑：跳过 LLM，按内容块保存的参数直接重生成（结果可复现）
+    async function rerun(b) {
+      if (busy.value || !props.hasSession || !b || !b.prompt) return;
+      busy.value = true;
+      startTimer();
+      streaming.value = true;
+      stream.parts = [];
+      status.value = '';
+      atBottom.value = true;
+      pinned = true;
+      scrollBottom(true);
+
+      let failed = false;
+      const ctrl = new AbortController();
+      sseCtrl = ctrl;
+      try {
+        await API.sse(`/api/micro/${props.id}/${props.sid}/regenerate`, {
+          prompt: b.prompt, media: b.media || 'image',
+          width: b.width || 0, height: b.height || 0, seconds: b.seconds || 0,
+          ref_url: b.ref_url || '',
+        }, (ev, d) => {
+          if (ev === EVENTS.TOOL) {
+            onTool(d);
+            status.value = '';
+            scrollBottom(false);
+          } else if (ev === EVENTS.MEDIA) {
+            onMedia(d);
+            scrollBottom(false);
+          } else if (ev === EVENTS.TOOL_STATUS) {
+            onToolStatus(d);
+          } else if (ev === EVENTS.TOOL_ERROR) {
+            onToolError(d);
+          } else if (ev === EVENTS.ERROR) {
+            failed = true;
+            onError(d);
+          }
+        }, ctrl.signal);
+        if (failed) {
+          status.value = I18N.t('mw.errRetry');
+        } else {
+          emit('sent');  // 落库完成：父组件刷新持久化历史
+        }
+      } catch (e) {
+        if (!ctrl.signal.aborted) {
+          onError({ message: e.message });
+          status.value = I18N.t('mw.errRetry');
+        }
+      } finally {
+        stopTimer();
+        busy.value = false;
+        streaming.value = false;
+        if (sseCtrl === ctrl) sseCtrl = null;
+      }
+    }
+
     // 代码块一键复制（事件委托）
     function onChatClick(e) {
       const btn = e.target.closest && e.target.closest('.copy-code');
@@ -333,7 +389,7 @@ Views.microChat = {
     return {
       ph, input, attached, busy, status, drag, streaming, stream, streamElapsed,
       chatBox, chatInner, inputEl, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter,
-      send, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
+      send, rerun, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
     };
   },
 };

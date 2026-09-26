@@ -103,6 +103,15 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
 - **Auto-generation via function calling**: when an image/video is needed, the model **auto-calls the `generate_media` tool**
   (distilling a detailed English prompt from the context), then calls Draw Things to produce a single image/video;
   the result is embedded directly into the chat bubble (with the prompt).
+- **Durable stream (recoverable output)**: the assistant reply is written to the database **incrementally** (a draft is
+  created up front, updated as text/media accrue, then finalized). If the browser disconnects, the page is refreshed, the
+  app is closed or the process crashes mid-generation, the partial reply is kept and marked **interrupted** (stale
+  drafts are swept on startup) — instead of losing the whole reply.
+- **Parameter snapshot + one-click re-run**: every generation records its snapshot (model / size / seconds / reference)
+  in the content block; the card shows it and offers **Re-run**, which reproduces the result with the **same parameters
+  directly (no LLM in the loop)** — deterministic re-generation.
+- **Cross-turn reference**: with "Supports reference image" on, when no image is attached the generation falls back to
+  the **session's most recently generated media** (across turns), not just the current one.
 - **User image attachments**: when the chosen LLM supports vision (`supports_vision`), the input box lets you click 📎 to upload, **paste**, or **drag**
   images (up to 4 per message; you can send images without text). Attachments are stored with the message and sent back to the model as part of the multi-turn context.
   Non-vision models do not show this entry.
@@ -147,12 +156,12 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 
 ```
 .
-├── main.py              # FastAPI entry + /api routes + SSE + SPA shell fallback (db session injected per request)
+├── main.py              # FastAPI 入口 + app 装配 + 配置/健康检查/SPA 外壳（API 路由在 services/）
 ├── app.py               # unified entry (PyInstaller target: no args = client, --server = server mode)
 ├── client.py            # CS desktop client (pywebview native window: auto-starts server / native "Save As" / notifications / single instance)
 ├── paths.py             # path resolution (resource & data dirs for source / packaged modes)
 ├── config.py            # keeps only the data directory (reads env DATA_DIR, optional)
-├── db.py                # SQLAlchemy engine / session / init_db (incl. legacy-structure migration)
+├── db.py                # SQLAlchemy engine / session / init_db (incl. migrations; marks stale streams interrupted)
 ├── models.py            # ORM models: LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
 ├── config_store.py      # config CRUD (with "referenced by a project/work" protection before delete)
 ├── i18n.py              # backend zh/en localization (Accept-Language → zh|en + L() text helper)
@@ -163,14 +172,26 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 unified agent layer (model construction / structured output / message history)
-│   ├── drawthings.py    # Draw Things gRPC client (images + video, via drawthings-py) + shared helpers/factory
-│   └── pipeline.py      # pipeline orchestration (builds the agent at runtime from the project's config)
+│   ├── api_common.py    # shared API infra (localization / media URL / serialization / SSE frame / paging)
+│   ├── api_comic.py     # comic project routes (/api/comics/*)
+│   ├── api_drama.py     # short-drama project routes (/api/dramas/*)
+│   ├── api_micro.py     # micro-creation routes (/api/micro/*) + SSE transport (drive engine queue + heartbeat)
+│   ├── micro_agent.py   # micro-creation session engine (system prompt / generate_media tool / parts / durable writes / rerun)
+│   ├── micro_parts.py   # assistant "ordered content blocks" schema + versioned (de)serialization
+│   ├── capabilities.py  # effective generation capabilities (feature-level model / ref-image overrides; shared)
+│   ├── media_files.py   # media cleanup / path resolve / user-attachment save / ZIP·PDF export (shared)
+│   ├── events.py        # SSE event contract (single source; frontend mirror = static/spa/js/events.js)
+│   ├── drawthings.py    # Draw Things gRPC client (images + video, via drawthings-py) + shared helpers/factory + cooperative cancel
+│   ├── pipeline.py      # pipeline facade (routes by kind → comic / drama)
+│   ├── pipeline_common.py / pipeline_comic.py / pipeline_drama.py  # shared utils + the two independent pipelines
+│   └── runtime.py       # runtime pipeline singleton
 ├── static/
 │   ├── vendor/          # frontend deps (downloaded locally, build-free/offline): vue / vue-router / element-plus (js+css+dark+zh-cn+en) / icons
 │   └── spa/             # single-page frontend (UMD, no bundler)
 │       ├── index.html   #   shell: left sidebar + toolbar + <router-view> + pre-paint theme/lang
 │       ├── css/app.css  #   app styles (Element Plus theme variable mapping + layout + chat area)
-│       └── js/          #   app.js (entry/router) api.js (fetch+SSE) theme.js i18n.js (zh/en dict) md.js (Markdown) views/ (7 routed views + sub-components like first-image / chapter-card)
+│       └── js/          #   app.js (entry/router) api.js (fetch+SSE) events.js (event constants) theme.js i18n.js (zh/en dict) md.js (Markdown)
+│                        #   views/ (routed views + sub-components: micro-block / micro-session-list / micro-chat / micro-works-gallery, chapter-card-*, create-form-*)
 └── data/                # app.db (SQLite) media/ (images/videos)
 ```
 

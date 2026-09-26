@@ -24,7 +24,10 @@ class TextBlock(BaseModel):
 
 
 class ToolBlock(BaseModel):
-    """生成块：一次 generate_media 调用（生成中 → 已生成 / 失败）。"""
+    """生成块：一次 generate_media 调用（生成中 → 已生成 / 失败）。
+
+    附「生成参数快照」（model/width/height/seconds/ref_url），用于结果复现与一键重跑。
+    """
     type: Literal["tool"] = "tool"
     id: str = ""
     label: str = ""
@@ -33,6 +36,12 @@ class ToolBlock(BaseModel):
     media: str = "image"         # image | video
     url: str = ""
     message: str = ""
+    # ---- 生成参数快照（B5：可复现 / 一键重跑）----
+    model: str = ""              # 实际使用的模型名
+    width: int = 0               # 图片宽（0=跟随预设）
+    height: int = 0
+    seconds: int = 0             # 视频时长（秒；0=用上限）
+    ref_url: str = ""            # 实际参考图（/media/xxx；空=无参考）
 
 
 class MediaBlock(BaseModel):

@@ -27,7 +27,7 @@ from services.media_files import (
     cleanup_message_media, export_pdf, export_zip, is_video_url,
     media_path_from_url, save_data_uri_images,
 )
-from services.micro_agent import run_micro_chat
+from services.micro_agent import run_micro_chat, run_regenerate
 from services.micro_parts import load_parts
 from services.pipeline import _now
 
@@ -365,6 +365,7 @@ def micro_session_page(request: Request, work_id: str, session_id: str, db: Sess
                      "created_at": m.created_at or "",
                      "duration": m.duration or 0,
                      "images": imgs, "media_url": m.media_url or "", "prompt": m.prompt or "",
+                     "status": m.status or "done",
                      "parts": load_parts(m.parts)})
     view["session_id"] = session.id
     view["messages"] = msgs
@@ -444,6 +445,10 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     db.add(MicroMessage(session_id=session_id, index=user_idx, role="user", content=message,
                         created_at=_now(),
                         images=json.dumps(image_urls, ensure_ascii=False) if image_urls else None))
+    # 助手「草稿」先落库（可恢复流）：生成过程中增量写入，断连/崩溃也保留部分输出
+    draft = MicroMessage(session_id=session_id, index=user_idx + 1, role="assistant",
+                         content="", created_at=_now(), status="streaming")
+    db.add(draft)
     if not session.title.strip():
         session.title = message[:50]
         if not work.title.strip():
@@ -451,6 +456,7 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     session.updated_at = _now()
     work.updated_at = _now()
     db.commit()
+    assistant_id = draft.id
 
     rows = db.query(MicroMessage).filter(MicroMessage.session_id == session_id,
                                          MicroMessage.index < user_idx)\
@@ -467,27 +473,87 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
             except (ValueError, TypeError):
                 pass
         history.append({"role": r.role, "content": r.content, "images": imgs})
+
+    def _runner(queue, cancel_event):
+        return run_micro_chat(
+            queue, db=db, session=session, work=work, llm_cfg=llm_cfg, dt_cfg=dt_cfg,
+            img_paths=image_paths, user_message=message, history=history,
+            assistant_idx=user_idx + 1, lang=lang, cancel_event=cancel_event,
+            assistant_id=assistant_id)
+
     return StreamingResponse(
-        _micro_stream(db, session, llm_cfg, dt_cfg, work, image_paths,
-                      message, history, user_idx + 1, lang),
+        _sse_transport(_runner),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _micro_stream(db: Session, session: MicroSession, llm_cfg, dt_cfg,
-                        work: MicroWork, img_paths: list[str],
-                        user_message: str, history: list[dict], assistant_idx: int,
-                        lang: str = "zh"):
-    """SSE 传输层：驱动 `run_micro_chat` 的事件队列，转成 SSE 帧（含心跳）。
+@router.post("/{work_id}/{session_id}/regenerate")
+async def micro_regenerate(request: Request, work_id: str, session_id: str,
+                           db: Session = Depends(get_db)):
+    """一键重跑：跳过 LLM，按内容块保存的参数直接重生成（可复现）。
 
-    事件语义见 `services/events.py`。出图/出视频耗时长，15s 无事件发心跳保持连接。
+    body: {prompt, media, width, height, seconds, ref_url}（来自 tool 内容块的参数快照）。
+    """
+    lang = _lang(request)
+    session = db.get(MicroSession, session_id)
+    if not session or session.micro_id != work_id:
+        raise HTTPException(status_code=404,
+                            detail=L(lang, "会话不存在", "Session not found"))
+    work = session.work
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "请求体需为 JSON", "Body must be JSON"))
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, "缺少提示词，无法重跑", "Missing prompt — cannot re-generate"))
+    kind = str(body.get("media") or "image").strip().lower()
+    if kind not in ("image", "video"):
+        kind = "image"
+
+    def _int(v) -> int:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+    width, height, seconds = _int(body.get("width")), _int(body.get("height")), _int(body.get("seconds"))
+    ref_url = str(body.get("ref_url") or "")
+    cs = ConfigStore(db)
+    dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
+
+    last = db.query(MicroMessage).filter_by(session_id=session_id)\
+        .order_by(MicroMessage.index.desc()).first()
+    draft = MicroMessage(session_id=session_id, index=(last.index + 1) if last else 0,
+                         role="assistant", content="", created_at=_now(), status="streaming")
+    db.add(draft)
+    session.updated_at = _now()
+    work.updated_at = _now()
+    db.commit()
+    assistant_id = draft.id
+
+    def _runner(queue, cancel_event):
+        return run_regenerate(
+            queue, db=db, session=session, work=work, dt_cfg=dt_cfg, assistant_id=assistant_id,
+            kind=kind, prompt=prompt, width=width, height=height, seconds=seconds,
+            ref_url=ref_url, lang=lang, cancel_event=cancel_event)
+
+    return StreamingResponse(
+        _sse_transport(_runner),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+async def _sse_transport(runner):
+    """SSE 传输层：驱动引擎（runner 协程，事件写入队列）转成 SSE 帧（含心跳）。
+
+    runner(queue, cancel_event) 由调用方构造（对话 / 重跑）；事件语义见 `services/events.py`。
+    出图/出视频耗时长，15s 无事件发心跳保持连接；客户端断开时协作式取消生成。
     """
     queue: asyncio.Queue = asyncio.Queue()
     cancel_event = threading.Event()  # 客户端断开（切换会话 / 关闭页面）时协作式停止正在进行的生成
-    task = asyncio.create_task(run_micro_chat(
-        queue, db=db, session=session, work=work, llm_cfg=llm_cfg, dt_cfg=dt_cfg,
-        img_paths=img_paths, user_message=user_message, history=history,
-        assistant_idx=assistant_idx, lang=lang, cancel_event=cancel_event))
+    task = asyncio.create_task(runner(queue, cancel_event))
     try:
         while True:
             try:

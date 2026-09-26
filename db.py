@@ -123,6 +123,7 @@ def _migrate():
             "created_at": "VARCHAR(40) DEFAULT ''",
             "duration": "REAL DEFAULT 0",
             "parts": "TEXT",
+            "status": "VARCHAR(12) DEFAULT 'done'",
         },
     }
     with engine.connect() as conn:
@@ -244,10 +245,20 @@ def _migrate_seasons():
         db.close()
 
 
+def _mark_interrupted_streams():
+    """启动清理：上次进程异常退出时残留的「streaming」助手消息标记为 interrupted
+    （可恢复流：断连/崩溃留下部分输出，下次进入会话可见「可能未完成」）。"""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text("UPDATE micro_messages SET status='interrupted' WHERE status='streaming'"))
+        conn.commit()
+
+
 def init_db():
     """建表 + 迁移 + 索引。需先 import models 以注册所有表到 metadata。"""
     import models  # noqa: F401  确保模型注册
     Base.metadata.create_all(engine)
     _migrate()
     _migrate_seasons()
+    _mark_interrupted_streams()
     _indexes()

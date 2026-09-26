@@ -219,4 +219,5 @@ class MicroMessage(Base):
     media_url = Column(String(500), default="")            # 助手消息附带的生成媒体（/media/xxx，兼容旧逻辑：取最后一次）
     prompt = Column(Text, default="")                      # 生成时用的提示词（兼容旧逻辑：取最后一次）
     parts = Column(Text, nullable=True)                   # 助手回复的有序内容块（JSON：[{type:text|tool|error,...}]，保序）
+    status = Column(String(12), default="done")            # done | streaming | interrupted（可恢复流：断连时的部分输出）
     session = relationship("MicroSession", back_populates="messages")

@@ -7,6 +7,7 @@ Views.microBlock = {
     b: { type: Object, required: true },
     cursor: { type: Boolean, default: false },
   },
+  emits: ['preview', 'rerun'],
   template: `
     <div class="blk" :class="'blk-' + b.type">
       <template v-if="b.type === 'text'">
@@ -22,6 +23,12 @@ Views.microBlock = {
           <button v-if="b.prompt" type="button" class="tool-prompt-toggle" @click="showPrompt = !showPrompt">
             {{ showPrompt ? I18N.t('mw.hidePrompt') : I18N.t('mw.prompt') }}
           </button>
+          <button v-if="b.prompt && b.status !== 'running'" type="button" class="tool-prompt-toggle" @click="$emit('rerun', b)">
+            {{ I18N.t('mw.rerun') }}
+          </button>
+          <div v-if="b.width || b.height || b.seconds || b.model" class="tool-note">
+            {{ paramLine }}
+          </div>
           <div v-if="showPrompt && b.prompt" class="tool-prompt">{{ b.prompt }}</div>
           <div v-if="b.status === 'running' && b.message" class="tool-note">{{ b.message }}</div>
           <div v-if="b.status === 'error' && b.message" class="tool-err">{{ b.message }}</div>
@@ -57,7 +64,15 @@ Views.microBlock = {
       if (props.b.status === 'error') return I18N.t('mw.toolError');
       return I18N.t('mw.toolOk');
     });
+    // 参数快照行：尺寸 / 时长 / 模型（可复现，便于核对「重跑」结果）
+    const paramLine = computed(() => {
+      const seg = [];
+      if (props.b.width && props.b.height) seg.push(props.b.width + '×' + props.b.height);
+      if (props.b.seconds) seg.push(props.b.seconds + 's');
+      if (props.b.model) seg.push(props.b.model);
+      return seg.join(' · ');
+    });
     function isVideo(url) { return /\.(mp4|mov|webm|gif)(\?|$)/i.test(url || ''); }
-    return { showPrompt, html, statusLabel, isVideo, I18N };
+    return { showPrompt, html, statusLabel, paramLine, isVideo, I18N };
   },
 };

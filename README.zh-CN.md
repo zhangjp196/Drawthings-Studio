@@ -99,6 +99,13 @@
 - **function call 自动生成**：需要出图/出视频时，由模型**自动调用 `generate_media` 工具**
   （结合上下文提炼详细英文提示词），再调 DrawThings 产出单张图/单个视频，
   结果直接嵌进对话气泡（含提示词）。
+- **可恢复流**：助手回复**增量落库**（先建草稿，文本/媒体推进时持续写入，结束定稿）。浏览器断连、
+  刷新、关闭客户端或进程在生成中崩溃，已产出的部分都会保留并标记为**已中断**（启动时清理残留草稿），
+  不再整条丢失。
+- **参数快照 + 一键重跑**：每次生成把参数快照（模型 / 尺寸 / 时长 / 参考图）写进内容块，卡片展示该快照并提供
+  **重跑**——按**原参数直接重生成（不经 LLM）**，结果可复现。
+- **跨轮次参考图**：勾选「支持参考图片」且本次未附图时，回退使用**本会话最近一次生成的媒体**作参考
+  （跨轮次生效，不再限于同一次生成）。
 - **用户附图**：所选 LLM 支持视觉（`supports_vision`）时，输入框可点 📎 上传、**粘贴**或**拖拽**
   图片（每条最多 4 张，可只发图不发文字）；附图随消息落库，并随多轮上下文回传给模型。
   附图同时作为下一次生成的**参考图**（图生图 / 图生视频，受作品「支持参考图片」勾选控制，配置作兜底；
@@ -136,12 +143,12 @@
 
 ```
 .
-├── main.py              # FastAPI 入口 + /api 路由 + SSE + SPA 外壳兜底（按请求注入 db 会话）
+├── main.py              # FastAPI 入口 + app 装配 + 配置/健康检查/SPA 外壳（API 路由在 services/）
 ├── app.py               # 统一入口（PyInstaller 打包目标：无参 = 客户端，--server = 服务模式）
 ├── client.py            # CS 桌面客户端（pywebview 原生窗口：自动拉起服务 / 原生「另存为」/ 系统通知 / 单实例）
 ├── paths.py             # 路径解析（源码 / 打包两种模式的资源与数据目录）
 ├── config.py            # 仅保留数据目录位置（读环境变量 DATA_DIR，可选）
-├── db.py                # SQLAlchemy 引擎 / 会话 / init_db（含旧库结构迁移）
+├── db.py                # SQLAlchemy 引擎 / 会话 / init_db（含迁移；启动把残留的 streaming 消息标记为 interrupted）
 ├── models.py            # ORM 模型：LLMConfig / DrawThingConfig / Project / Chapter / MicroWork / MicroSession / MicroMessage
 ├── config_store.py      # 配置增删查（含删除前的“被项目/微创作作品引用”保护）
 ├── i18n.py              # 后端中英文本地化（Accept-Language → zh|en + L() 文案助手）
@@ -152,14 +159,26 @@
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 统一 Agent 层（模型构造 / 结构化输出 / 消息历史）
-│   ├── drawthings.py    # Draw Things gRPC 客户端（出图 + 出视频，drawthings-py）+ 共享工具/工厂
-│   └── pipeline.py      # 流水线编排（按项目所选 config 运行时构建 Agent）
+│   ├── api_common.py    # API 共享基础设施（本地化 / 媒体 URL / 序列化视图 / SSE 帧 / 分页）
+│   ├── api_comic.py     # 漫画项目路由（/api/comics/*）
+│   ├── api_drama.py     # 短剧项目路由（/api/dramas/*）
+│   ├── api_micro.py     # 微创作路由（/api/micro/*）+ SSE 传输层（驱动引擎队列 + 心跳）
+│   ├── micro_agent.py   # 微创作会话引擎（系统提示词 / generate_media 工具 / 内容块 / 增量落库 / 重跑）
+│   ├── micro_parts.py   # 助手「有序内容块」schema + 版本化读写
+│   ├── capabilities.py  # 生效生成能力解析（功能级模型 / 参考图开关覆盖；项目与微创作共用）
+│   ├── media_files.py   # 媒体清理 / 路径解析 / 用户附图落盘 / ZIP·PDF 导出（共用）
+│   ├── events.py        # SSE 事件契约（单一来源；前端镜像 = static/spa/js/events.js）
+│   ├── drawthings.py    # Draw Things gRPC 客户端（出图 + 出视频，drawthings-py）+ 工具/工厂 + 协作式取消
+│   ├── pipeline.py      # 流水线门面（按类型分发 → comic / drama）
+│   ├── pipeline_common.py / pipeline_comic.py / pipeline_drama.py  # 共用工具 + 两条独立流水线
+│   └── runtime.py       # 运行时流水线单例
 ├── static/
 │   ├── vendor/          # 前端依赖（本地下载，免构建/离线）：vue / vue-router / element-plus（js+css+dark+zh-cn+en）/ icons
 │   └── spa/             # 单页前端（UMD 引入，无打包）
 │       ├── index.html   #   外壳：左栏侧边导航 + 工具栏 + <router-view> + 主题/语言预渲染
 │       ├── css/app.css  #   应用样式（Element Plus 主题变量映射 + 布局 + 对话区）
-│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）theme.js i18n.js（中英词典）md.js（Markdown）views/（7 个路由视图 + first-image / chapter-card 等子组件）
+│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）events.js（事件常量）theme.js i18n.js（中英词典）md.js（Markdown）
+│                        #   views/（路由视图 + 子组件：micro-block / micro-session-list / micro-chat / micro-works-gallery、chapter-card-*、create-form-*）
 └── data/                # app.db（SQLite） media/（图片/视频）
 ```
 
