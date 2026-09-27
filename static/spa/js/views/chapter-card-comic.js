@@ -75,13 +75,9 @@ Views.chapterCardComic = {
             <span v-if="chapter.score_note" class="muted small" style="margin-left:6px;">{{ chapter.score_note }}</span>
           </div>
           <div class="actions">
-            <el-popconfirm :title="I18N.t('p.chGenConfirm')" @confirm="doGen">
-              <template #reference>
-                <el-button size="small" type="primary" :loading="busy === 'gen'" :disabled="locked">
-                  {{ done ? I18N.t('p.chRegen') : I18N.t('p.chGen') }}
-                </el-button>
-              </template>
-            </el-popconfirm>
+            <el-button size="small" type="primary" :loading="busy === 'gen'" :disabled="locked" @click="openGen">
+              {{ done ? I18N.t('p.chRegen') : I18N.t('p.chGen') }}
+            </el-button>
             <el-popconfirm :title="I18N.t('p.chSaveConfirm')" @confirm="doSave">
               <template #reference><el-button size="small" :loading="busy === 'save'" :disabled="locked">{{ I18N.t('p.chSave') }}</el-button></template>
             </el-popconfirm>
@@ -91,12 +87,25 @@ Views.chapterCardComic = {
             <el-popconfirm :title="I18N.t('p.chMoveDownConfirm')" @confirm="doMove('down')">
               <template #reference><el-button size="small" :disabled="isLast || locked">{{ I18N.t('p.chMoveDown') }}</el-button></template>
             </el-popconfirm>
+            <el-popconfirm :title="I18N.t('p.chClearConfirm')" @confirm="doClear">
+              <template #reference><el-button size="small" :loading="busy === 'clear'" :disabled="locked">{{ I18N.t('p.chClear') }}</el-button></template>
+            </el-popconfirm>
             <el-popconfirm :title="I18N.t('p.chDeleteConfirm')" @confirm="doDelete">
               <template #reference><el-button size="small" type="danger" plain :disabled="locked">{{ I18N.t('p.chDelete') }}</el-button></template>
             </el-popconfirm>
           </div>
         </div>
       </div>
+      <!-- 重新生成画面：可填写补充提示词，人工修正/补充画面问题 -->
+      <el-dialog v-model="genDlg" :title="done ? I18N.t('p.chRegen') : I18N.t('p.chGen')"
+                 width="520px" append-to-body>
+        <p class="hint mb8">{{ I18N.t('p.chGenExtraHint') }}</p>
+        <el-input v-model="genExtra" type="textarea" :rows="4" :placeholder="I18N.t('p.chGenExtraPh')" />
+        <template #footer>
+          <el-button @click="genDlg = false">{{ I18N.t('p.cancel') }}</el-button>
+          <el-button type="primary" :loading="busy === 'gen'" @click="confirmGen">{{ I18N.t('p.confirm') }}</el-button>
+        </template>
+      </el-dialog>
     </el-card>
   `,
   setup(props, { emit }) {
@@ -115,11 +124,17 @@ Views.chapterCardComic = {
       if (!(s > 0)) return 'none';
       return s >= props.scoreMin ? 'ok' : 'low';
     });
+    // 重新生成画面：弹框补充提示词（人工修正/补充画面问题）
+    const genDlg = ref(false);
+    const genExtra = ref('');
+    function openGen() { genDlg.value = true; }
+    async function confirmGen() { genDlg.value = false; await doGen(); }
 
     async function doGen() {
       busy.value = 'gen';
       try {
-        await API.post(`/api/comics/${props.projectId}/gen/${props.seasonIndex}`, { season_id: props.seasonId }, 0);
+        await API.post(`/api/comics/${props.projectId}/gen/${props.seasonIndex}`,
+                       { season_id: props.seasonId, extra_prompt: genExtra.value || '' }, 0);
         emit('reloaded', props.seasonIndex);
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -140,7 +155,7 @@ Views.chapterCardComic = {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
     }
-    // VLM 自动评分：调用 VLM 重新给本章评分（与流水线自动评分同款），成功后刷新分值/评语
+    // VLM 手动评分：调用 VLM 给本章评分，成功后刷新分值/评语
     async function doScore() {
       busy.value = 'score';
       try {
@@ -165,8 +180,28 @@ Views.chapterCardComic = {
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
+    // 清空本章产物：清掉媒体、出图提示词与评分（保留标题/摘要/剧本），成功后重置本地展示
+    async function doClear() {
+      busy.value = 'clear';
+      try {
+        await API.post(`/api/comics/${props.projectId}/chapters/${props.seasonIndex}/clear`,
+                       { season_id: props.seasonId });
+        props.chapter.media_path = '';
+        props.chapter.media_url = '';
+        props.chapter.prompt = '';
+        props.chapter.score = 0;
+        props.chapter.score_note = '';
+        props.chapter.status = 'pending';
+        props.chapter.error = '';
+        prompt.value = '';
+        ElementPlus.ElMessage.success(I18N.t('p.chCleared'));
+        emit('reloaded');
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { busy.value = ''; }
+    }
 
     return { busy, dTab, title, summary, prompt, done, statusLabel, statusType, scoreTone,
-             doGen, doSave, doScore, doMove, doDelete };
+             genDlg, genExtra, openGen, confirmGen,
+             doGen, doSave, doScore, doMove, doClear, doDelete };
   },
 };

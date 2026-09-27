@@ -76,6 +76,11 @@ def get_db():
 def _migrate():
     """SQLite 轻量迁移：给旧库各表补新列（ALTER TABLE ADD COLUMN）。"""
     from sqlalchemy import text
+    # 一次性标记表：用于记录已执行的「数据修正」类迁移（避免每次启动重复执行）
+    with engine.connect() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS app_flags (k VARCHAR(64) PRIMARY KEY, v VARCHAR(64) DEFAULT '')"))
+        conn.commit()
     new_cols = {
         "llm_configs": {
             "supports_vision": "VARCHAR(5) DEFAULT 'yes'",
@@ -84,7 +89,7 @@ def _migrate():
         },
         "drawthing_configs": {
             "max_side": "INTEGER DEFAULT 0",
-            "max_seconds": "INTEGER DEFAULT 8",
+            "max_seconds": "INTEGER DEFAULT 10",
             "model_image": "VARCHAR(200) DEFAULT ''",
             "model_video": "VARCHAR(200) DEFAULT ''",
             "ref_image": "INTEGER DEFAULT 0",
@@ -93,6 +98,7 @@ def _migrate():
         "chapters": {
             "width": "INTEGER DEFAULT 0",
             "height": "INTEGER DEFAULT 0",
+            "seconds": "INTEGER DEFAULT 0",
             "summary": "TEXT DEFAULT ''",
             "season_id": "VARCHAR(12)",
             "score": "INTEGER DEFAULT 0",
@@ -115,9 +121,10 @@ def _migrate():
             "count_mode": "VARCHAR(10) DEFAULT 'auto'",
             "count_min": "INTEGER DEFAULT 0",
             "count_max": "INTEGER DEFAULT 0",
-            "auto_score": "INTEGER DEFAULT 1",
+            "auto_score": "INTEGER DEFAULT 0",
             "score_min": "INTEGER DEFAULT 60",
-            "auto_redo": "INTEGER DEFAULT 1",
+            "auto_redo": "INTEGER DEFAULT 0",
+            "stop_on_low": "INTEGER DEFAULT 0",
             "dt_model_image": "VARCHAR(200) DEFAULT ''",
             "dt_model_video": "VARCHAR(200) DEFAULT ''",
             "dt_ref_image": "VARCHAR(1) DEFAULT ''",
@@ -129,6 +136,7 @@ def _migrate():
             "dt_ref_image": "VARCHAR(1) DEFAULT ''",
             "dt_ref_video": "VARCHAR(1) DEFAULT ''",
             "score_mode": "VARCHAR(10) DEFAULT 'image'",
+            "auto_score": "INTEGER DEFAULT 0",
         },
         "micro_messages": {
             "images": "TEXT",
@@ -209,6 +217,19 @@ def _migrate():
                     'INSERT INTO micro_messages (id, session_id, "index", role, content, media_url, prompt) '
                     'SELECT id, session_id, "index", role, content, media_url, prompt FROM _micro_messages_backup'))
                 conn.execute(text("DROP TABLE _micro_messages_backup"))
+        # 一次性修正：短剧曾短暂支持「规划/剧本自动写时长」，会把 seconds(1–8) 传给 Draw Things
+        # 导致 LTX 等模型因非原生帧数异常。这里把短剧片段的 seconds 归零一次（恢复「0=跟随预设上限」），
+        # 用户之后仍可在界面手动设置时长。仅执行一次（app_flags 标记）。
+        try:
+            done = conn.execute(text("SELECT v FROM app_flags WHERE k='drama_seconds_reset'")).scalar()
+            if not done:
+                conn.execute(text(
+                    "UPDATE chapters SET seconds=0 WHERE seconds>0 AND season_id IN ("
+                    "  SELECT s.id FROM seasons s JOIN projects p ON p.id=s.project_id WHERE p.kind='drama')"))
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO app_flags (k, v) VALUES ('drama_seconds_reset','1')"))
+        except Exception:
+            pass  # 旧库尚无相关表：忽略
         conn.commit()
 
 

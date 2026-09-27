@@ -30,14 +30,14 @@ Views.microChat = {
               </div>
             </template>
             <template v-else>
-              <micro-block v-for="(b, bi) in m.blocks" :key="bi" :b="b" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" @reference="onReference" />
+              <micro-block v-for="(b, bi) in m.blocks" :key="bi" :b="b" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" @reference="onReference" @score="scoreNow" />
               <div v-if="m.status && m.status !== 'done'" class="tool-note">{{ I18N.t('mw.interrupted') }}</div>
               <div class="msg-time" v-if="m.duration">{{ m.duration }}s</div>
             </template>
           </div>
 
           <div v-if="streaming" class="msg assistant">
-            <micro-block v-for="(b, bi) in stream.parts" :key="bi" :b="b" :cursor="streamCursor(bi)" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" @reference="onReference" />
+            <micro-block v-for="(b, bi) in stream.parts" :key="bi" :b="b" :cursor="streamCursor(bi)" @preview="(l, i) => $emit('preview', l, i)" @rerun="rerun" @reference="onReference" @score="scoreNow" />
             <div v-if="showTyping" class="md streaming-tail"><span class="typing"><i></i><i></i><i></i></span></div>
             <div class="msg-time">{{ streamElapsed }}s</div>
           </div>
@@ -118,7 +118,7 @@ Views.microChat = {
     function applyQuote() { quoted.value = { url: ctx.url, kind: ctx.kind }; ctx.show = false; }
     function closeCtx() { if (ctx.show) ctx.show = false; }
 
-    // 对某个内容块评分（写回 b.score / b.score_note；用于「VLM 评分」与「重做」前置）
+    // VLM 手动评分：写回 b.score / b.score_note（服务端持久化）
     async function doScore(b) {
       b.scoring = true;
       try {
@@ -131,7 +131,17 @@ Views.microChat = {
         b.scoring = false;
       }
     }
-    // 重做：先确保有评分（无则补评分）→ 结合评分让 LLM 改进提示词后重新生成；新消息，**不删除原来的**
+    // 卡片上「评分」按钮
+    async function scoreNow(b) {
+      if (!b || !b.url || b.scoring) return;
+      try {
+        await doScore(b);
+        ElementPlus.ElMessage.success(I18N.t('mw.scoreDone', b.score));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
+    // 重做：先评分（无则补评分）→ 结合评分让 LLM 改进提示词后重新生成；新消息，不删除原来的
     async function redoMedia() {
       const b = ctx.block;
       ctx.show = false;
@@ -245,11 +255,6 @@ Views.microChat = {
       const t = d.id ? findTool(d.id) : null;
       if (t && t.status === 'running') { t.message = d.message || ''; }
     }
-    function onMediaScore(d) {
-      // 生成后自动评分结果：写回对应内容块（与卡片显示一致）
-      const t = d.id ? findTool(d.id) : null;
-      if (t) { t.score = d.score || 0; t.score_note = d.note || ''; }
-    }
     function onError(d) {
       stream.parts.push({ type: 'error', message: d.message || I18N.t('mw.err') });
     }
@@ -295,8 +300,6 @@ Views.microChat = {
             stickBottom();
           } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
-          } else if (ev === EVENTS.MEDIA_SCORE) {
-            onMediaScore(d);
           } else if (ev === EVENTS.TOOL_ERROR) {
             onToolError(d);
           } else if (ev === EVENTS.ERROR) {
@@ -358,8 +361,6 @@ Views.microChat = {
             stickBottom();
           } else if (ev === EVENTS.TOOL_STATUS) {
             onToolStatus(d);
-          } else if (ev === EVENTS.MEDIA_SCORE) {
-            onMediaScore(d);
           } else if (ev === EVENTS.TOOL_ERROR) {
             onToolError(d);
           } else if (ev === EVENTS.ERROR) {
@@ -508,7 +509,7 @@ Views.microChat = {
       ph, input, attached, busy, status, drag, streaming, stream, streamElapsed,
       chatBox, chatInner, inputEl, fileInput, onFiles, onPaste, onDrop, autoResize, onEnter,
       send, rerun, activeJob, stopJob, streamCursor, showTyping, atBottom, onChatScroll, scrollBottom,
-      quoted, ctx, openQuote, onReference, applyQuote, redoMedia,
+      quoted, ctx, openQuote, onReference, applyQuote, scoreNow, redoMedia,
     };
   },
 };

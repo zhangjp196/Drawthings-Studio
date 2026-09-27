@@ -65,6 +65,14 @@ from .pipeline_common import (
 
 logger = logging.getLogger("drawthings")
 
+# 漫画出图安全网：避免模型在画面里画出不稳定/穿帮元素（字幕条、时间码、水印、logo、网址/UI 叠加等）。
+# 注意：漫画页**保留**对白气泡与对白文字（这是漫画的组成部分），只禁止与故事无关的叠加元素，
+# 并强调光影与场景稳定一致（避免光源突变/场景跳变导致前后章穿帮）。
+_COMIC_IMAGE_NOISE_SUFFIX = (", clean comic lineart, free of subtitles, subtitle bars, captions strips, "
+                             "timestamps, timecodes, clocks, watermarks, logos, website URLs or UI overlays, "
+                             "and any unintended text; keep only the planned speech bubbles and narration; "
+                             "consistent lighting and stable scene")
+
 class ComicPipeline:
     def __init__(self, data_dir):
         self.data_dir = str(data_dir)
@@ -330,11 +338,12 @@ class ComicPipeline:
         style = (scope.get("style") or "").strip()
         theme = (scope.get("theme") or "").strip()
         tone = (scope.get("tone") or "").strip()
-        system = ("你是资深漫画/短剧策划兼编剧。根据一句话创意与风格设定，写整体故事大纲：\n"
-                  "分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、如何承接到下一段，"
-                  "末尾附 1-3 条贯穿全篇的主线设定。")
+        system = ("你是资深漫画/短剧策划兼编剧。根据项目名称（主题）与风格设定：\n"
+                  "① 先给作品起一个吸引人的标题（title，简短精炼，5-15 字为宜）；\n"
+                  "② 再写整体故事大纲：分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、"
+                  "如何承接到下一段，末尾附 1-3 条贯穿全篇的主线设定。")
         agent = make_agent(build_model(llm_cfg), system, output_type=ArcOut)
-        user = project.origin
+        user = f"项目名称（主题）：{project.origin or ''}"
         if style:
             user += f"\n风格：{style}"
         if theme:
@@ -349,6 +358,9 @@ class ComicPipeline:
         if not arc:
             raise RuntimeError(L(lang, "模型未返回大纲内容，请重试",
                                  "The model returned no outline content — please retry"))
+        # 生成大纲时一并产出标题（标题可再在总览页手动修改）
+        if (data.title or "").strip():
+            project.title = (data.title or "").strip()[:200]
         project.arc = arc
         project.res_width = int(res_width or 0)
         project.res_height = int(res_height or 0)
@@ -358,18 +370,26 @@ class ComicPipeline:
 
     async def step_season_arc(self, db, project: Project, season: Season, lang: str = "zh",
                               extra_prompt: str = "") -> Project:
-        """「生成本季大纲」：基于整体故事大纲（全篇主线）+ 本季季号/季名，为当前季单独写故事大纲。
-        不触碰整体大纲 / 风格 / 角色 / 章节。status: → arced。"""
+        """「生成本季大纲」：基于整体故事大纲（全篇主线）+ 本季季号/季名 + 前后季衔接 + 角色，
+        为当前季单独写故事大纲（四段式 + 关键剧情节点 beats）。不触碰整体大纲 / 风格 / 角色 / 章节。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         style = (scope.get("style") or "").strip()
         theme = (scope.get("theme") or "").strip()
+        tone = (scope.get("tone") or "").strip()
         overall_arc = (project.arc or "").strip()
         season_no = season.number
         season_title = (season.title or "").strip()
+        chars = chars_to_text(self._combined_chars(project, season))
+        gprompt = (project.global_prompt or "").strip()
         system = ("你是资深漫画/短剧策划兼编剧。根据整体故事大纲（全篇主线）与本季季号/季名，"
                   "写本季的剧情大纲：说明本季承接主线的哪一段、本季的开端、发展、高潮、结局，"
-                  "以及与前后季的衔接。字数与整体大纲相当，分 开端、发展、高潮、结局 四段，每段 1-2 句。"
+                  "以及与前后季的衔接。分 开端、发展、高潮、结局 四段，每段 1-2 句；"
+                  "再给出 3-6 条本季**关键剧情节点 beats**（按时间顺序的转折/冲突/爽点节拍，"
+                  "每条一句话、可独立成章的推进点），供后续分章逐章落位。\n"
+                  "要求：① 节点均匀覆盖本季全程（开端→高潮→结局），不要都堆在开头或结尾；"
+                  "② beats 之间为因果递进（前一个引发后一个），最后一条落到本季结局/下一季钩子；"
+                  "③ 与前后季不重复、不跳跃，若已给出前后季信息须顺畅衔接。\n"
                   "若本季尚无合适名字，请在末尾附一个简洁的季名（篇章名）。")
         agent = make_agent(build_model(llm_cfg), system, output_type=SeasonArcOut)
         user = f"季号：第 {season_no} 季"
@@ -381,6 +401,15 @@ class ComicPipeline:
             user += f"\n风格：{style}"
         if theme:
             user += f"\n主题：{theme}"
+        if tone:
+            user += f"\n基调：{tone}"
+        if chars:
+            user += f"\n角色设定（请保持一致）：\n{chars}"
+        if gprompt:
+            user += f"\n全局要点（务必涵盖/遵循）：{gprompt}"
+        ctx = self._season_neighbor_context(db, project, season)
+        if ctx:
+            user += f"\n{ctx}"
         if (extra_prompt or "").strip():
             user += f"\n额外要求：{(extra_prompt or '').strip()}"
         async with agent:
@@ -389,13 +418,41 @@ class ComicPipeline:
         if not arc:
             raise RuntimeError(L(lang, "模型未返回本季大纲内容，请重试",
                                  "The model returned no season outline content — please retry"))
-        season.arc = arc
+        season.arc = self._compose_season_arc(arc, data.beats)
         # 若本季尚无名字且模型给出，则采用模型建议的季名
         if not season_title and (data.title or "").strip():
             season.title = (data.title or "").strip()
         project.status = "arced"
         self._save(db, project)
         return project
+
+    def _compose_season_arc(self, arc: str, beats: list[str]) -> str:
+        """把四段式季大纲与关键剧情节点合并为一段可存储文本（beats 作为独立小节追加）。"""
+        arc = (arc or "").strip()
+        items = [str(b).strip() for b in (beats or []) if str(b).strip()]
+        if not items:
+            return arc
+        lines = "\n".join(f"{i}. {b}" for i, b in enumerate(items, 1))
+        return f"{arc}\n\n关键剧情节点：\n{lines}"
+
+    def _season_neighbor_context(self, db, project: Project, season: Season) -> str:
+        """前后季衔接信息：上一季 / 下一季大纲（若已存在），供本季大纲顺畅承接。"""
+        parts = []
+        prev_season = (db.query(Season)
+                       .filter(Season.project_id == project.id,
+                               Season.number < season.number)
+                       .order_by(Season.number.desc()).first())
+        if prev_season is not None and (prev_season.arc or "").strip():
+            label = f"第{prev_season.number}季" + (f"（{prev_season.title}）" if prev_season.title else "")
+            parts.append(f"上一季大纲（本季需承接其结局，避免重复）：\n{label}：{(prev_season.arc or '').strip()}")
+        next_season = (db.query(Season)
+                       .filter(Season.project_id == project.id,
+                               Season.number > season.number)
+                       .order_by(Season.number.asc()).first())
+        if next_season is not None and (next_season.arc or "").strip():
+            label = f"第{next_season.number}季" + (f"（{next_season.title}）" if next_season.title else "")
+            parts.append(f"下一季大纲（本季结局需为其埋线）：\n{label}：{(next_season.arc or '').strip()}")
+        return "\n".join(parts)
 
     async def step_season_chars(self, db, project: Project, season: Season, lang: str = "zh",
                                 extra_prompt: str = "") -> Project:
@@ -535,7 +592,7 @@ class ComicPipeline:
                       res_width: int | None = 0, res_height: int | None = 0,
                       count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
                       auto_score: int | None = None, score_min: int | None = None,
-                      auto_redo: int | None = None) -> Project:
+                      auto_redo: int | None = None, stop_on_low: int | None = None) -> Project:
         """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定。
         仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_season），
         也不触碰已生成的剧本/媒体（保存不触发生成）。"""
@@ -584,6 +641,8 @@ class ComicPipeline:
             project.score_min = max(0, min(100, int(score_min or 0)))
         if auto_redo is not None:
             project.auto_redo = 1 if auto_redo else 0
+        if stop_on_low is not None:
+            project.stop_on_low = 1 if stop_on_low else 0
         db.commit()
         self._save(db, project)
         return project
@@ -674,9 +733,25 @@ class ComicPipeline:
             project.count_mode = "range"
             project.count_min = 0
             project.count_max = 0
+            self._rm_media(project.first_image)
+            project.first_image = ""
+            project.first_image_base = ""
             for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
                 self._rm_media(ch.media_path)
                 db.delete(ch)
+            # 季/篇章级内容一并清空（保留季本身与季名；封面/季大纲/季角色/数量设定回到初始）
+            for s in self._load_seasons(db, project):
+                for c in chars_from_raw(s.characters):
+                    self._rm_media(c.get("image"))
+                s.characters = ""
+                s.arc = ""
+                self._rm_media(s.first_image)
+                s.first_image = ""
+                s.first_image_base = ""
+                s.cover_as_first_ref = False
+                s.count_mode = "range"
+                s.count_min = 0
+                s.count_max = 0
             project.status = "planning"
         self._save(db, project)
         return project
@@ -762,37 +837,41 @@ class ComicPipeline:
         scope = project.scope or {}
         gprompt = (project.global_prompt or "").strip()
         arc = self._season_arc(project, season)
-        system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
+        system = "你是分章策划。依据本季大纲判断应拆分为多少章，只给出章数（一个整数）。"
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterCount)
         lo, hi = count_range(count_min, count_max)
         if lo == hi:
             return lo                             # 固定值（min=max）：无需 LLM 挑选
-        cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数"
+        cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数（若大纲含「关键剧情节点」，章数宜不少于节点数）"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
-                + f"{cnt}\n\n整体故事大纲：\n{arc}")
+                + f"{cnt}\n\n本季大纲：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
         return max(1, int(data.count or 0))
 
     async def _plan_one_chapter(self, db, project: Project, season: Season, lang: str, i: int, n: int,
                                  prior: list[tuple[str, str]], model=None) -> tuple[str, str]:
-        """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。"""
+        """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。
+        若本季大纲含「关键剧情节点」，则要求本章落位到对应节点，保证节点均匀覆盖整季。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
         arc = self._season_arc(project, season)
         system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
-                  "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。")
+                  "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。"
+                  "若本季大纲给出了「关键剧情节点」，请让本章**落在对应比例的节点上**"
+                  "（第 i/n 章对应节点序列中约第 ⌈i/n × 节点数⌉ 个），把该节点展开为本章内容；"
+                  "不要提前消耗后面的节点，也不要跳过。")
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterOut)
         prior_text = "\n".join(f"第{k}章：{t}（{s}）" for k, (t, s) in enumerate(prior, 1)) \
             or "（本章为第一章，尚无前置章节）"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"角色设定：{chars}\n" if chars else "")
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
-                + f"共 {n} 章，现在规划第 {i} 章。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
-                  f"整体故事大纲：\n{arc}")
+                + f"共 {n} 章，现在规划第 {i} 章（进度 {i}/{n}）。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
+                  f"本季大纲（含关键剧情节点，请按比例落位）：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
         return ((data.title or f"第{i}章").strip(), (data.scene or "").strip())
@@ -914,7 +993,10 @@ class ComicPipeline:
     def _script_system(self, project: Project) -> str:
         """剧本/提示词写作的系统提示词（漫画）。"""
         shot = ("漫画：prompt 描述『一页多格漫画』——一张图内含多个分镜格（竖版漫画页），"
-                "并让画面带文字（分镜旁白、对白气泡）；构图优先竖版（3:4 或 2:3）。")
+                "并让画面带文字（分镜旁白、对白气泡）；构图优先竖版（3:4 或 2:3）。"
+                "除对白气泡与旁白外，画面**不得出现任何多余元素**：无字幕条/英文字幕、无水印、无 logo、"
+                "无时间码/时钟、无网址或 UI 叠加等与剧情无关的干扰物；"
+                "前后章的光影与场景需保持一致稳定（光源方向/时间/地点不得无故跳变）。")
         return ("你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
                 "写本章详细剧本描述（description）和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
                 f"{shot}\n"
@@ -924,9 +1006,11 @@ class ComicPipeline:
                 "prompt 为单个英文提示词。不要输出数组、Markdown 代码块或任何额外文字。")
 
     async def _gen_one_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
-                               chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:
+                               chapters: list[Chapter], lang: str = "zh", model=None,
+                               extra_prompt: str = "") -> Chapter:
         """为第 i 章（季内序号）单独写剧本/提示词（供「按章生成」与「批量生成」复用）。
-        chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。"""
+        chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。
+        extra_prompt：人工「重新生成」时填写的补充修正要求，会作为额外指令交给 LLM 写进 prompt。"""
         llm_cfg, dt_cfg, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
@@ -996,6 +1080,9 @@ class ComicPipeline:
                      "prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
                      "（角色外形、服装、画风、光照、构图），再具体描述本章的变化（新动作 / 新场景 / 新物件）；"
                      "不要从头重新描述整个画面。")
+        if (extra_prompt or "").strip():
+            user += ("\n【人工补充修正要求（务必在 prompt 中落实，修正以下画面问题）】"
+                     + extra_prompt.strip())
         prompt_content: str | list = [ImageUrl(url=ref_uri), user] if ref_uri else user
         data = (await agent.run(prompt_content)).output
         ch.description = data.description
@@ -1065,12 +1152,13 @@ class ComicPipeline:
     async def step_generate(self, db, project: Project, season: Season,
                              indices: list[int] | None = None,
                              lang: str = "zh", progress_cb=None,
-                             chapter_done_cb=None, score_cb=None, cancel_event=None) -> Project:
+                             chapter_done_cb=None, score_cb=None, cancel_event=None,
+                             extra_prompt: str = "") -> Project:
         """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
         开启「自动评分」时追加第 3 步：0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）。
         indices: 季内章节序号列表（0 起）；None=该季全部章节。
         季内第 1 章参考：开启「本季封面作为第 1 章参考」→ 本季封面；否则非第一季→上一季末章，第一季→无参考（文生图）。
-        其余章沿用上一章媒体。"""
+        其余章沿用上一章媒体。extra_prompt：人工重新生成时填写的补充修正要求（仅单章生成透传）。"""
         dt = self._clients(db, project, lang)
         if cancel_event is not None:
             dt.cancel_event = cancel_event  # 协作式取消：正在跑的生图/生视频尽快停止
@@ -1087,16 +1175,21 @@ class ComicPipeline:
                 if progress_cb:
                     await progress_cb(pos, len(targets), ch.title)
                 # 自动评分：生成画面后按 0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）
+                # 「低于阈值停止生成」为独立开关：某章低于阈值即停止本批后续生成（0=关闭）
                 auto_score = bool(project.auto_score)
                 auto_redo = bool(project.auto_redo)
+                stop_on_low = bool(project.stop_on_low)
                 rounds = 1 + MAX_SCORE_REDO if (auto_score and auto_redo) else 1
+                stop_batch = False
+                scored_ok = False
                 score_min = int(project.score_min or 60)
                 for rd in range(rounds):
                     if rd:
                         # 上一轮评分低于阈值 → 重做（重新生成提示词 + 画面）
                         if score_cb:
                             await score_cb(ch, None, "redo", rd)
-                    await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
+                    await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model,
+                                               extra_prompt=extra_prompt)
                     # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章）
                     if i == 0:
                         season_cover = (season.first_image or "").strip()
@@ -1118,7 +1211,8 @@ class ComicPipeline:
                         if w and h:
                             params = {"width": w, "height": h}
                         ch.media_path = await run_sync(
-                            partial(dt.generate_image, ch.prompt, ref_path=ref, params=params))
+                            partial(dt.generate_image, (ch.prompt or "").strip() + _COMIC_IMAGE_NOISE_SUFFIX,
+                                    ref_path=ref, params=params))
                         ch.status = "done"
                         ch.error = ""
                         ch.width = w
@@ -1134,6 +1228,7 @@ class ComicPipeline:
                     try:
                         score, note = await self._score_chapter(db, project, season, ch, model)
                         ch.score, ch.score_note = score, note
+                        scored_ok = True
                     except Exception:
                         ch.score, ch.score_note = 0, ""  # 评分失败不阻塞流程
                         db.commit()
@@ -1141,11 +1236,20 @@ class ComicPipeline:
                     db.commit()
                     if score_cb:
                         await score_cb(ch, (ch.score or 0), (ch.score_note or ""), rd)
-                    if (ch.score or 0) >= score_min or rd == rounds - 1:
-                        break  # 达到阈值，或重做次数用尽：本章完成
+                    if (ch.score or 0) >= score_min:
+                        break  # 达到阈值：本章完成
+                if auto_score and scored_ok and (ch.score or 0) < score_min and stop_on_low:
+                    # 「低于阈值停止生成」：本章低于阈值 → 停止本批后续生成
+                    stop_batch = True
+                    if score_cb:
+                        await score_cb(ch, (ch.score or 0), "stopped", rd)
                 if chapter_done_cb:
                     await chapter_done_cb(ch)
                 db.commit()  # 逐章提交：停止/中断时已完成章节不丢失
+                if stop_batch:
+                    logger.warning("第 %s 章评分 %d 低于阈值 %d，按「低于阈值停止」自动停止后续生成",
+                                   ch.index + 1, ch.score or 0, score_min)
+                    break
         finally:
             # 异常中断（如用户停止）时尽可能提交当前进度（已完成章节 + 本章已有结果）
             try:
@@ -1189,6 +1293,41 @@ class ComicPipeline:
         db.delete(ch)
         db.commit()
         self._reindex_flat(db, project)
+        db.commit()
+        self._save(db, project)
+        return project
+
+    def delete_chapters(self, db, project: Project, season: Season,
+                        indices: list[int] | None = None) -> Project:
+        """批量删除季内章节（连同清理其媒体文件），其余章节重新编号。
+        indices=None 表示删除该季全部章节（保留季本身）。"""
+        chapters = self._season_chapters(db, project, season)
+        targets = list(enumerate(chapters)) if indices is None else \
+            [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
+        for _, ch in targets:
+            self._rm_media(ch.media_path)
+            db.delete(ch)
+        db.commit()
+        self._reindex_flat(db, project)
+        db.commit()
+        self._save(db, project)
+        return project
+
+    def clear_chapters(self, db, project: Project, season: Season,
+                       indices: list[int] | None = None) -> Project:
+        """清空季内章节的产物：清掉出图提示词、评分与已生成画面/视频（删除媒体文件、重置状态）。
+        保留标题 / 摘要 / 剧本描述等文字。indices=None 表示该季全部章节。"""
+        chapters = self._season_chapters(db, project, season)
+        targets = list(enumerate(chapters)) if indices is None else \
+            [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
+        for _, ch in targets:
+            self._rm_media(ch.media_path)
+            ch.media_path = ""
+            ch.prompt = ""
+            ch.score = 0
+            ch.score_note = ""
+            ch.status = "pending"
+            ch.error = ""
         db.commit()
         self._save(db, project)
         return project
@@ -1370,7 +1509,8 @@ class ComicPipeline:
         scope = project.scope or {}
         system = ("你是封面美术提示词作者。请结合一句话创意、风格、故事大纲与角色设定，"
                   "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
-                  "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（作品名由程序叠加）。")
+                  "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
+                  "（作品名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
         agent = make_agent(build_model(llm_cfg), system)
         user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
         if (project.arc or "").strip():
@@ -1390,7 +1530,7 @@ class ComicPipeline:
         h = int(project.res_height or 0)
         params = {"width": w, "height": h} if (w and h) else {}
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
-        path = await run_sync(partial(dt.generate_image, prompt, params=params))
+        path = await run_sync(partial(dt.generate_image, prompt + _COMIC_IMAGE_NOISE_SUFFIX, params=params))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
@@ -1438,7 +1578,8 @@ class ComicPipeline:
         scope = project.scope or {}
         system = ("你是封面美术提示词作者。请结合一句话创意、风格、角色设定与本季标题/大纲/新增角色，"
                   "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
-                  "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（季名由程序叠加）。")
+                  "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
+                  "（季名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
         agent = make_agent(build_model(llm_cfg), system)
         user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
         chars_text = chars_to_text(chars_from_raw(project.characters))
@@ -1462,7 +1603,7 @@ class ComicPipeline:
         h = int(project.res_height or 0)
         params = {"width": w, "height": h} if (w and h) else {}
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
-        path = await run_sync(partial(dt.generate_image, prompt, params=params))
+        path = await run_sync(partial(dt.generate_image, prompt + _COMIC_IMAGE_NOISE_SUFFIX, params=params))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"seasonfirst_{season.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():

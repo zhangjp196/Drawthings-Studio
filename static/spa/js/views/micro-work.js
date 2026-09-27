@@ -146,7 +146,7 @@ Views.microWork = {
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
     const cfgDlg = ref(false);
-    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, score_mode: 'image' });
+    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, score_mode: 'image', auto_score: false });
     function openCfg() { syncCfg(); cfgDlg.value = true; }  // 作品选项弹框：打开前同步当前值
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
@@ -172,6 +172,7 @@ Views.microWork = {
       cfg.llm = w.llm_config_id;
       cfg.dt = w.drawthings_config_id || '';
       cfg.score_mode = w.score_mode || 'image';
+      cfg.auto_score = !!w.auto_score;
       const c = (data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
       // 作品级未显式选模型时预填配置里的；参考图开关：作品显式值优先，否则跟随配置
       cfg.mi = w.dt_model_image || (c ? (c.model_image || '') : '');
@@ -300,6 +301,7 @@ Views.microWork = {
           dt_model_image: cfg.mi, dt_model_video: cfg.mv,
           dt_ref_image: cfg.ref_i ? 1 : 0, dt_ref_video: cfg.ref_v ? 1 : 0,
           score_mode: cfg.score_mode,
+          auto_score: cfg.auto_score ? 1 : 0,
         });
         ElementPlus.ElMessage.success(I18N.t('mw.cfgSaved'));
         cfgDlg.value = false;

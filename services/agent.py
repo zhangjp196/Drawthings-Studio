@@ -158,14 +158,19 @@ def to_message_history(items: list[dict]) -> list[ModelMessage]:
 
 # ---------------- 流水线结构化输出 ----------------
 class ArcOut(BaseModel):
-    """企划步骤 1：整体故事大纲。"""
+    """企划步骤 1：整体故事大纲（生成大纲时一并产出作品标题）。"""
+    title: str = ""
     arc: str = ""
 
 
 class SeasonArcOut(BaseModel):
-    """季大纲：本季名（篇章名，如「赛亚人篇」）+ 本季故事大纲。"""
+    """季大纲：本季名（篇章名，如「赛亚人篇」）+ 本季故事大纲 + 关键剧情节点。
+
+    arc：四段式（开端/发展/高潮/结局）的故事路线；
+    beats：3-6 条本季关键剧情节点（起承转合/爽点节拍），供分章时逐章落位。"""
     title: str = ""
     arc: str = ""
+    beats: list[str] = []
 
 
 class CharacterOut(BaseModel):
@@ -187,6 +192,7 @@ class CharDescOut(BaseModel):
 class ChapterOut(BaseModel):
     title: str
     scene: str
+    seconds: int = 0   # 预留字段（当前不使用）：短剧时长默认 0 = 跟随配置/预设上限，由用户手动设置。漫画忽略。
 
 
 class ChapterCount(BaseModel):
@@ -195,9 +201,11 @@ class ChapterCount(BaseModel):
 
 
 class ScriptOut(BaseModel):
-    """阶段 4：单章剧本 + 提示词（分辨率统一按总体设定，不由智能体决定）。"""
+    """阶段 4：单章剧本 + 提示词（分辨率统一按总体设定，不由智能体决定）。
+    seconds：预留字段（当前不使用；时长由用户在界面手动设置，0=跟随配置/预设上限）。漫画忽略。"""
     description: str
     prompt: str
+    seconds: int = 0
 
 
 class ScoreOut(BaseModel):

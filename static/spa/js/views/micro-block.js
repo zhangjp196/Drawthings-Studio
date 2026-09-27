@@ -7,7 +7,7 @@ Views.microBlock = {
     b: { type: Object, required: true },
     cursor: { type: Boolean, default: false },
   },
-  emits: ['preview', 'rerun', 'reference'],
+  emits: ['preview', 'rerun', 'reference', 'score'],
   template: `
     <div class="blk" :class="'blk-' + b.type">
       <template v-if="b.type === 'text'">
@@ -25,6 +25,9 @@ Views.microBlock = {
           </button>
           <button v-if="b.prompt && b.status !== 'running'" type="button" class="tool-prompt-toggle" @click="$emit('rerun', b)">
             {{ I18N.t('mw.rerun') }}
+          </button>
+          <button v-if="b.status === 'ok'" type="button" class="tool-prompt-toggle" :disabled="b.scoring" @click="$emit('score', b)">
+            {{ b.scoring ? I18N.t('mw.scoring') : I18N.t('mw.scoreBtn') }}
           </button>
           <div v-if="b.width || b.height || b.seconds || b.model" class="tool-note">
             {{ paramLine }}

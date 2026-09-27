@@ -13,6 +13,11 @@ datas += copy_metadata('pydantic_evals')
 datas += copy_metadata('logfire_api')
 tmp_ret = collect_all('pywebview')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# OpenCV（抽帧 / 无 ffmpeg 时合成视频）：惰性导入，需显式声明让 PyInstaller 收集
+hiddenimports += ['cv2', 'numpy']
+# imageio-ffmpeg：自带静态 ffmpeg（合成含音轨视频、无需系统安装 ffmpeg）
+if_ret = collect_all('imageio_ffmpeg')
+datas += if_ret[0]; binaries += if_ret[1]; hiddenimports += if_ret[2]
 
 
 a = Analysis(

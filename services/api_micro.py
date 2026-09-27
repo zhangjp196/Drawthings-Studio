@@ -105,6 +105,7 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "dt_ref_image": work.dt_ref_image or "",
             "dt_ref_video": work.dt_ref_video or "",
             "score_mode": work.score_mode or "image",
+            "auto_score": int(work.auto_score or 0),
             "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "",
             "dt_name": dt_cfg.name if dt_cfg else "",
@@ -182,6 +183,7 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
         dt_ref_image=_dt_ref_field(body, "dt_ref_image"),
         dt_ref_video=_dt_ref_field(body, "dt_ref_video"),
         score_mode=norm_score_mode(body.get("score_mode")),
+        auto_score=(1 if body.get("auto_score") else 0),
         created_at=_now(), updated_at=_now(),
     )
     db.add(w)
@@ -423,6 +425,7 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     work.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
     work.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
     work.score_mode = norm_score_mode(body.get("score_mode"))
+    work.auto_score = 1 if body.get("auto_score") else 0
     work.updated_at = _now()
     db.commit()
     return {"ok": True}

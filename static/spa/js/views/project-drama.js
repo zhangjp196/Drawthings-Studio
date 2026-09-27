@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectDrama = {
   props: ['id'],
-  components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'plan-dialog': Views.dramaPlanDialog, 'cfg-dialog': Views.dramaCfgDialog, 'reset-dialog': Views.dramaResetDialog },
+  components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'plan-dialog': Views.dramaPlanDialog, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'cfg-dialog': Views.dramaCfgDialog, 'reset-dialog': Views.dramaResetDialog, 'video-dialog': Views.dramaVideoDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -15,7 +15,7 @@ Views.projectDrama = {
           <el-tag size="small" type="success" effect="light">{{ I18N.t('proj.drama') }}</el-tag>
           <h1 class="ptitle">{{ data.project.title || data.project.origin }}</h1>
           <p class="meta muted">{{ I18N.t('p.metaIdea', data.project.origin) }}
-            · {{ I18N.t('p.metaLength', data.chapters.length) }}
+            · {{ I18N.t('d.metaLength', data.chapters.length) }}
             · {{ I18N.t('p.metaStyle', scope.style || '—') }}
             · {{ I18N.t('p.metaLlm', data.project.llm_name) }}
             · {{ I18N.t('p.metaDt', data.project.dt_name) }}</p>
@@ -24,9 +24,6 @@ Views.projectDrama = {
           <el-button :disabled="locked" @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
           <el-button :disabled="locked" @click="openReset">{{ I18N.t('p.reset') }}</el-button>
           <el-button @click="router.push(backTo())">{{ I18N.t('p.back') }}</el-button>
-          <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del">
-            <template #reference><el-button type="danger" plain>{{ I18N.t('p.del') }}</el-button></template>
-          </el-popconfirm>
         </div>
       </div>
 
@@ -50,13 +47,13 @@ Views.projectDrama = {
         <span class="season-sep" aria-hidden="true"></span>
         <button v-for="s in seasons" :key="s.id" type="button" class="season-item"
                 :class="{ active: seasonId === s.id }" @click="selectSeason(s.id)">
-          {{ s.title || I18N.t('p.season', s.number) }}
+          {{ s.title || I18N.t('d.ep', s.number) }}
         </button>
-        <el-popconfirm :title="I18N.t('p.seasonAddConfirm')" @confirm="addSeason">
-          <template #reference><button type="button" class="season-item season-add" :disabled="locked">{{ I18N.t('p.seasonAdd') }}</button></template>
+        <el-popconfirm :title="I18N.t('d.epAddConfirm')" @confirm="addSeason">
+          <template #reference><button type="button" class="season-item season-add" :disabled="locked">{{ I18N.t('d.epAdd') }}</button></template>
         </el-popconfirm>
-        <el-popconfirm v-if="seasons.length > 1 && !isOverall && !locked" :title="I18N.t('p.seasonDelConfirm')" @confirm="delSeason">
-          <template #reference><button type="button" class="season-item season-del">{{ I18N.t('p.seasonDel') }}</button></template>
+        <el-popconfirm v-if="seasons.length > 1 && !isOverall && !locked" :title="I18N.t('d.epDelConfirm')" @confirm="delSeason">
+          <template #reference><button type="button" class="season-item season-del">{{ I18N.t('d.epDel') }}</button></template>
         </el-popconfirm>
       </div>
 
@@ -66,6 +63,7 @@ Views.projectDrama = {
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subStory') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'score' }" @click="oSub = 'score'">{{ I18N.t('p.subScore') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'finish' }" @click="oSub = 'finish'">{{ I18N.t('p.subFinish') }}</button>
         </nav>
         <div class="subtabs-body">
@@ -79,6 +77,9 @@ Views.projectDrama = {
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
                   <el-form label-position="top">
+                    <el-form-item :label="I18N.t('p.outTitle')" class="out-title">
+                      <el-input v-model="oTitle" size="large" maxlength="100" :placeholder="I18N.t('p.outTitlePh')" @blur="saveTitle" />
+                    </el-form-item>
                     <el-form-item :label="I18N.t('p.outStyle')">
                       <el-input v-model="oStyle" :placeholder="scope.style || ''" />
                     </el-form-item>
@@ -106,14 +107,6 @@ Views.projectDrama = {
                           <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
                         </template>
                         <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
-                      </div>
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.scoreAuto')">
-                      <div class="res-row">
-                        <el-checkbox v-model="oScore">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
-                        <el-checkbox v-model="oRedo" :disabled="!oScore">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
-                        <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
-                        <el-input-number v-model="oScoreMin" :min="0" :max="100" size="small" :disabled="!oScore" />
                       </div>
                     </el-form-item>
                   </el-form>
@@ -168,22 +161,46 @@ Views.projectDrama = {
                   </div>
                   <el-empty v-if="!chars.length" :description="I18N.t('p.charsEmpty')" :image-size="48" />
                 </el-card>
+                <!-- ============ 自动评分：生成后评分 / 低分重做 / 低于阈值停止生成 ============ -->
+                <el-card v-else-if="oSub === 'score'" shadow="never">
+                  <template #header><b>{{ I18N.t('p.subScore') }}</b></template>
+                  <div class="actions outline-bar">
+                    <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveScore">
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.outSave') }}</el-button></template>
+                    </el-popconfirm>
+                    <span class="muted" v-if="busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
+                  </div>
+                  <el-form label-position="top">
+                    <el-form-item :label="I18N.t('p.scoreAuto')">
+                      <div class="score-opts">
+                        <el-checkbox v-model="oScore">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
+                        <el-checkbox v-model="oRedo" :disabled="!oScore">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
+                        <el-checkbox v-model="oStopLow" :disabled="!oScore">{{ I18N.t('p.scoreStopLowLabel') }}</el-checkbox>
+                        <div class="res-row" style="margin: 2px 0;">
+                          <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
+                          <el-input-number v-model="oScoreMin" :min="0" :max="100" size="small" :disabled="!oScore" />
+                        </div>
+                        <div class="hint" style="margin: 2px 0 0;">{{ I18N.t('p.scoreAutoHint') }}</div>
+                      </div>
+                    </el-form-item>
+                  </el-form>
+                </el-card>
                 <!-- ============ 完结：全部季章节完成才可完结；完结后锁定，需解锁才能操作 ============ -->
                 <el-card v-else-if="oSub === 'finish'" shadow="never">
                   <template #header><b>{{ I18N.t('p.subFinish') }}</b></template>
                   <p class="hint mb8">{{ I18N.t('p.finishDesc') }}</p>
-                  <p class="muted small mb8">{{ I18N.t('p.finishTotal', totalDoneCount, totalChCount) }}</p>
+                  <p class="muted small mb8">{{ I18N.t('d.finishTotal', totalDoneCount, totalChCount) }}</p>
                   <el-alert v-if="finishReady" type="success" :closable="false" class="mb8"
                             :title="I18N.t('p.finishReadyMsg')" />
                   <div v-for="r in finishRows" :key="r.id" class="finish-row">
                     <b class="finish-row-name">{{ r.label }}</b>
-                    <span class="muted small">{{ I18N.t('p.finishSeasonProgress', r.done, r.total) }}</span>
+                    <span class="muted small">{{ I18N.t('d.finishEpProgress', r.done, r.total) }}</span>
                     <el-tag size="small" :type="r.ok ? 'success' : (r.total === 0 ? 'info' : 'warning')"
                              effect="light" style="margin-left: auto;">
-                      {{ r.ok ? I18N.t('p.finishTagOk') : (r.total === 0 ? I18N.t('p.finishNoCh') : I18N.t('p.finishTagDoing')) }}
+                      {{ r.ok ? I18N.t('p.finishTagOk') : (r.total === 0 ? I18N.t('d.finishNoClip') : I18N.t('p.finishTagDoing')) }}
                     </el-tag>
                   </div>
-                  <el-empty v-if="!finishRows.length" :description="I18N.t('p.seasonNoChapters')" :image-size="48" />
+                  <el-empty v-if="!finishRows.length" :description="I18N.t('d.epNoClips')" :image-size="48" />
                   <div class="actions" style="margin-top: 12px;">
                     <template v-if="locked">
                       <el-popconfirm :title="I18N.t('p.unlockConfirm')" @confirm="unlock">
@@ -221,33 +238,34 @@ Views.projectDrama = {
         <el-tab-pane :label="I18N.t('p.tabOutline')" name="outline">
           <div class="subtabs">
             <nav class="subtabs-nav">
-              <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('p.seasonArc') }}</button>
-              <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.seasonChars') }}</button>
-              <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.seasonCover') }}</button>
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'arc' }" @click="oSub = 'arc'">{{ I18N.t('d.epArc') }}</button>
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('d.epChars') }}</button>
+              <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('d.epCover') }}</button>
             </nav>
             <div class="subtabs-body">
               <el-card v-if="oSub === 'arc'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_arc', I18N.t('p.seasonArcGen'))">{{ I18N.t('p.seasonArcGen') }}</el-button>
-                    <el-popconfirm :title="I18N.t('p.seasonArcSaveConfirm')" @confirm="saveSeasonArc">
-                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.seasonArcSave') }}</el-button></template>
+                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_arc', I18N.t('d.epArcGen'))">{{ I18N.t('d.epArcGen') }}</el-button>
+                    <el-popconfirm :title="I18N.t('d.epArcSaveConfirm')" @confirm="saveSeasonArc">
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('d.epArcSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
                    <el-form label-position="top">
-                     <el-form-item :label="I18N.t('p.seasonTitle')">
-                       <el-input v-model="seasonTitleText" :placeholder="I18N.t('p.seasonTitlePh')" />
+                     <el-form-item :label="I18N.t('d.epTitle')">
+                       <el-input v-model="seasonTitleText" :placeholder="I18N.t('d.epTitlePh')" />
                      </el-form-item>
-                     <el-form-item :label="I18N.t('p.seasonArc')">
-                       <el-input v-model="seasonArcText" type="textarea" :rows="8" :placeholder="I18N.t('p.seasonArcPh')" />
+                     <el-form-item :label="I18N.t('d.epArc')">
+                       <el-input v-model="seasonArcText" type="textarea" :rows="10" :placeholder="I18N.t('d.epArcPh')" />
+                       <div class="hint">{{ I18N.t('d.epArcHint') }}</div>
                      </el-form-item>
                    </el-form>
                 </el-card>
                 <el-card v-else-if="oSub === 'chars'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_chars', I18N.t('p.seasonCharsGen'))">{{ I18N.t('p.seasonCharsGen') }}</el-button>
-                    <el-popconfirm :title="I18N.t('p.seasonCharsSaveConfirm')" @confirm="saveSeasonChars">
-                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.seasonCharsSave') }}</el-button></template>
+                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('season_chars', I18N.t('d.epCharsGen'))">{{ I18N.t('d.epCharsGen') }}</el-button>
+                    <el-popconfirm :title="I18N.t('d.epCharsSaveConfirm')" @confirm="saveSeasonChars">
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('d.epCharsSave') }}</el-button></template>
                     </el-popconfirm>
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
@@ -268,11 +286,11 @@ Views.projectDrama = {
                   <div class="actions" style="margin-top:10px;">
                     <el-button size="small" @click="addSeasonChar">{{ I18N.t('p.charAdd') }}</el-button>
                   </div>
-                  <el-empty v-if="!seasonChars.length" :description="I18N.t('p.seasonCharsEmpty')" :image-size="48" />
+                  <el-empty v-if="!seasonChars.length" :description="I18N.t('d.epCharsEmpty')" :image-size="48" />
                 </el-card>
                 <template v-else-if="oSub === 'cover'">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="busySeasonFirst" :disabled="locked" @click="openCoverGenDlg('season')">{{ I18N.t('p.genSeasonFirst') }}</el-button>
+                    <el-button type="primary" :loading="busySeasonFirst" :disabled="locked" @click="openCoverGenDlg('season')">{{ I18N.t('d.genEpCover') }}</el-button>
                     <span class="muted" v-if="busySeasonFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
                   </div>
                   <season-cover :season="curSeason" :project-id="data.project.id" :season-id="seasonId"
@@ -284,8 +302,8 @@ Views.projectDrama = {
           </div>
         </el-tab-pane>
 
-        <!-- ============ 章节：章节规划 / 章节详情 / 预览 一体（季作用域，一屏内完成）============ -->
-        <el-tab-pane :label="I18N.t('p.tabChapters')" name="chapters">
+        <!-- ============ 片段：片段规划 / 片段详情 / 预览 一体（集作用域，一屏内完成）============ -->
+        <el-tab-pane :label="I18N.t('d.tabClips')" name="chapters">
           <chapter-toolbar :locked="locked" :act-busy="actBusy" :busy-save="busySave"
                            :busy-gen-all="busyGenAll" :busy-score-all="busyScoreAll"
                            :selected-count="selected.length" :score-filter="scoreFilter"
@@ -294,28 +312,34 @@ Views.projectDrama = {
                            :done-count="seasonDoneCount" :progress-text="progress.text"
                            :all-selected="allSelected"
                            @plan="openPlanDlg" @save-plan="savePlan" @update:score-filter="setScoreFilter"
-                           @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll" @stop="stopGen" />
+                           @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll"
+                           @clear-all="clearAll" @plan-selected="planSelected" @delete-selected="deleteSelected"
+                           @set-seconds="setBatchSeconds" @stop="stopGen" />
 
-          <div class="md-layout ch-work">
-            <!-- 左：章节列表（专属子组件） -->
+          <!-- 上：片段列表（横向，短剧专属子组件） -->
+          <div class="ch-strip-wrap">
             <chapter-list :chapters="visibleChapters" :current="cur" :selected="selected"
                           :score-min="data.project.score_min || 60"
                           @select="pickChapter" @toggle="toggleSelect" />
+          </div>
 
-            <!-- 中：选中章详情（标题 + 摘要/剧本/提示词 三个子页签，一次「保存」提交） -->
+          <div class="md-layout ch-work">
+            <!-- 中：选中片段详情（标题 + 摘要/剧本/提示词 三个子页签，一次「保存」提交） -->
             <div class="md-detail">
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :project-id="data.project.id"
                             :season-id="seasonId" :season-index="cur"
                             :def-w="oW" :def-h="oH"
                             :score-min="(data.project.score_min || 60)"
+                            :beats="epBeats" :clip-count="seasonChapters.length"
+                            :ref-kind="curRefKind(cur)"
                             :expanded="true" :no-toggle="true" :locked="locked"
                             :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
                             @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
                             @saveplan="savePlan" />
-              <el-empty v-else :description="I18N.t('p.chPlanEmpty')" :image-size="54" />
+              <el-empty v-else :description="I18N.t('d.clipPlanEmpty')" :image-size="54" />
             </div>
 
-            <!-- 右：本季预览（短剧专属子组件） -->
+            <!-- 右：本集预览（短剧专属子组件） -->
             <season-preview :items="pvItems" :urls="pvUrls" :current="cur" :total="seasonChapters.length"
                             @select="gotoChapter" />
           </div>
@@ -324,7 +348,7 @@ Views.projectDrama = {
         <el-tab-pane :label="I18N.t('p.tabExport')" name="done">
           <season-export :done="seasonDoneCount" :total="seasonChapters.length"
                          :completed="seasonCompleted" :exporting="exporting"
-                         @zip="exportZip" />
+                         @zip="exportZip" @preview-video="previewVideo" @export-video="exportVideo" />
         </el-tab-pane>
       </el-tabs>
 
@@ -333,12 +357,13 @@ Views.projectDrama = {
                   @new-config="router.push('/configs?ctype=drawthings')" />
 
       <reset-dialog v-model="resetDlg" v-model:title="rtitle" v-model:origin="rogin" v-model:style="rstyle"
-                    v-model:custom="rstyleCustom" v-model:clear="rclear" :style-presets="stylePresets"
+                    v-model:custom="rstyleCustom" :style-presets="stylePresets"
                     @save="saveReset" />
 
       <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle"
                   :busy="actBusy" @confirm="confirmGen" />
 
+      <!-- 片段规划：数量 + 方式（新增 / 覆盖），确认后执行 SSE 逐段规划 -->
       <plan-dialog v-model="planDlg" v-model:count="planCount" v-model:mode="planMode"
                    :title="planDlgTitle" :hint="planModeHint" :busy="actBusy" @confirm="confirmPlan" />
 
@@ -347,6 +372,9 @@ Views.projectDrama = {
 
       <!-- 叠加标题：位置（自由拖动）+ 字号 / 样式 / 颜色 / 底条 -->
       <overlay-dialog :dlg="ovlDlg" :busy="ovlBusy" @apply="applyOvl" />
+
+      <!-- 合成视频预览：inline mp4 直接播放 -->
+      <video-dialog v-model="videoDlg" :url="videoUrl" @closed="videoUrl = ''" />
 
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>
@@ -364,7 +392,9 @@ Views.projectDrama = {
     const busySave = ref(false);
     const busyGenAll = ref(false);
     const busyScoreAll = ref(false);
-    const exporting = ref(false);  // 导出 ZIP/PDF 进行中（CS 走系统「另存为」，耗时期间禁用按钮）
+    const exporting = ref(false);  // 导出（ZIP/合成视频）进行中（CS 走系统「另存为」，耗时期间禁用按钮）
+    const videoDlg = ref(false);   // 合成视频预览弹框
+    const videoUrl = ref('');      // 合成视频预览地址（inline mp4）
     const busyFirst = ref(false);
     const busySeasonFirst = ref(false);
     // 生成封面弹框：包含标题（生成后自动叠加作品标题 / 季名）
@@ -397,6 +427,45 @@ Views.projectDrama = {
       return (data.value?.chapters || []).filter(c => c.season_id === seasonId.value);
     });
     const seasonDoneCount = computed(() => seasonChapters.value.filter(c => c.status === 'done').length);
+    // 本集关键剧情节点：从本集大纲中解析「关键剧情节点：」小节下的编号条目（用于片段卡片按比例落位）
+    const epBeats = computed(() => {
+      const arc = (curSeason.value?.arc || '').trim();
+      if (!arc) return [];
+      const marker = arc.indexOf('关键剧情节点');
+      if (marker < 0) return [];
+      const body = arc.slice(marker).split('\n').slice(1);
+      return body.map(l => l.replace(/^\s*\d+[.、)]\s*/, '').trim()).filter(Boolean);
+    });
+    // 某片段的参考来源种类（连贯信息）：prev | epcover | prevep | next | none
+    function curRefKind(i) {
+      const list = seasonChapters.value;
+      if (!list.length) return 'none';
+      if (i > 0) return 'prev';
+      // i === 0：本集首段 → 本集封面（若开启）→ 上一集末段 → 下一段（首集首段回退）
+      const s = curSeason.value;
+      if (s && s.cover_as_first_ref && s.first_image_url) return 'epcover';
+      if (s && s.number > 1) return 'prevep';
+      return list.length > 1 ? 'next' : 'none';
+    }
+    // 批量设置所选（或整集）片段时长：selected 存的是全局扁平 index，需映射回该集内的局部位置
+    async function setBatchSeconds(sec) {
+      if (!seasonId.value) return;
+      const s = parseInt(sec, 10);
+      if (!(s > 0)) return;
+      const list = seasonChapters.value;
+      const local = list.map((c, i) => i);
+      const targets = selected.value.length
+        ? local.filter(i => selected.value.indexOf(list[i].index) >= 0)
+        : local;
+      try {
+        for (const i of targets) {
+          await API.post(`/api/dramas/${props.id}/edit/${i}`, { season_id: seasonId.value, seconds: s });
+        }
+        ElementPlus.ElMessage.success(I18N.t('d.batchSecondsDone'));
+        selected.value = [];
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+    }
     // 评分筛选：'' 全部 / none 未评分 / low 低于阈值 / pass 达标（仅过滤左侧列表显示，
     // 不影响整季进度统计与「生成/评分全部」——它们仍作用于整季）
     const scoreFilter = ref('');
@@ -476,6 +545,7 @@ Views.projectDrama = {
     }
 
     // 大纲表单
+    const oTitle = ref('');        // 作品标题（放大输入，随「生成大纲」一并生成）
     const arcText = ref('');
     const oStyle = ref('');
     const chars = ref([]);       // 角色设定：[{id, name, description, image_url}]（id 为空 = 未保存的新角色）
@@ -486,6 +556,7 @@ Views.projectDrama = {
     const oScore = ref(true);
     const oScoreMin = ref(60);
     const oRedo = ref(true);
+    const oStopLow = ref(false);
     // 分辨率：先选比例、再选固定分辨率（均为 64 的倍数；0×0 = 跟随出图端/智能体）
     const RES_RATIOS = [
       { key: '1:1',  label: 'p.ratio11',  sizes: ['512×512', '768×768', '1024×1024'] },
@@ -521,36 +592,34 @@ Views.projectDrama = {
       applyRes();
     }
     function onResChange() { applyRes(); }
-    // 章节数量（固定值）与规划方式（新增/重做）
-    const planCount = ref(12);                      // 章节数量（固定值）
-    const planMode = ref('append');                 // 新增（现有章节之后新增）/ 重做（清空全部重规划 / 重写所选）
-    // 章节规划弹框（与新增章节融合）：章节数量固定值 + 方式仅在此弹框内显示
+    // 片段数量（固定值）与规划方式（新增：现有片段之后续加 / 覆盖：全集重规划）
+    const planCount = ref(12);
+    const planMode = ref('append');
+    // 片段规划弹框：数量 + 方式只在弹框内调整，确认后执行
     const planDlg = ref(false);
     const planDlgTitle = computed(() =>
-      selected.value.length ? I18N.t('p.planSel', selected.value.length) : I18N.t('p.planChapters'));
+      selected.value.length ? I18N.t('d.planSelDrama', selected.value.length) : I18N.t('d.planChaptersDrama'));
     const planModeHint = computed(() => {
-      if (planMode.value === 'append') return I18N.t('p.planAppendHint', planCount.value);
-      if (selected.value.length) return I18N.t('p.planSelConfirm', selected.value.length);
-      return I18N.t('p.planRedoHint', planCount.value);
+      if (planMode.value === 'append') return I18N.t('d.planAppendHint', planCount.value);
+      if (selected.value.length) return I18N.t('d.planSelConfirm', selected.value.length);
+      return I18N.t('d.planRedoHint', planCount.value);
     });
-    function openPlanDlg() { planDlg.value = true; }
-    function confirmPlan() { planDlg.value = false; planChapters(); }
 
-    // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各季完成进度
+    // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各集完成进度
     const locked = computed(() => (data.value?.project.status) === 'done');
     const totalChCount = computed(() => (data.value?.chapters || []).length);
     const totalDoneCount = computed(() => (data.value?.chapters || []).filter(c => c.status === 'done').length);
     const finishRows = computed(() => (data.value?.seasons || []).map(s => {
       const chs = (data.value?.chapters || []).filter(c => c.season_id === s.id);
       const done = chs.filter(c => c.status === 'done').length;
-      return { id: s.id, label: s.title || I18N.t('p.season', s.number),
+      return { id: s.id, label: s.title || I18N.t('d.ep', s.number),
                total: chs.length, done, ok: chs.length > 0 && done === chs.length };
     }));
-    // 可完结 = 每季都有章节且全部已生成（与后端 complete 校验一致）
+    // 可完结 = 每集都有片段且全部已生成（与后端 complete 校验一致）
     const finishReady = computed(() => finishRows.value.length > 0 && finishRows.value.every(r => r.ok));
     const finishIssues = computed(() => finishRows.value.filter(r => !r.ok)
-      .map(r => `${r.label}：${r.total === 0 ? I18N.t('p.finishNoCh')
-        : I18N.t('p.finishSeasonProgress', r.done, r.total)}`)
+      .map(r => `${r.label}：${r.total === 0 ? I18N.t('d.finishNoClip')
+        : I18N.t('d.finishEpProgress', r.done, r.total)}`)
       .join(I18N.isEn() ? '; ' : '；'));
     const finishBusy = ref(false);
     async function markFinished() {
@@ -621,12 +690,12 @@ Views.projectDrama = {
     const rogin = ref('');
     const rstyle = ref('');
     const rstyleCustom = ref('');   // 风格选「自定义」时的描述
-    const rclear = ref(false);
     // 与「新建创作」一致的风格预设下拉
     const stylePresets = computed(() => [0, 1, 2, 3, 4, 5].map(i => I18N.t('cf.preset.' + i)));
 
     function syncOutlineForm() {
       const p = data.value.project;
+      oTitle.value = p.title || '';
       arcText.value = p.arc || '';
       oStyle.value = (p.scope || {}).style || '';
       chars.value = (p.characters || []).map(c => ({ id: c.id || '', name: c.name || '',
@@ -637,6 +706,7 @@ Views.projectDrama = {
       oScore.value = !!p.auto_score;
       oScoreMin.value = p.score_min || 60;
       oRedo.value = !!p.auto_redo;
+      oStopLow.value = !!p.stop_on_low;
       // 由已存 W×H 反推比例与分辨率选项（0×0=自动；不在固定列表的旧值=自定义）
       const cur = `${oW.value}×${oH.value}`;
       const r = RES_RATIOS.find(x => x.sizes.includes(cur));
@@ -888,7 +958,7 @@ Views.projectDrama = {
       ovlDlg.target = target;
       if (target === 'season') {
         const s = curSeason.value;
-        ovlDlg.titleText = (s && s.title) || I18N.t('p.season', (s && s.number) || 1);
+        ovlDlg.titleText = (s && s.title) || I18N.t('d.ep', (s && s.number) || 1);
         ovlDlg.coverUrl = (s && s.first_image_url) || '';
       } else {
         ovlDlg.titleText = (data.value && data.value.project.title) || '';
@@ -916,22 +986,25 @@ Views.projectDrama = {
         ovlBusy.value = false;
       }
     }
-    async function planChapters() {
-      // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），SSE 实时逐个补入
+    async function planChapters(opts = {}) {
+      // 片段规划（逐段）：先定总段数再逐段规划（每段参考前段承接剧情），SSE 实时逐个补入。
+      // 方式：append（新增）= 不清空，现有片段之后续加；replan（覆盖）= 未勾选=全集覆盖重规划，勾选=仅重写所选。
+      // opts.mode 覆盖弹框方式；opts.indices 非空则只规划这些已有片段（批量重新规划，不清空其它/不新增）。
       if (!seasonId.value) {
-        ElementPlus.ElMessage.warning(I18N.t('p.seasonAdd'));
+        ElementPlus.ElMessage.warning(I18N.t('d.epAdd'));
         return;
       }
       if (!(data.value?.project?.arc || '').trim() && !(seasonArcText.value || '').trim()) {
-        ElementPlus.ElMessage.warning(I18N.t('p.planNeedArc'));
+        ElementPlus.ElMessage.warning(I18N.t('d.planNeedArcB'));
         return;
       }
-      // mode=append（新增）：不清空，现有章节之后续加；replan（重做）：未勾选=全季重规划，勾选=仅重写勾选
-      const sel = selected.value.slice().sort((a, b) => a - b);
+      const mode = opts.mode || planMode.value;
+      const sel = (opts.indices != null ? opts.indices.slice() : selected.value.slice()).sort((a, b) => a - b);
       const subset = sel.length > 0;
-      const isAppend = planMode.value === 'append';
+      const isAppend = mode === 'append';
       actBusy.value = true; progress.text = '';
       if (!isAppend && !subset) {
+        // 全集覆盖：先清空本集旧片段（媒体保留，预览重新生成），SSE 逐个补入
         data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
         cur.value = 0;
       }
@@ -945,16 +1018,38 @@ Views.projectDrama = {
           mode: isAppend ? 'append' : 'replan',
           ...(isAppend ? {} : (subset ? { indices: sel } : {})),
         }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.planProgress', d.current, d.total, d.title);
           else if (ev === EVENTS.CHAPTER) applyChapterPlan(d);
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
-        ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
+        ElementPlus.ElMessage.success(I18N.t('d.planSaved'));
+        selected.value = [];
         await load();
       } catch (e) {
         if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { actBusy.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+    }
+    // 工具条「片段规划 / 规划所选」：弹出规划弹框（数量 + 新增/覆盖 选择）
+    function openPlanDlg() { planDlg.value = true; }
+    function confirmPlan() { planDlg.value = false; planChapters(); }
+    // 批量重新规划所选：仅对已选中的现有片段重写标题与摘要（保留已生成视频；不新增、不清空其它片段）
+    async function planSelected() {
+      if (!seasonId.value || !selected.value.length) return;
+      await planChapters({ mode: 'replan', indices: selected.value });
+    }
+    // 批量删除所选片段（连同视频文件，其余片段重新编号）
+    async function deleteSelected() {
+      if (!seasonId.value || !selected.value.length) return;
+      try {
+        await API.post(`/api/dramas/${props.id}/chapters/delete-batch`, {
+          season_id: seasonId.value,
+          indices: selected.value.slice().sort((a, b) => a - b),
+        });
+        ElementPlus.ElMessage.success(I18N.t('d.delSelDone'));
+        selected.value = [];
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
     // 分页保存：每个子页只提交自己的字段（后端 /outline 部分更新，未提交的字段不动）
@@ -970,6 +1065,15 @@ Views.projectDrama = {
         busySave.value = false;
       }
     }
+    // 作品标题：失焦即保存（标题也可随「生成大纲」一并生成）
+    async function saveTitle() {
+      const t = (oTitle.value || '').trim();
+      if (t === (data.value?.project?.title || '')) return;
+      try {
+        await API.post(`/api/dramas/${props.id}/rename`, { title: t });
+        if (data.value) data.value.project.title = t;
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+    }
     // 总体（全局）：只保存全局字段（风格 / 整体大纲 / 全局提示词 / 分辨率）
     function saveStory() {
       busySave.value = true;
@@ -978,7 +1082,21 @@ Views.projectDrama = {
           await API.post(`/api/dramas/${props.id}/outline`, {
             arc: arcText.value, style: oStyle.value, global_prompt: oGlobal.value,
             res_width: oW.value, res_height: oH.value,
+          });
+          ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
+          await load();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); }
+        finally { busySave.value = false; }
+      })();
+    }
+    // 总体（全局）：只保存「自动评分」设置
+    function saveScore() {
+      busySave.value = true;
+      (async () => {
+        try {
+          await API.post(`/api/dramas/${props.id}/outline`, {
             auto_score: oScore.value, score_min: oScoreMin.value, auto_redo: oRedo.value,
+            stop_on_low: oStopLow.value,
           });
           ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
           await load();
@@ -1007,7 +1125,7 @@ Views.projectDrama = {
       (async () => {
         try {
           await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, { title: seasonTitleText.value, arc: seasonArcText.value });
-          ElementPlus.ElMessage.success(I18N.t('p.seasonSaved'));
+          ElementPlus.ElMessage.success(I18N.t('d.epSaved'));
           await load();
         } catch (e) { ElementPlus.ElMessage.error(e.message); }
         finally { busySave.value = false; }
@@ -1022,7 +1140,7 @@ Views.projectDrama = {
           await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, {
             characters: seasonChars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
           });
-          ElementPlus.ElMessage.success(I18N.t('p.seasonSaved'));
+          ElementPlus.ElMessage.success(I18N.t('d.epSaved'));
           await load();
         } catch (e) { ElementPlus.ElMessage.error(e.message); }
         finally { busySave.value = false; }
@@ -1039,7 +1157,7 @@ Views.projectDrama = {
             count_max: planCount.value,
             chapters: seasonChapters.value.map(c => ({ title: c.title, summary: c.summary })),
           });
-          ElementPlus.ElMessage.success(I18N.t('p.planSaved'));
+          ElementPlus.ElMessage.success(I18N.t('d.planSaved'));
           await load();
         } catch (e) { ElementPlus.ElMessage.error(e.message); }
         finally { busySave.value = false; }
@@ -1052,6 +1170,10 @@ Views.projectDrama = {
     function applyScoreLive(d) {
       if (d.phase === 'scoring') progress.text = I18N.t('p.scoreDoing', d.title);
       else if (d.phase === 'redo') progress.text = I18N.t('p.scoreRedoDo', d.title, d.redo, 2);
+      else if (d.phase === 'stopped') {
+        progress.text = I18N.t('p.scoreStopMsg', d.title, d.score);
+        ElementPlus.ElMessage.warning(I18N.t('p.scoreStopMsg', d.title, d.score));
+      }
       else if (d.phase === 'error') {
         progress.text = I18N.t('p.scoreFailMsg', d.title, d.note);
         ElementPlus.ElMessage.warning(I18N.t('p.scoreFailMsg', d.title, d.note));
@@ -1076,12 +1198,15 @@ Views.projectDrama = {
     function applyChapterPlan(d) {
       const arr = data.value?.chapters || [];
       const pos = arr.findIndex(c => c.index === d.index && c.season_id === seasonId.value);
+      const sec = (d.seconds === undefined || d.seconds === null) ? 0 : d.seconds;
       if (pos >= 0) {
         const ch = arr[pos];
         ch.title = d.title; ch.summary = d.summary; ch.status = d.status;
+        if (sec > 0) ch.seconds = sec;                 // 规划时一并给出的建议时长
       } else {
         arr.push({ index: d.index, season_id: seasonId.value, title: d.title, summary: d.summary,
-                   status: d.status, description: '', prompt: '', media_url: '', error: '', width: 0, height: 0 });
+                   seconds: sec, status: d.status, description: '', prompt: '', media_url: '',
+                   error: '', width: 0, height: 0 });
         arr.sort((a, b) => a.index - b.index);
       }
       if (visibleChapters.value.some(c => c.index === d.index)) cur.value = d.index;
@@ -1090,7 +1215,7 @@ Views.projectDrama = {
     function stopGen() {
       if (sseCtrl) {
         sseCtrl.abort();
-        ElementPlus.ElMessage.info(I18N.t('p.genStopped'));
+        ElementPlus.ElMessage.info(I18N.t('d.genStoppedDrama'));
       }
     }
     // 生成画面：勾选章节则只生成它们，未勾选则生成全部（两步连贯、逐章进行、后章参考前章已生成图）
@@ -1101,7 +1226,7 @@ Views.projectDrama = {
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/dramas/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.genProgress', d.current, d.total, d.title);
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.genProgress', d.current, d.total, d.title);
           else if (ev === EVENTS.SCORE) applyScoreLive(d);
           else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
@@ -1123,7 +1248,7 @@ Views.projectDrama = {
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
         await API.sse(`/api/dramas/${props.id}/action-stream`, { step: 'score', season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.scoreProgress', d.current, d.total, d.title);
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.scoreProgress', d.current, d.total, d.title);
           else if (ev === EVENTS.SCORE) applyScoreLive(d);
           else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
@@ -1136,6 +1261,18 @@ Views.projectDrama = {
         else { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { busyScoreAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+    }
+
+    // 批量清空章节产物：勾选章节则只清它们，未勾选则清全部（清理产物/出视频提示词/评分，保留标题/摘要/剧本）
+    async function clearAll() {
+      if (!seasonId.value) return;
+      try {
+        const indices = selected.value.length ? selected.value : null;
+        await API.post(`/api/dramas/${props.id}/chapters/clear`, { season_id: seasonId.value, indices });
+        ElementPlus.ElMessage.success(I18N.t('p.clearedAll'));
+        selected.value = [];
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
     // 导出作用域为当前所选季（「完成」页签仅在选定季时可用）
@@ -1153,7 +1290,13 @@ Views.projectDrama = {
       }
     }
     function exportZip() { return exportMedia('zip'); }
-    function exportPdf() { return exportMedia('pdf'); }
+    // 导出合成视频：把该季各章视频合成为一个 mp4（可能较慢，走系统「另存为」/下载）
+    function exportVideo() { return exportMedia('video'); }
+    // 预览合成视频：弹框内 <video> 播放 inline mp4（前端不下载）
+    function previewVideo() {
+      videoUrl.value = `/api/dramas/${props.id}/export/video?season_id=${encodeURIComponent(seasonId.value)}&preview=1`;
+      videoDlg.value = true;
+    }
 
     async function delChapter(i) {
       if (!seasonId.value) return;
@@ -1180,7 +1323,6 @@ Views.projectDrama = {
       } else {
         rstyle.value = ''; rstyleCustom.value = '';
       }
-      rclear.value = false;
       resetDlg.value = true;
     }
     async function saveReset() {
@@ -1192,7 +1334,6 @@ Views.projectDrama = {
         await API.post(`/api/dramas/${props.id}/reset`, {
           title: rtitle.value, origin: rogin.value,
           style: rstyle.value === 'custom' ? rstyleCustom.value.trim() : rstyle.value,
-          clear_downstream: rclear.value,
         });
         ElementPlus.ElMessage.success(I18N.t('p.resetSaved'));
         resetDlg.value = false;
@@ -1234,16 +1375,6 @@ Views.projectDrama = {
       }
     }
 
-    async function del() {
-      try {
-        await API.post(`/api/dramas/${props.id}/delete`);
-        ElementPlus.ElMessage.success(I18N.t('proj.msgDeleted'));
-        router.push(backTo());
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      }
-    }
-
     function openLb(list, idx) {
       lb.list = list;
       lb.idx = idx;
@@ -1255,17 +1386,17 @@ Views.projectDrama = {
     onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
       data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, setScoreFilter, scoreFilterOptions, visibleChapters,
-      seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
+      seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, epBeats, curRefKind, setBatchSeconds, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
-      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan,
-      cfgDlg, cfgBusy, cfg, imgChoices, vidChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, oScore, oScoreMin, oRedo, oStopLow, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
+      cfgDlg, cfgBusy, cfg, imgChoices, vidChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, genDlg, genDlgTitle, genDlgExtra,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, saveScore, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
-      exportZip, exportPdf, delChapter, onChapterReloaded,
-      openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
+      exportZip, exportVideo, previewVideo, videoDlg, videoUrl, delChapter, onChapterReloaded,
+      openReset, saveReset, openCfg, saveCfg, openLb, load, backTo, router,
     };
   },
 };

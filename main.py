@@ -37,7 +37,7 @@ from services.logging_setup import setup_logging
 from services.api_common import (
     MEDIA_DIR, _lang, _json_body, _llm_view, _dt_view, _dt_gen_fields,
 )
-from services import api_comic, api_drama, api_micro, api_idea
+from services import api_comic, api_drama, api_micro
 
 setup_logging()  # 统一日志（LOG_LEVEL 控制；重复调用无副作用）
 
@@ -67,7 +67,6 @@ app.add_middleware(GZipMiddleware, minimum_size=500)  # HTML/CSS/JS 压缩，减
 app.include_router(api_comic.router)   # 漫画 API（/api/comics/*）
 app.include_router(api_drama.router)   # 短剧 API（/api/dramas/*）
 app.include_router(api_micro.router)   # 微创作 API（/api/micro/*）
-app.include_router(api_idea.router)    # 新建创作 AI 生成标题/主题（/api/idea/*）
 
 logger = logging.getLogger("drawthings")
 
@@ -430,7 +429,10 @@ SPA_SHELL = STATIC_ROOT / "spa" / "index.html"
 
 @app.get("/{full_path:path}")
 def spa_shell(full_path: str):
-    """非 /api、/static、/media 的路径一律返回 SPA 外壳（前端路由接管，刷新深链可用）。"""
+    """非 /api、/static、/media 的路径一律返回 SPA 外壳（前端路由接管，刷新深链可用）。
+    未匹配到的 /api/* 直接 404（避免把 JSON 接口吞成 SPA 页面）。"""
+    if full_path.startswith(("api/", "static/", "media/")):
+        raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(SPA_SHELL, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 

@@ -13,7 +13,7 @@ so it runs fully offline; FastAPI falls back to serving the SPA shell, so refres
 
 Start from **one sentence** and run it through a single pipeline to produce a **continuous comic** or a **continuous short drama**:
 
-> one sentence → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP/PDF)
+> one sentence → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP; comic PDF / drama composed video)
 
 The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
 Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent
@@ -47,14 +47,15 @@ With it on, each chapter's prompt is auto-written as an **edit instruction based
 
 ## My Creations (list page /projects)
 
-- **Management**: click the **title** to open / rename / delete (delete has a second confirmation); the project page header also has "Delete this project".
+- **Management**: click the **title** to open / rename / delete (delete has a second confirmation).
   Deleting also removes all chapter records and the generated image/video files.
 - **Filters**: keyword (title/idea), type (comic/drama), status, sort (newest created / oldest created / recently active), and page size (10/20/50).
 - **Info**: type tag, title/idea, status tag, chapter progress (generated/total chapters), first-image thumbnail (click to preview), last active (with created date);
   the toolbar shows the total count and a "＋ New Project" dialog (the same form component as the /new page).
-- **AI title/theme on the create form**: a **✨ AI title/theme** button on the new-project form opens a
-  **multi-turn, streaming chat**; the model asks a few questions to pin the idea down, then calls a function
-  (`set_fields`) to **write the title and theme straight into the form** (you can keep chatting / ask it to adjust).
+- **Simplified creation**: the new-project form only asks for a **model (LLM config) + project name**. The name is a
+  working name / creative seed — the **real title** is edited large in the project's **Overview → Story outline**
+  and is **generated together with the outline** ("Generate outline"). The one-line idea/theme field and the
+  "✨ AI title/theme" multi-step flow have been removed to reduce duplication.
 
 ## Creation control (project page)
 
@@ -70,23 +71,36 @@ The project page is organized into **three tabs — Outline / Chapters / Complet
 
 - **① Outline**: click "Generate outline" to plan, in one pass, **style / theme / tone + the overall story outline (beginning → development → climax → ending) + the characters**,
   and to produce the **chapter plan** — each chapter's title + one-line topic summary — based on the "chapter count".
+  > The toolbar's **"Chapter plan / Plan selected" opens a planning dialog**: pick the **count** and the **mode** —
+  > **Append** (add after the existing ones, keeping existing chapters and media) or **Redo** (nothing selected = clear
+  > the whole season then re-plan; selected = rewrite only the selected chapters' titles + summaries).
+  > The drama line is the same (clip-plan dialog: Append / Overwrite).
   The outline, characters, **default resolution** and the chapter plan (title / summary / count) are all **manually editable**, then "Save outline";
   you can also "Regenerate outline" (redoes outline + characters + chapters from the current settings) or "Rebuild chapters from outline" (re-plans the chapters only).
   The character sheet keeps the cast consistent across chapters (fed into each chapter's prompt).
+  **Season outline**: each season has its own outline, generated from the overall outline plus the season number/name, the
+  neighbouring seasons (so it continues the previous and seeds the next), the characters, style and global notes; the model
+  also produces **3–6 key plot beats**, which are used to place each planned chapter evenly across the season (chapter count
+  follows the beat count), keeping pacing from collapsing into the opening.
 - **② Chapters**: produce the content for the planned chapters. **One-click generate** — "Generate all scripts / Generate all media / Regenerate all frames" (SSE per-chapter progress);
   each chapter's accordion card (**shows only its photo** by default; click to expand, one open at a time, auto-expands when generated) supports **per-chapter steps**:
   "Generate script" (writes script/prompt/resolution, using the outline's style + characters + that chapter's summary) → "Generate media",
   plus **Regenerate media / Save prompt / adjust resolution / Move up / Move down / Delete**.
-  A comic chapter = **one multi-panel comic page** (several panels in a single image, portrait, with caption/dialogue text); a drama chapter = one video clip.
-- **③ Complete**: once generated, **Export ZIP** (all media + the outline/characters/per-chapter script text) and **Export PDF**
-  (comic: the chapter images combined into a multi-page PDF; drama is video and has no PDF), then click "Complete" to mark the project as done.
+  A comic chapter = **one multi-panel comic page** (several panels in a single image, portrait, with caption/dialogue text); a drama clip = one video clip.
+  > **Drama terminology**: on the drama line the UI and code identifiers call a chapter a **clip** and a season an **episode**;
+  > the comic line keeps "chapter / season". Drama clip cards also show **continuity info** (the reference source: previous
+  > clip's last frame / episode cover / previous episode ending / next clip) and the **plot beat** a clip lands on; the
+  > toolbar offers **batch duration** (set selected/whole-episode clips to N seconds), and prompts can be **copied / reverted**.
+- **③ Complete**: once generated, **Export ZIP** (all media + the outline/characters/per-chapter script text); the comic also offers
+  **Export PDF / Preview PDF** (chapter images combined into a multi-page PDF), while the drama instead offers **Export composed
+  video / Preview composed video** (its chapter clips concatenated in order into one MP4 via **ffmpeg concat**; stream-copy
+  first, re-encode to h264/aac if the clips differ) — then click "Complete" to mark the project as done.
 - **Re-set**: at any time, open "Re-set" on the project page to adjust the **title / one-line idea (theme) / style** in a dialog.
-  It is **non-destructive by default** — the existing outline, characters, chapters and generated media are kept;
-  you can optionally tick "Clear & rebuild downstream" to wipe the outline/characters/chapters/media and return to the "Outline" stage (a fresh restart with the new settings).
+  It is **non-destructive** — the existing outline, characters, chapters and generated media are kept.
 - **Per-chapter progress for long steps (SSE)**: "Generate all scripts / Generate all media / Regenerate all frames" are long steps
   (the LLM writes chapter by chapter / media renders chapter by chapter; blocking calls run in a thread pool so the event loop stays responsive),
   streamed over SSE with per-chapter progress (chapter x/y "title"), then auto-refreshes; a single chapter can still generate its script/media or regenerate from its own card buttons.
-- **Generation jobs (observable / cancellable)**: each long step (chapter planning / generation / batch scoring / single-chapter generation)
+- **Generation jobs (observable / cancellable)**: each long step (chapter planning / generation / single-chapter generation)
   runs as a **job** (`running → done | error | interrupted | cancelled`) with a progress note; `GET /api/comics|dramas/{id}/jobs`
   lists them and `POST .../jobs/{id}/cancel` stops a running one **without relying on the client connection**. The page's existing
   "Stop" button aborts the SSE stream, which now also stops the in-flight Draw Things render (cooperative cancel).
@@ -142,12 +156,23 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   "Use as reference"; it becomes the reference for the next generation (video → last frame for image-to-image; image →
   first frame for image-to-video). Works per message and across sessions; the reference is cleared after that generation.
 - **Attachment de-duplication**: adding the same image twice is skipped (no duplicate upload).
-- **Automatic VLM scoring (configurable basis)**: every generated image / video is scored **automatically right after
-  generation** (the work's VLM rates it 0–100 with a one-line comment; videos are scored on their last frame). The
-  **scoring basis is chosen per work** in *Settings → Scoring basis*: **image only** (ignore the prompt, default) or
-  **image + prompt match**. The score and comment are persisted and shown on the card. Right-click → **Redo (improve by
-  score)** then has the LLM **rewrite the prompt using that score & comment** and regenerates as a **new message** — the
-  original is always kept. (The card's *Re-run* still reproduces the exact same params without the LLM.)
+- **Manual VLM scoring + Redo (Quick Create)**: click **Score** on a generated image/video (the work's VLM rates it 0–100
+  with a one-line comment; videos use the last frame); right-click → **Redo (improve by score)** rewrites the prompt using
+  that score & comment and regenerates as a **new message** (the original is kept). The scoring basis is per work
+  (image only / image + prompt).
+- **Project-side scoring + retry/stop**: each chapter card has a manual **VLM score** button; the project's *Overall* section has
+  a dedicated **Auto scoring** tab where you can turn on **auto scoring** with a **threshold**, plus two independent
+  switches — **low-score auto-retry** (regenerate below threshold, max 2×) and **stop when below threshold** (halt the
+  remaining batch once a chapter scores below the threshold). Off by default.
+- **Regenerate with extra prompt**: each chapter's **Regenerate media** button opens a dialog with an optional **extra
+  prompt** — describe the problems to fix, and the model folds them into the rewritten prompt before regenerating (works
+  for comic images and short-drama videos).
+- **Clear chapter outputs**: a single-chapter **Clear** button (on the chapter card) and a toolbar **Clear all** remove
+  only the generated media, the prompt and the score; titles, summaries and scripts are kept. Selected chapters are
+  cleared if any are checked, otherwise the whole season.
+- **Short-drama prompt hardening**: video prompts automatically require **no text / subtitles / captions / watermarks /
+  character-introduction cards**, and (with "supports reference image" on) **continue from the previous clip's last frame**
+  for visual continuity.
 - **User image attachments**: when the chosen LLM supports vision (`supports_vision`), the input box lets you click 📎 to upload, **paste**, or **drag**
   images (up to 4 per message; you can send images without text). Attachments are stored with the message and sent back to the model as part of the multi-turn context.
   Non-vision models do not show this entry.
@@ -178,7 +203,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   (steps / sampler / size) is **inferred from the model name**, no input needed. Any project/work can use any
   Draw Things config.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
-  `max_seconds` (max video duration in seconds; **default 8 = built-in cap**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap).
+  `max_seconds` (max video duration in seconds; **default 10, settable 1–10**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap). **Drama clips each have their own duration (seconds) field**, **manual by design**: leave it **0 to follow the preset/config cap** (recommended for LTX — a non-native frame count can make some models return no frames or crash the app), or set a shorter value in the clip card / with the toolbar **Batch duration**.
   **Supports reference image** (now picked per feature in the project / micro-creation create form; the config-level
   `ref_image` / `ref_video` is kept as a fallback default, **off by default**): per type, whether the generation uses
   the reference image (image-to-image / image-to-video). When on, comics pass the previous image and dramas the last
@@ -186,6 +211,9 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   Known Draw Things bug: on some app versions, reference-image generation may crash the app — this app then detects the
   disconnection, waits up to 2 minutes per round for the app to restart, and retries the generation automatically
   (up to twice; community issue #121).
+  If Draw Things returns **no frames** (e.g. "No images received from server") the request was sent correctly and the cause
+  is app-side; for video the app automatically **retries once at reduced frames**, and if it still fails it reports the
+  request summary plus concrete checks (model loaded in-app / OOM at this resolution+frames / unsupported frames).
   There is also a **hard 8-second cap** on a single video (frames = fps × 8).
 
 ## Directory structure
@@ -213,8 +241,6 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 │   ├── api_drama.py     # short-drama project routes (/api/dramas/*)
 │   ├── api_micro.py     # micro-creation routes (/api/micro/*) + SSE transport (drive engine queue + heartbeat)
 │   ├── micro_agent.py   # micro-creation session engine (system prompt / generate_media tool / parts / durable writes / rerun)
-│   ├── api_idea.py      # new-project "AI title/theme" chat routes (/api/idea/*) + SSE transport
-│   ├── idea_agent.py    # new-project idea engine (multi-turn + streaming + set_fields function call)
 │   ├── micro_parts.py   # assistant "ordered content blocks" schema + versioned (de)serialization
 │   ├── capabilities.py  # effective generation capabilities (feature-level model / ref-image overrides; shared)
 │   ├── media_files.py   # media cleanup / path resolve / user-attachment save / ZIP·PDF export (shared)
@@ -342,7 +368,10 @@ The client + server can be packaged as a standard macOS app (with icon, double-c
   `build_app.sh` builds straight from the spec, so **change packaging options in the spec** (not via extra CLI flags).
 - **Resources / data separation**: `static/` is baked into the bundle (read-only); data (SQLite + media) lives in
   `~/Library/Application Support/Drawthings Studio/data` (source mode stays `<project root>/data`; the two don't affect each other).
-- **ffmpeg** is not bundled: last-frame extraction relies on the system `ffmpeg` (`brew install ffmpeg`); it degrades gracefully when missing.
+- **Audio without a system ffmpeg**: if `ffmpeg` isn't on PATH, the app uses the **bundled static ffmpeg from
+  `imageio-ffmpeg`** (installed via pip), so `drawthings-py` still assembles the mp4 **with the model's audio track**.
+  Only when neither is available does it fall back to **OpenCV** (video only, **no audio**). Last-frame extraction uses
+  **OpenCV first** (no ffmpeg needed). (`brew install ffmpeg` is optional.)
 
 ## Packaging as a DMG (release)
 
@@ -401,7 +430,8 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 
 - Depends on `drawthings-py` (already in `requirements.txt` as `drawthings-py[ffmpeg]`): it builds the FlatBuffer
   generation config, receives the **frame sequence**, and assembles video with ffmpeg (LTX etc. also return audio,
-  playable in the browser). Video models here are **integrated audio+video** (LTX 2.3 generates both in one pass), so the
+  playable in the browser). **If `ffmpeg` is unavailable, the app falls back to assembling the mp4 with OpenCV**
+  (video only, no audio). Video models here are **integrated audio+video** (LTX 2.3 generates both in one pass), so the
   model's audio is muxed as-is — never generated separately. The mp4 frame rate is the model's **native fps**, inferred
   per family (LTX 25 / Hunyuan 30 / SkyReels 24 / Wan 16) unless the preset sets `fps` explicitly: `drawthings-py`
   backfills `fps` with an unrelated schema default (5) for presets that omit it, and stamping 25 fps frames as 5 fps
@@ -420,7 +450,7 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 - Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`
   → 768×448, ~90 s for 25 frames).
-- Duration: the config's `max_seconds` (**default 8 = built-in cap**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), then bounded by the preset frame count and the **built-in 8s cap**. (E.g. with the LTX preset at fps=25: 2s = 49 frames, 4s = 97 frames ≈ 3.9s; longer requests are capped by the preset's 121 frames ≈ 4.84s.)
+- Duration: the config's `max_seconds` (**default 10 = built-in cap, settable 1–10**; 0 = use the built-in cap) is the upper bound; the **model may choose a shorter duration per request** (the Quick Create tool takes a `seconds` argument). Frames = seconds × fps, snapped to the model's **valid frame counts** (LTX: `8n+1`; Wan/Hunyuan etc.: `4n+1`), bounded by `fps × 10`. **When an explicit duration/frame count is given it is no longer capped by the preset frame count**, so clips up to 10s are possible. (E.g. LTX fps=25: 4s = 97 frames ≈ 3.9s, 8s = 201 frames, 10s = 249 frames.)
 - Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically);
   requires "Supports reference image" on the work (config value as fallback) — off = text-to-image / text-to-video.
 

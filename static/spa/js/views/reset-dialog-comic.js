@@ -8,10 +8,9 @@ Views.comicResetDialog = {
     origin: { type: String, default: '' },
     style: { type: String, default: '' },
     custom: { type: String, default: '' },
-    clear: { type: Boolean, default: false },
     stylePresets: { type: Array, default: () => [] },
   },
-  emits: ['update:modelValue', 'update:title', 'update:origin', 'update:style', 'update:custom', 'update:clear', 'save'],
+  emits: ['update:modelValue', 'update:title', 'update:origin', 'update:style', 'update:custom', 'save'],
   template: `
     <el-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)"
                :title="I18N.t('p.reset')" width="540px">
@@ -33,7 +32,6 @@ Views.comicResetDialog = {
                     class="mt8" :placeholder="I18N.t('cf.styleCustomPh')" />
         </el-form-item>
       </el-form>
-      <el-checkbox :model-value="clear" @update:model-value="$emit('update:clear', $event)" style="margin-bottom: 4px;">{{ I18N.t('p.resetClear') }}</el-checkbox>
       <template #footer>
         <el-button @click="$emit('update:modelValue', false)">{{ I18N.t('common.cancel') }}</el-button>
         <el-button type="primary" @click="$emit('save')">{{ I18N.t('p.resetSave') }}</el-button>

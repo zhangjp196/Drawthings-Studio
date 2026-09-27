@@ -47,7 +47,7 @@ from .agent import (
     image_data_uri,
     make_agent,
 )
-from .drawthings import extract_last_frame
+from .drawthings import extract_last_frame, MAX_VIDEO_SECONDS, concat_videos
 from .jobs import JobCancelled
 from .capabilities import dt_client, ref_video_enabled
 from .pipeline_common import (
@@ -64,7 +64,20 @@ from .pipeline_common import (
 
 logger = logging.getLogger("drawthings")
 
+# 短剧生成安全网：在提示词末尾追加「无文字/字幕/水印/时间码 + 光影场景稳定」约束，
+# 避免模型生成可读文字、穿帮的字幕条/时间码/水印，以及前后段场景/光照跳变导致的画面不稳定。
+_VIDEO_NO_TEXT_SUFFIX = (", no text, no subtitles, no captions, no on-screen words, no logos, "
+                         "no watermarks, no character introduction cards, no name tags, "
+                         "no timestamps, no timecodes, no clocks, no HUD or UI overlays, no website URLs, "
+                         "no scene jumps or glitch transitions; consistent lighting and stable scene")
+
 class DramaPipeline:
+    """短剧流水线（集 / 片段）：与漫画流水线完全独立。
+
+    术语：短剧把「季」称为**集（episode）**、把「章」称为**片段（clip）**；
+    模型层仍复用共享的 Season / Chapter（数据库列 season_id 不变），仅在方法名与局部标识上使用 episode/clip。
+    """
+
     def __init__(self, data_dir):
         self.data_dir = str(data_dir)
 
@@ -111,7 +124,7 @@ class DramaPipeline:
         db.add(project)
         db.commit()
         db.refresh(project)
-        self.ensure_first_season(db, project)  # 新项目默认带第一季
+        self.ensure_first_episode(db, project)  # 新项目默认带第一季
         return project
 
     def get(self, db, project_id: str) -> Project:
@@ -172,19 +185,19 @@ class DramaPipeline:
         db.refresh(project)
 
     # ---------------- 季（篇章）管理 ----------------
-    def _load_seasons(self, db, project: Project) -> list[Season]:
+    def _load_episodes(self, db, project: Project) -> list[Season]:
         """项目下的季，按季号升序。"""
         return (db.query(Season)
                 .filter(Season.project_id == project.id)
                 .order_by(Season.number).all())
 
-    def _get_season(self, db, project: Project, season_id: str) -> Season | None:
+    def _get_episode(self, db, project: Project, season_id: str) -> Season | None:
         s = db.get(Season, season_id)
         if s and s.project_id == project.id:
             return s
         return None
 
-    def _season_chapters(self, db, project: Project, season: Season) -> list[Chapter]:
+    def _episode_clips(self, db, project: Project, season: Season) -> list[Chapter]:
         """某一季的章节（按扁平序号有序，即季内顺序）。"""
         return (db.query(Chapter)
                 .filter(Chapter.project_id == project.id, Chapter.season_id == season.id)
@@ -197,11 +210,11 @@ class DramaPipeline:
             merged[c["id"]] = dict(c)
         return list(merged.values())
 
-    def _season_arc(self, project: Project, season: Season) -> str:
+    def _episode_arc(self, project: Project, season: Season) -> str:
         """季大纲（为空则回退项目总纲）。"""
         return (season.arc or "").strip() or (project.arc or "").strip()
 
-    def _prev_season_last_chapter(self, db, project: Project, season: Season) -> Chapter | None:
+    def _prev_episode_last_clip(self, db, project: Project, season: Season) -> Chapter | None:
         """上一季最后一章（用于新季第 1 章的参考图链）。"""
         if season.number <= 1:
             return None
@@ -210,13 +223,13 @@ class DramaPipeline:
                 .first())
         if not prev:
             return None
-        chs = self._season_chapters(db, project, prev)
+        chs = self._episode_clips(db, project, prev)
         return chs[-1] if chs else None
 
-    def ensure_first_season(self, db, project: Project) -> Season:
+    def ensure_first_episode(self, db, project: Project) -> Season:
         """保证项目至少存在第一季（幂等）：无任何季时自动建第一季，
         并把孤儿章节（season_id 为空的旧数据）并入第一季后重排扁平序号。"""
-        seasons = self._load_seasons(db, project)
+        seasons = self._load_episodes(db, project)
         if seasons:
             return seasons[0]
         season = Season(id=uuid.uuid4().hex[:12], project_id=project.id, number=1,
@@ -234,9 +247,9 @@ class DramaPipeline:
         db.refresh(season)
         return season
 
-    def add_season(self, db, project: Project, title: str = "") -> Season:
+    def add_episode(self, db, project: Project, title: str = "") -> Season:
         """新增一季（季号 = 现有最大季号 + 1；空项目从 1 起）。"""
-        seasons = self._load_seasons(db, project)
+        seasons = self._load_episodes(db, project)
         number = (seasons[-1].number if seasons else 0) + 1
         season = Season(id=uuid.uuid4().hex[:12], project_id=project.id, number=number,
                         title=(title or "").strip(), created_at=_now(), updated_at=_now())
@@ -246,11 +259,11 @@ class DramaPipeline:
         self._save(db, project)
         return season
 
-    def rename_season(self, db, project: Project, season_id: str, title: str) -> Season:
+    def rename_episode(self, db, project: Project, season_id: str, title: str) -> Season:
         """修改季名。"""
-        season = self._get_season(db, project, season_id)
+        season = self._get_episode(db, project, season_id)
         if season is None:
-            raise ValueError("季不存在 (Season not found)")
+            raise ValueError("集不存在 (Episode not found)")
         season.title = (title or "").strip()[:200]
         season.updated_at = _now()
         db.commit()
@@ -258,12 +271,12 @@ class DramaPipeline:
         self._save(db, project)
         return season
 
-    def delete_season(self, db, project: Project, season_id: str) -> Project:
+    def delete_episode(self, db, project: Project, season_id: str) -> Project:
         """删除一季：连同其章节（清理媒体）与季角色参考图；剩余季重排季号 + 章节扁平重编号。"""
-        season = self._get_season(db, project, season_id)
+        season = self._get_episode(db, project, season_id)
         if season is None:
-            raise ValueError("季不存在 (Season not found)")
-        for ch in self._season_chapters(db, project, season):
+            raise ValueError("集不存在 (Episode not found)")
+        for ch in self._episode_clips(db, project, season):
             self._rm_media(ch.media_path)
             db.delete(ch)
         for c in chars_from_raw(season.characters):
@@ -271,7 +284,7 @@ class DramaPipeline:
         db.delete(season)
         db.commit()
         # 剩余季重排季号（保持相对顺序连续 1..S）
-        for i, s in enumerate(self._load_seasons(db, project), start=1):
+        for i, s in enumerate(self._load_episodes(db, project), start=1):
             s.number = i
         self._reindex_flat(db, project)
         db.commit()
@@ -283,7 +296,7 @@ class DramaPipeline:
 
         季内顺序 = 当前扁平顺序按季分组（保持相对次序）。"""
         flat = self._load_chapters(db, project)
-        season_no = {s.id: s.number for s in self._load_seasons(db, project)}
+        season_no = {s.id: s.number for s in self._load_episodes(db, project)}
         groups: dict[str, list[Chapter]] = {}
         order: list[str] = []
         for ch in flat:
@@ -303,7 +316,7 @@ class DramaPipeline:
                 new_idx += 1
         db.commit()
 
-    def _season_base_index(self, db, project: Project, season: Season) -> int:
+    def _episode_base_index(self, db, project: Project, season: Season) -> int:
         """向某季插入新章时的起始扁平序号 = 所有前序季（季号 < 本季）的章节总数；无前序季返回 0。
 
         （旧实现只算紧邻上一季的章数——第 3 季起新章会与更前面的季撞号；
@@ -329,11 +342,12 @@ class DramaPipeline:
         style = (scope.get("style") or "").strip()
         theme = (scope.get("theme") or "").strip()
         tone = (scope.get("tone") or "").strip()
-        system = ("你是资深漫画/短剧策划兼编剧。根据一句话创意与风格设定，写整体故事大纲：\n"
-                  "分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、如何承接到下一段，"
-                  "末尾附 1-3 条贯穿全篇的主线设定。")
+        system = ("你是资深漫画/短剧策划兼编剧。根据项目名称（主题）与风格设定：\n"
+                  "① 先给作品起一个吸引人的标题（title，简短精炼，5-15 字为宜）；\n"
+                  "② 再写整体故事大纲：分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、"
+                  "如何承接到下一段，末尾附 1-3 条贯穿全篇的主线设定。")
         agent = make_agent(build_model(llm_cfg), system, output_type=ArcOut)
-        user = project.origin
+        user = f"项目名称（主题）：{project.origin or ''}"
         if style:
             user += f"\n风格：{style}"
         if theme:
@@ -348,6 +362,9 @@ class DramaPipeline:
         if not arc:
             raise RuntimeError(L(lang, "模型未返回大纲内容，请重试",
                                  "The model returned no outline content — please retry"))
+        # 生成大纲时一并产出标题（标题可再在总览页手动修改）
+        if (data.title or "").strip():
+            project.title = (data.title or "").strip()[:200]
         project.arc = arc
         project.res_width = int(res_width or 0)
         project.res_height = int(res_height or 0)
@@ -355,20 +372,28 @@ class DramaPipeline:
         self._save(db, project)
         return project
 
-    async def step_season_arc(self, db, project: Project, season: Season, lang: str = "zh",
+    async def step_episode_arc(self, db, project: Project, season: Season, lang: str = "zh",
                               extra_prompt: str = "") -> Project:
-        """「生成本季大纲」：基于整体故事大纲（全篇主线）+ 本季季号/季名，为当前季单独写故事大纲。
-        不触碰整体大纲 / 风格 / 角色 / 章节。status: → arced。"""
+        """「生成本季大纲」：基于整体故事大纲（全篇主线）+ 本季季号/季名 + 前后季衔接 + 角色，
+        为当前季单独写故事大纲（四段式 + 关键剧情节点 beats）。不触碰整体大纲 / 风格 / 角色 / 章节。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         style = (scope.get("style") or "").strip()
         theme = (scope.get("theme") or "").strip()
+        tone = (scope.get("tone") or "").strip()
         overall_arc = (project.arc or "").strip()
         season_no = season.number
         season_title = (season.title or "").strip()
+        chars = chars_to_text(self._combined_chars(project, season))
+        gprompt = (project.global_prompt or "").strip()
         system = ("你是资深漫画/短剧策划兼编剧。根据整体故事大纲（全篇主线）与本季季号/季名，"
                   "写本季的剧情大纲：说明本季承接主线的哪一段、本季的开端、发展、高潮、结局，"
-                  "以及与前后季的衔接。字数与整体大纲相当，分 开端、发展、高潮、结局 四段，每段 1-2 句。"
+                  "以及与前后季的衔接。分 开端、发展、高潮、结局 四段，每段 1-2 句；"
+                  "再给出 3-6 条本季**关键剧情节点 beats**（按时间顺序的转折/冲突/爽点节拍，"
+                  "每条一句话、可独立成章的推进点），供后续分章逐章落位。\n"
+                  "要求：① 节点均匀覆盖本季全程（开端→高潮→结局），不要都堆在开头或结尾；"
+                  "② beats 之间为因果递进（前一个引发后一个），最后一条落到本季结局/下一季钩子；"
+                  "③ 与前后季不重复、不跳跃，若已给出前后季信息须顺畅衔接。\n"
                   "若本季尚无合适名字，请在末尾附一个简洁的季名（篇章名）。")
         agent = make_agent(build_model(llm_cfg), system, output_type=SeasonArcOut)
         user = f"季号：第 {season_no} 季"
@@ -380,6 +405,15 @@ class DramaPipeline:
             user += f"\n风格：{style}"
         if theme:
             user += f"\n主题：{theme}"
+        if tone:
+            user += f"\n基调：{tone}"
+        if chars:
+            user += f"\n角色设定（请保持一致）：\n{chars}"
+        if gprompt:
+            user += f"\n全局要点（务必涵盖/遵循）：{gprompt}"
+        ctx = self._episode_neighbor_context(db, project, season)
+        if ctx:
+            user += f"\n{ctx}"
         if (extra_prompt or "").strip():
             user += f"\n额外要求：{(extra_prompt or '').strip()}"
         async with agent:
@@ -388,7 +422,7 @@ class DramaPipeline:
         if not arc:
             raise RuntimeError(L(lang, "模型未返回本季大纲内容，请重试",
                                  "The model returned no season outline content — please retry"))
-        season.arc = arc
+        season.arc = self._compose_episode_arc(arc, data.beats)
         # 若本季尚无名字且模型给出，则采用模型建议的季名
         if not season_title and (data.title or "").strip():
             season.title = (data.title or "").strip()
@@ -396,14 +430,44 @@ class DramaPipeline:
         self._save(db, project)
         return project
 
-    async def step_season_chars(self, db, project: Project, season: Season, lang: str = "zh",
+    def _compose_episode_arc(self, arc: str, beats: list[str]) -> str:
+        """把四段式季大纲与关键剧情节点合并为一段可存储文本（beats 作为独立小节追加）。"""
+        arc = (arc or "").strip()
+        items = [str(b).strip() for b in (beats or []) if str(b).strip()]
+        if not items:
+            return arc
+        lines = "\n".join(f"{i}. {b}" for i, b in enumerate(items, 1))
+        return f"{arc}\n\n关键剧情节点：\n{lines}"
+
+    def _episode_neighbor_context(self, db, project: Project, season: Season) -> str:
+        """前后季衔接信息：上一季末章 / 下一季大纲（若已存在），供本季大纲顺畅承接。"""
+        parts = []
+        prev_season = (db.query(Season)
+                       .filter(Season.project_id == project.id,
+                               Season.number < season.number)
+                       .order_by(Season.number.desc()).first())
+        if prev_season is not None:
+            prev_arc = (prev_season.arc or "").strip()
+            if prev_arc:
+                label = f"第{prev_season.number}季" + (f"（{prev_season.title}）" if prev_season.title else "")
+                parts.append(f"上一季大纲（本季需承接其结局，避免重复）：\n{label}：{prev_arc}")
+        next_season = (db.query(Season)
+                       .filter(Season.project_id == project.id,
+                               Season.number > season.number)
+                       .order_by(Season.number.asc()).first())
+        if next_season is not None and (next_season.arc or "").strip():
+            label = f"第{next_season.number}季" + (f"（{next_season.title}）" if next_season.title else "")
+            parts.append(f"下一季大纲（本季结局需为其埋线）：\n{label}：{(next_season.arc or '').strip()}")
+        return "\n".join(parts)
+
+    async def step_episode_chars(self, db, project: Project, season: Season, lang: str = "zh",
                                 extra_prompt: str = "") -> Project:
         """「生成季角色」：基于本季大纲（为空则整体大纲）+ 风格 + 已有核心角色，生成本季新增角色。
         不触碰整体大纲 / 风格 / 核心角色 / 章节。本季无新角色时可为空。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         style = (scope.get("style") or "").strip()
-        season_arc = self._season_arc(project, season)
+        season_arc = self._episode_arc(project, season)
         if not season_arc:
             raise RuntimeError(L(lang, "请先生成或填写本季大纲（或整体大纲）再生成季角色",
                                  "Please create the season (or overall) outline before generating season characters"))
@@ -514,17 +578,20 @@ class DramaPipeline:
         self._save(db, project)
         return desc
 
-    def _rebuild_chapters(self, db, project: Project, season: Season,
-                          plan: list[tuple[str, str]]) -> None:
-        """按 [(标题, 主题摘要)] 重建**该季**章节：清空旧章节（清理其媒体）后按序建新的。"""
-        for ch in self._season_chapters(db, project, season):
+    def _rebuild_clips(self, db, project: Project, season: Season,
+                          plan: list[tuple[str, str, int]]) -> None:
+        """按 [(标题, 主题摘要, 建议时长秒)] 重建**该季**章节：清空旧章节（清理其媒体）后按序建新的。
+        时长元素可缺省（2 元组）：缺省按 0 处理（0=由生成剧本时决定 / 跟随配置上限）。"""
+        for ch in self._episode_clips(db, project, season):
             self._rm_media(ch.media_path)
             db.delete(ch)
         db.commit()
-        base = self._season_base_index(db, project, season)
-        for i, (title, summary) in enumerate(plan):
+        base = self._episode_base_index(db, project, season)
+        for i, item in enumerate(plan):
+            title, summary = item[0], item[1]
+            sec = int(item[2]) if (len(item) > 2 and item[2]) else 0
             db.add(Chapter(project_id=project.id, season_id=season.id,
-                           index=base + i, title=title, summary=summary))
+                           index=base + i, title=title, summary=summary, seconds=sec))
         db.commit()
         self._reindex_flat(db, project)
 
@@ -534,9 +601,9 @@ class DramaPipeline:
                       res_width: int | None = 0, res_height: int | None = 0,
                       count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
                       auto_score: int | None = None, score_min: int | None = None,
-                      auto_redo: int | None = None) -> Project:
+                      auto_redo: int | None = None, stop_on_low: int | None = None) -> Project:
         """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定。
-        仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_season），
+        仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_episode），
         也不触碰已生成的剧本/媒体（保存不触发生成）。"""
         scope = dict(project.scope or {})
         if style is not None:
@@ -583,11 +650,13 @@ class DramaPipeline:
             project.score_min = max(0, min(100, int(score_min or 0)))
         if auto_redo is not None:
             project.auto_redo = 1 if auto_redo else 0
+        if stop_on_low is not None:
+            project.stop_on_low = 1 if stop_on_low else 0
         db.commit()
         self._save(db, project)
         return project
 
-    def save_season(self, db, project: Project, season: Season, *,
+    def save_episode(self, db, project: Project, season: Season, *,
                     title: str | None = None, arc: str | None = None,
                     characters: list[dict] | None = None,
                     count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
@@ -623,7 +692,7 @@ class DramaPipeline:
                                  count_max if count_max is not None else season.count_max)
             season.count_min, season.count_max = lo, hi
         if chapters is not None:
-            existing = self._season_chapters(db, project, season)
+            existing = self._episode_clips(db, project, season)
             for i, item in enumerate(chapters):
                 t = (item.get("title") or "").strip()
                 s = (item.get("summary") or "").strip()
@@ -632,10 +701,10 @@ class DramaPipeline:
                         existing[i].title = t
                     existing[i].summary = s
                 else:
-                    base = self._season_base_index(db, project, season) + len(existing)
+                    base = self._episode_base_index(db, project, season) + len(existing)
                     db.add(Chapter(project_id=project.id, season_id=season.id,
                                    index=base + (i - len(existing)),
-                                   title=t or f"第{i + 1}章", summary=s))
+                                   title=t or f"第{i + 1}段", summary=s))
             for ch in existing[len(chapters):]:
                 self._rm_media(ch.media_path)
                 db.delete(ch)
@@ -673,9 +742,25 @@ class DramaPipeline:
             project.count_mode = "range"
             project.count_min = 0
             project.count_max = 0
+            self._rm_media(project.first_image)
+            project.first_image = ""
+            project.first_image_base = ""
             for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
                 self._rm_media(ch.media_path)
                 db.delete(ch)
+            # 集级内容一并清空（保留集本身与集名；封面/集大纲/集角色/数量设定回到初始）
+            for s in self._load_episodes(db, project):
+                for c in chars_from_raw(s.characters):
+                    self._rm_media(c.get("image"))
+                s.characters = ""
+                s.arc = ""
+                self._rm_media(s.first_image)
+                s.first_image = ""
+                s.first_image_base = ""
+                s.cover_as_first_ref = False
+                s.count_mode = "range"
+                s.count_min = 0
+                s.count_max = 0
             project.status = "planning"
         self._save(db, project)
         return project
@@ -688,8 +773,8 @@ class DramaPipeline:
     def season_progress(self, db, project: Project) -> list[dict]:
         """各季完成进度：[{id, number, title, total, done, ok}]（ok = 本季有章节且全部已生成）。"""
         out = []
-        for s in self._load_seasons(db, project):
-            chs = self._season_chapters(db, project, s)
+        for s in self._load_episodes(db, project):
+            chs = self._episode_clips(db, project, s)
             done = sum(1 for c in chs if c.status == "done")
             out.append({"id": s.id, "number": s.number, "title": s.title or "",
                         "total": len(chs), "done": done,
@@ -705,7 +790,7 @@ class DramaPipeline:
             if row["title"]:
                 label += f"（{row['title']}）" if lang == "zh" else f" ({row['title']})"
             if row["total"] == 0:
-                issues.append(L(lang, f"{label}：无章节", f"{label}: no chapters"))
+                issues.append(L(lang, f"{label}：无片段", f"{label}: no clips"))
             elif row["done"] < row["total"]:
                 issues.append(L(lang, f"{label}：已完成 {row['done']}/{row['total']} 章",
                                 f"{label}: only {row['done']}/{row['total']} chapters done"))
@@ -734,69 +819,74 @@ class DramaPipeline:
         self._save(db, project)
         return project
 
-    async def step_chapters(self, db, project: Project, season: Season, lang: str = "zh",
+    async def step_clips(self, db, project: Project, season: Season, lang: str = "zh",
                              count_min: int = 0, count_max: int = 0) -> Project:
         """「章节规划」：依据季大纲/风格/角色 + 章节数量范围（min~max）规划章节（标题 + 主题摘要）。
         会清空该季已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
         season.count_mode = "range"              # 仅范围模式
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
-        n = await self._plan_chapter_count(db, project, season, lang,
+        n = await self._plan_clip_count(db, project, season, lang,
                                            season.count_min, season.count_max, model=model)
-        prior: list[tuple[str, str]] = []
-        plan: list[tuple[str, str]] = []
+        prior: list[tuple[str, str, int]] = []
+        plan: list[tuple[str, str, int]] = []
         for i in range(1, n + 1):
-            t, s = await self._plan_one_chapter(db, project, season, lang, i, n, prior, model=model)
-            prior.append((t, s))
-            plan.append((t, s))
-        self._rebuild_chapters(db, project, season, plan)
+            t, s, sec = await self._plan_one_clip(db, project, season, lang, i, n, prior, model=model)
+            prior.append((t, s, sec))
+            plan.append((t, s, sec))
+        self._rebuild_clips(db, project, season, plan)
         project.status = "chaptered"
         self._save(db, project)
         return project
 
-    async def _plan_chapter_count(self, db, project: Project, season: Season, lang: str,
+    async def _plan_clip_count(self, db, project: Project, season: Season, lang: str,
                                    count_min: int, count_max: int, model=None) -> int:
         """先定总章数：在 [count_min, count_max] 范围内选一个合适的数。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         gprompt = (project.global_prompt or "").strip()
-        arc = self._season_arc(project, season)
-        system = "你是分章策划。依据整体故事大纲判断应拆分为多少章，只给出章数（一个整数）。"
+        arc = self._episode_arc(project, season)
+        system = "你是分章策划。依据本季大纲判断应拆分为多少章，只给出章数（一个整数）。"
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterCount)
         lo, hi = count_range(count_min, count_max)
         if lo == hi:
             return lo                             # 固定值（min=max）：无需 LLM 挑选
-        cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数"
+        cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数（若大纲含「关键剧情节点」，章数宜不少于节点数）"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
-                + f"{cnt}\n\n整体故事大纲：\n{arc}")
+                + f"{cnt}\n\n本季大纲：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
         return max(1, int(data.count or 0))
 
-    async def _plan_one_chapter(self, db, project: Project, season: Season, lang: str, i: int, n: int,
-                                 prior: list[tuple[str, str]], model=None) -> tuple[str, str]:
-        """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。"""
+    async def _plan_one_clip(self, db, project: Project, season: Season, lang: str, i: int, n: int,
+                                 prior: list[tuple[str, str]], model=None) -> tuple[str, str, int]:
+        """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要, 0)。
+        若本季大纲含「关键剧情节点」，则要求本章落位到对应节点，保证节点均匀覆盖整季。
+        注意：规划**不写时长**（时长默认 0 = 跟随配置/预设上限；由用户在卡片手动设置或用工具条「批量时长」）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         scope = project.scope or {}
         chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
-        arc = self._season_arc(project, season)
+        arc = self._episode_arc(project, season)
         system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
-                  "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。")
+                  "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。"
+                  "若本季大纲给出了「关键剧情节点」，请让本章**落在对应比例的节点上**"
+                  "（第 i/n 章对应节点序列中约第 ⌈i/n × 节点数⌉ 个），把该节点展开为本章内容；"
+                  "不要提前消耗后面的节点，也不要跳过。")
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterOut)
-        prior_text = "\n".join(f"第{k}章：{t}（{s}）" for k, (t, s) in enumerate(prior, 1)) \
+        prior_text = "\n".join(f"第{k}章：{t}（{s}）" for k, (t, s, *_r) in enumerate(prior, 1)) \
             or "（本章为第一章，尚无前置章节）"
         user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
                 + (f"角色设定：{chars}\n" if chars else "")
                 + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
-                + f"共 {n} 章，现在规划第 {i} 章。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
-                  f"整体故事大纲：\n{arc}")
+                + f"共 {n} 章，现在规划第 {i} 章（进度 {i}/{n}）。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
+                  f"本季大纲（含关键剧情节点，请按比例落位）：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
-        return ((data.title or f"第{i}章").strip(), (data.scene or "").strip())
+        return ((data.title or f"第{i}段").strip(), (data.scene or "").strip(), 0)
 
-    async def step_chapters_stream(self, db, project: Project, season: Season, lang: str = "zh",
+    async def step_clips_stream(self, db, project: Project, season: Season, lang: str = "zh",
                                     count_min: int = 0, count_max: int = 0, indices: list[int] | None = None,
                                     mode: str = "replan", progress_cb=None, chapter_done_cb=None,
                                     cancel_event=None) -> Project:
@@ -809,7 +899,7 @@ class DramaPipeline:
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         if mode == "append":
-            await self._append_chapters(db, project, season, lang, model, season.count_max,
+            await self._append_clips(db, project, season, lang, model, season.count_max,
                                         progress_cb, chapter_done_cb, cancel_event)
             project.status = "chaptered"
             self._save(db, project)
@@ -818,85 +908,86 @@ class DramaPipeline:
         if targets:
             await self._replan_selected(db, project, season, lang, targets, model, progress_cb, chapter_done_cb, cancel_event)
         else:
-            await self._replan_season(db, project, season, lang, model, progress_cb, chapter_done_cb, cancel_event)
+            await self._replan_episode(db, project, season, lang, model, progress_cb, chapter_done_cb, cancel_event)
         project.status = "chaptered"
         self._save(db, project)
         return project
 
-    async def _replan_season(self, db, project: Project, season: Season, lang: str, model,
+    async def _replan_episode(self, db, project: Project, season: Season, lang: str, model,
                               progress_cb, chapter_done_cb, cancel_event=None) -> None:
         """全季重规划：清空该季旧章节/媒体后按大纲重新拆章（先定总章数，再逐章规划）。"""
-        self._rebuild_chapters(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
-        n = await self._plan_chapter_count(db, project, season, lang,
+        self._rebuild_clips(db, project, season, [])  # 清空该季旧章节/媒体，随后逐个补入
+        n = await self._plan_clip_count(db, project, season, lang,
                                            season.count_min, season.count_max, model=model)
         # base = 所有前序季（季号 < 本季）的章节总数：本季新章紧接「前序季末尾」继续编号
         # （旧实现只算紧邻上一季的章数，第 3 季起会与更前面的季撞号）
-        base = self._season_base_index(db, project, season)
-        prior: list[tuple[str, str]] = []
+        base = self._episode_base_index(db, project, season)
+        prior: list[tuple[str, str, int]] = []
         for i in range(1, n + 1):
             if cancel_event is not None and cancel_event.is_set():
                 raise JobCancelled()
             if progress_cb:
-                await progress_cb(i, n, f"第{i}章")
-            title, summary = await self._plan_one_chapter(db, project, season, lang, i, n, prior, model=model)
-            prior.append((title, summary))
+                await progress_cb(i, n, f"第{i}段")
+            title, summary, sec = await self._plan_one_clip(db, project, season, lang, i, n, prior, model=model)
+            prior.append((title, summary, sec))
             ch = Chapter(project_id=project.id, season_id=season.id,
-                         index=base + i - 1, title=title, summary=summary)
+                         index=base + i - 1, title=title, summary=summary, seconds=sec)
             db.add(ch)
             db.commit()
             db.refresh(ch)
             if chapter_done_cb:
                 await chapter_done_cb(ch)
         # 收尾统一重排扁平序号：本方法逐章插入且中途提交，后续季（季号 > 本季）的旧序号
-        # 可能已与新章冲突，须像 _rebuild_chapters 一样在末尾重排一次（旧实现漏了这步）。
+        # 可能已与新章冲突，须像 _rebuild_clips 一样在末尾重排一次（旧实现漏了这步）。
         self._reindex_flat(db, project)
 
     async def _replan_selected(self, db, project: Project, season: Season, lang: str, indices: list[int],
                                 model, progress_cb, chapter_done_cb, cancel_event=None) -> None:
         """多选重规划：按季内序号就地重写选中章节的标题 + 主题摘要；其余章节、提示词与已生成媒体都不动。"""
-        chapters = self._season_chapters(db, project, season)
+        chapters = self._episode_clips(db, project, season)
         n = len(chapters)
         targets = [i for i in indices if 0 <= i < n]
         for pos, idx in enumerate(targets, start=1):
             if cancel_event is not None and cancel_event.is_set():
                 raise JobCancelled()
             if progress_cb:
-                await progress_cb(pos, len(targets), f"第{idx + 1}章")
+                await progress_cb(pos, len(targets), f"第{idx + 1}段")
             # 承接上下文：前面章节（含未选中的）按序传入，规划结果与全季剧情保持连贯
-            prior = [(c.title, c.summary) for c in chapters[:idx]]
-            title, summary = await self._plan_one_chapter(db, project, season, lang, idx + 1, n,
-                                                          prior, model=model)
+            prior = [(c.title, c.summary, c.seconds or 0) for c in chapters[:idx]]
+            title, summary, sec = await self._plan_one_clip(db, project, season, lang, idx + 1, n,
+                                                              prior, model=model)
             ch = chapters[idx]
             ch.title, ch.summary = title, summary
+            # 注意：重写规划不改动时长（尊重用户手动设置的 seconds）
             db.commit()
             db.refresh(ch)
             if chapter_done_cb:
                 await chapter_done_cb(ch)
 
-    async def _append_chapters(self, db, project: Project, season: Season, lang: str, model,
+    async def _append_clips(self, db, project: Project, season: Season, lang: str, model,
                                 count: int, progress_cb, chapter_done_cb, cancel_event=None) -> None:
         """新增章节：保留现有章节与其媒体，在现有章节末尾之后续规划 count 章（每章承接前序剧情）。"""
-        chapters = self._season_chapters(db, project, season)
+        chapters = self._episode_clips(db, project, season)
         existing = len(chapters)
-        base = self._season_base_index(db, project, season)
-        prior: list[tuple[str, str]] = [(c.title, c.summary) for c in chapters]
+        base = self._episode_base_index(db, project, season)
+        prior: list[tuple[str, str, int]] = [(c.title, c.summary, c.seconds or 0) for c in chapters]
         for k in range(1, count + 1):
             if cancel_event is not None and cancel_event.is_set():
                 raise JobCancelled()
             if progress_cb:
-                await progress_cb(k, count, f"第{existing + k}章")
-            title, summary = await self._plan_one_chapter(db, project, season, lang,
-                                                           existing + k, existing + count,
-                                                           prior, model=model)
-            prior.append((title, summary))
+                await progress_cb(k, count, f"第{existing + k}段")
+            title, summary, sec = await self._plan_one_clip(db, project, season, lang,
+                                                               existing + k, existing + count,
+                                                               prior, model=model)
+            prior.append((title, summary, sec))
             ch = Chapter(project_id=project.id, season_id=season.id,
-                         index=base + existing + k - 1, title=title, summary=summary)
+                         index=base + existing + k - 1, title=title, summary=summary, seconds=sec)
             db.add(ch)
             db.commit()
             db.refresh(ch)
             if chapter_done_cb:
                 await chapter_done_cb(ch)
-        # 章号可能与后续季旧序号冲突，末尾统一重排扁平序号（同 _replan_season）
+        # 章号可能与后续季旧序号冲突，末尾统一重排扁平序号（同 _replan_episode）
         self._reindex_flat(db, project)
 
     def _load_chapters(self, db, project: Project) -> list[Chapter]:
@@ -912,7 +1003,15 @@ class DramaPipeline:
 
     def _script_system(self, project: Project) -> str:
         """剧本/提示词写作的系统提示词（短剧）。"""
-        shot = "短剧：prompt 描述一段连贯的视频画面；横/竖构图可按场景自选。"
+        shot = ("短剧：prompt 描述一段连贯的视频画面；横/竖构图可按场景自选。"
+                "prompt 必须与上一画面**连贯**：延续同一角色（外形/服装）、场景、光照与画风，"
+                "表现为上一画面之后紧接着发生的动作或运镜。"
+                "prompt 必须明确要求画面中**不出现任何文字**：无字幕、无标题、无水印、无 logo、"
+                "无人物介绍/名牌/卡片、无时间码/时钟/HUD、无浏览器网址或 UI 叠加、无任何可读文字"
+                "（例如加 'no text, no subtitles, no captions, no watermark, no character introduction, "
+                "no timestamp, no HUD'）；"
+                "且**画面稳定一致**：场景不得无故跳变/瞬移、不得出现转场闪烁或闪帧，"
+                "光影（光源方向/色温/时间）与上一画面保持一致。")
         return ("你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
                 "写本章详细剧本描述（description）和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
                 f"{shot}\n"
@@ -921,10 +1020,12 @@ class DramaPipeline:
                 "description 用一段文字概括本章（即使包含多个分镜，也合成一段文字，不要拆成数组）；"
                 "prompt 为单个英文提示词。不要输出数组、Markdown 代码块或任何额外文字。")
 
-    async def _gen_one_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
-                               chapters: list[Chapter], lang: str = "zh", model=None) -> Chapter:
+    async def _gen_one_clip_script(self, db, project: Project, season: Season, i: int, ch: Chapter,
+                               chapters: list[Chapter], lang: str = "zh", model=None,
+                               extra_prompt: str = "") -> Chapter:
         """为第 i 章（季内序号）单独写剧本/提示词（供「按章生成」与「批量生成」复用）。
-        chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。"""
+        chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。
+        extra_prompt：人工「重新生成」时填写的补充修正要求，会作为额外指令交给 LLM 写进 prompt。"""
         llm_cfg, dt_cfg, scope = self._script_agent_context(db, project, lang)
         style = (scope.get("style") or "").strip()
         media_dir = Path(self.data_dir) / "media"
@@ -951,7 +1052,7 @@ class DramaPipeline:
                 context = "附本季封面（本季第 1 章视觉基准）：它是本季的视觉基准（角色形象/风格），请保持主角与风格与其一致。"
                 ref_img = season_cover
             elif season.number > 1:
-                prev_last = self._prev_season_last_chapter(db, project, season)
+                prev_last = self._prev_episode_last_clip(db, project, season)
                 if prev_last and prev_last.media_path:
                     context = f"上一季末章：{prev_last.description}{self._ref_score_line(prev_last)}"
                     pm = (prev_last.media_path or "").strip()
@@ -994,11 +1095,25 @@ class DramaPipeline:
                      "prompt 必须写成针对参考帧的修改指令：先用一句话点明需与参考帧保持一致的元素"
                      "（角色外形、服装、场景、画风、光照、机位），再具体描述本章的变化（新动作 / 新情节 / 新运镜）；"
                      "不要从头重新描述整个画面。")
+        if (extra_prompt or "").strip():
+            user += ("\n【人工补充修正要求（务必在 prompt 中落实，修正以下画面问题）】"
+                     + extra_prompt.strip())
         prompt_content: str | list = [ImageUrl(url=ref_uri), user] if ref_uri else user
         data = (await agent.run(prompt_content)).output
         ch.description = data.description
         ch.prompt = data.prompt
+        # 注意：剧本生成**不写时长**（ch.seconds 保持用户设定；0 = 跟随配置/预设上限）。
         return ch
+
+    def _max_seconds(self, dt_cfg) -> int:
+        """单片段时长上限（秒）：配置的 max_seconds（0=不限→内置 10 秒硬上限）。"""
+        try:
+            cap = int(getattr(dt_cfg, "max_seconds", 0) or 0)
+        except (TypeError, ValueError):
+            cap = 0
+        if cap > 0:
+            return min(cap, MAX_VIDEO_SECONDS)
+        return MAX_VIDEO_SECONDS
 
     def _ref_score_line(self, ch: Chapter) -> str:
         """参考章节评分内容：参考章已评分时，把 VLM 分值+评语附进参考上下文，
@@ -1019,7 +1134,7 @@ class DramaPipeline:
                 "4) 画面质量（清晰度、构图、色调、无明显畸变 / 伪影）；5) 与上一章画面内容是否连贯。"
                 "除 JSON 外不要输出任何文字。")
 
-    async def _score_chapter(self, db, project: Project, season: Season, ch: Chapter,
+    async def _score_clip(self, db, project: Project, season: Season, ch: Chapter,
                              model) -> tuple[int, str]:
         """自动评分：对本章已生成的视频（抽末帧）打 0-100 分，返回 (分数, 评语)。"""
         style = ((project.scope or {}).get("style") or "").strip()
@@ -1030,33 +1145,36 @@ class DramaPipeline:
                 f"整体风格：{style}\n"
                 f"全局提示词：{gprompt}")
         media = (ch.media_path or "").strip()
-        prompt: str | list = user + "\n生成视频缺失，请打 0 分并在 note 说明原因。"
-        if media and Path(media).is_file():
-            ext = Path(media).suffix.lower()
-            if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
-                frame = media
-            else:
-                frame = await run_sync(extract_last_frame, media, Path(self.data_dir) / "media")
-            if frame and Path(frame).is_file():
-                prompt = [ImageUrl(url=image_data_uri(frame)),
-                          user + "\n请对附带的视频末帧画面评分（标准见系统提示词）。输出 JSON：score（0-100 整数）与 note（一句话评语）。"]
+        if not (media and Path(media).is_file()):
+            raise ValueError("本章还没有生成视频，无法评分")
+        ext = Path(media).suffix.lower()
+        if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            frame = media
+        else:
+            # 视频抽末帧（需 ffmpeg）；取不到帧时**跳过评分并报错**，
+            # 绝不退回「视频缺失→打 0 分」，否则会误判低分触发反复重做。
+            frame = await run_sync(extract_last_frame, media, Path(self.data_dir) / "media")
+        if not (frame and Path(frame).is_file()):
+            raise ValueError("无法读取本章视频帧用于评分（需安装 ffmpeg 抽取末帧）；已跳过自动评分")
+        prompt = [ImageUrl(url=image_data_uri(frame)),
+                  user + "\n请对附带的视频末帧画面评分（标准见系统提示词）。输出 JSON：score（0-100 整数）与 note（一句话评语）。"]
         agent = make_agent(model, self._score_system(project), output_type=ScoreOut)
         async with agent:
             data = (await agent.run(prompt)).output
         score = max(0, min(100, int(data.score or 0)))
         return score, (data.note or "").strip()[:300]
 
-    async def vlm_score_chapter(self, db, project: Project, season: Season, index: int,
+    async def vlm_score_clip(self, db, project: Project, season: Season, index: int,
                                 lang: str = "zh") -> tuple[int, str]:
         """VLM 自动评分：对季内第 index 章调用 VLM 重新评分（与流水线自动评分同款，视频抽末帧），
         落库分值 + 评语。无生成视频 / VLM 评分失败 → ValueError（前端提示）。"""
-        ch = self._season_chapters(db, project, season)[index]
+        ch = self._episode_clips(db, project, season)[index]
         media = (ch.media_path or "").strip()
         if not (media and Path(media).is_file()):
             raise ValueError("本章还没有生成视频，无法 VLM 评分")
         try:
             model = build_model(self._llm_cfg(db, project, lang))
-            score, note = await self._score_chapter(db, project, season, ch, model)
+            score, note = await self._score_clip(db, project, season, ch, model)
         except ValueError:
             raise
         except Exception as e:
@@ -1069,18 +1187,19 @@ class DramaPipeline:
     async def step_generate(self, db, project: Project, season: Season,
                              indices: list[int] | None = None,
                              lang: str = "zh", progress_cb=None,
-                             chapter_done_cb=None, score_cb=None, cancel_event=None) -> Project:
+                             chapter_done_cb=None, score_cb=None, cancel_event=None,
+                             extra_prompt: str = "") -> Project:
         """逐章生成画面（季内）：每章跑完整 2 步——① (重新)生成出图提示词/描述/分辨率 ② 生图/生视频。
         开启「自动评分」时追加第 3 步：0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）。
         score_cb(ch, score, phase, rd)：评分事件回调（phase=scoring/redo/result；score=None 表示进行中）。
         indices: 季内章节序号列表（0 起）；None=该季全部章节。
         季内第 1 章参考：开启「本季封面作为第 1 章参考」→ 本季封面；否则非第一季→上一季末章，第一季→无参考（文生图）。
-        其余章沿用上一章媒体。"""
+        其余章沿用上一章媒体。extra_prompt：人工重新生成时填写的补充修正要求（仅单章生成透传）。"""
         dt = self._clients(db, project, lang)
         if cancel_event is not None:
             dt.cancel_event = cancel_event  # 协作式取消：正在跑的生图/生视频尽快停止
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
-        chapters = self._season_chapters(db, project, season)
+        chapters = self._episode_clips(db, project, season)
         if indices is None:
             targets = list(enumerate(chapters))
         else:
@@ -1092,23 +1211,28 @@ class DramaPipeline:
                 if progress_cb:
                     await progress_cb(pos, len(targets), ch.title)
                 # 自动评分：生成画面后按 0-100 评分；低于阈值且开启「低分自动重做」→ 重新生成（最多 MAX_SCORE_REDO 次）
+                # 「低于阈值停止生成」为独立开关：某章低于阈值即停止本批后续生成（0=关闭）
                 auto_score = bool(project.auto_score)
                 auto_redo = bool(project.auto_redo)
+                stop_on_low = bool(project.stop_on_low)
                 rounds = 1 + MAX_SCORE_REDO if (auto_score and auto_redo) else 1
+                stop_batch = False
+                scored_ok = False
                 score_min = int(project.score_min or 60)
                 for rd in range(rounds):
                     if rd:
                         # 上一轮评分低于阈值 → 重做（重新生成提示词 + 视频）
                         if score_cb:
                             await score_cb(ch, None, "redo", rd)
-                    await self._gen_one_script(db, project, season, i, ch, chapters, lang, model=model)
+                    await self._gen_one_clip_script(db, project, season, i, ch, chapters, lang, model=model,
+                                               extra_prompt=extra_prompt)
                     # 第 2 步：生图 / 生视频（参考上一章图；季内第 1 章参考上一季末章）
                     if i == 0:
                         season_cover = (season.first_image or "").strip()
                         if season.cover_as_first_ref and season_cover and Path(season_cover).is_file():
                             ref = season_cover
                         elif season.number > 1:
-                            prev_last = self._prev_season_last_chapter(db, project, season)
+                            prev_last = self._prev_episode_last_clip(db, project, season)
                             ref = prev_last.media_path if (prev_last and prev_last.media_path) else ""
                         else:
                             ref = ""
@@ -1116,14 +1240,19 @@ class DramaPipeline:
                         prev = chapters[i - 1]
                         ref = prev.media_path if (prev and prev.media_path) else ""
                     try:
-                        # 分辨率统一跟随总体设定（不再按章覆盖）
+                        # 分辨率统一跟随总体设定（不再按章覆盖）；本章秒数（>0）覆盖配置上限
                         w = int(project.res_width or 0)
                         h = int(project.res_height or 0)
                         params = {}
                         if w and h:
                             params = {"width": w, "height": h}
+                        sec = int(getattr(ch, "seconds", 0) or 0)
+                        if sec > 0:
+                            params["seconds"] = sec
+                        # 提示词追加「无文字/字幕/人物介绍」安全网
+                        gen_prompt = (ch.prompt or "").strip() + _VIDEO_NO_TEXT_SUFFIX
                         ch.media_path = await run_sync(
-                            partial(dt.generate_video, ch.prompt, ref_video_path=ref, params=params))
+                            partial(dt.generate_video, gen_prompt, ref_video_path=ref, params=params))
                         ch.status = "done"
                         ch.error = ""
                         ch.width = w
@@ -1137,20 +1266,30 @@ class DramaPipeline:
                     if score_cb:
                         await score_cb(ch, None, "scoring", rd)
                     try:
-                        score, note = await self._score_chapter(db, project, season, ch, model)
+                        score, note = await self._score_clip(db, project, season, ch, model)
                         ch.score, ch.score_note = score, note
-                    except Exception:
-                        ch.score, ch.score_note = 0, ""  # 评分失败不阻塞流程
+                        scored_ok = True
+                    except Exception as e:
+                        ch.score, ch.score_note = 0, str(e)[:300]  # 评分失败不阻塞流程（并说明原因，不重做）
                         db.commit()
                         break  # 评分失败：不重做（避免拿不到分时反复重生成）
                     db.commit()
                     if score_cb:
                         await score_cb(ch, (ch.score or 0), (ch.score_note or ""), rd)
-                    if (ch.score or 0) >= score_min or rd == rounds - 1:
-                        break  # 达到阈值，或重做次数用尽：本章完成
+                    if (ch.score or 0) >= score_min:
+                        break  # 达到阈值：本章完成
+                if auto_score and scored_ok and (ch.score or 0) < score_min and stop_on_low:
+                    # 「低于阈值停止生成」：本章低于阈值 → 停止本批后续生成
+                    stop_batch = True
+                    if score_cb:
+                        await score_cb(ch, (ch.score or 0), "stopped", rd)
                 if chapter_done_cb:
                     await chapter_done_cb(ch)
                 db.commit()  # 逐章提交：停止/中断时已完成章节不丢失
+                if stop_batch:
+                    logger.warning("第 %s 章评分 %d 低于阈值 %d，按「低于阈值停止」自动停止后续生成",
+                                   ch.index + 1, ch.score or 0, score_min)
+                    break
         finally:
             # 异常中断（如用户停止）时尽可能提交当前进度（已完成章节 + 本章已有结果）
             try:
@@ -1164,21 +1303,29 @@ class DramaPipeline:
         return project
 
     # ---------------- 章节字段保存（提示词） ----------------
-    def save_chapter_fields(self, db, project: Project, season: Season, index: int, prompt: str) -> Project:
-        """手动编辑季内第 index 章的出图提示词（分辨率统一按总体设定，不再按章覆盖）。"""
-        ch = self._season_chapters(db, project, season)[index]
+    def save_clip_fields(self, db, project: Project, season: Season, index: int, prompt: str,
+                            seconds: int | None = None) -> Project:
+        """手动编辑季内第 index 章的出视频提示词与时长（分辨率统一按总体设定，不再按章覆盖）。
+        时长钳制到 [0, 生效上限]（0 = 跟随配置/预设上限）。"""
+        ch = self._episode_clips(db, project, season)[index]
         ch.prompt = (prompt or "").strip()
+        if seconds is not None:
+            try:
+                cap = self._max_seconds(self._configs(db, project, "zh")[1])
+            except Exception:
+                cap = MAX_VIDEO_SECONDS
+            ch.seconds = max(0, min(int(seconds), cap))
         db.commit()
         self._save(db, project)
         return project
 
     # ---------------- 章节增 / 删 / 排序（季内） ----------------
-    def add_chapter(self, db, project: Project, season: Season) -> Chapter:
+    def add_clip(self, db, project: Project, season: Season) -> Chapter:
         """在该季末尾新增一章（标题/主题摘要留空）。"""
-        chapters = self._season_chapters(db, project, season)
-        base = self._season_base_index(db, project, season) + len(chapters)
+        chapters = self._episode_clips(db, project, season)
+        base = self._episode_base_index(db, project, season) + len(chapters)
         ch = Chapter(project_id=project.id, season_id=season.id,
-                     index=base, title="新章节", summary="")
+                     index=base, title="新片段", summary="")
         db.add(ch)
         db.commit()
         self._reindex_flat(db, project)
@@ -1186,9 +1333,9 @@ class DramaPipeline:
         self._save(db, project)
         return ch
 
-    def delete_chapter(self, db, project: Project, season: Season, index: int) -> Project:
+    def delete_clip(self, db, project: Project, season: Season, index: int) -> Project:
         """删除季内第 index 章（连同清理其媒体文件），其余章节重新编号。"""
-        chapters = self._season_chapters(db, project, season)
+        chapters = self._episode_clips(db, project, season)
         ch = chapters[index]
         self._rm_media(ch.media_path)
         db.delete(ch)
@@ -1198,9 +1345,44 @@ class DramaPipeline:
         self._save(db, project)
         return project
 
-    def move_chapter(self, db, project: Project, season: Season, index: int, direction: str) -> Project:
+    def delete_clips(self, db, project: Project, season: Season,
+                     indices: list[int] | None = None) -> Project:
+        """批量删除季内片段（连同清理其媒体文件），其余片段重新编号。
+        indices=None 表示删除该季全部片段（保留季本身）。"""
+        chapters = self._episode_clips(db, project, season)
+        targets = list(enumerate(chapters)) if indices is None else \
+            [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
+        for _, ch in targets:
+            self._rm_media(ch.media_path)
+            db.delete(ch)
+        db.commit()
+        self._reindex_flat(db, project)
+        db.commit()
+        self._save(db, project)
+        return project
+
+    def clear_clips(self, db, project: Project, season: Season,
+                       indices: list[int] | None = None) -> Project:
+        """清空季内章节的产物：清掉出图/出视频提示词、评分与已生成画面/视频（删除媒体文件、重置状态）。
+        保留标题 / 摘要 / 剧本描述等文字。indices=None 表示该季全部章节。"""
+        chapters = self._episode_clips(db, project, season)
+        targets = list(enumerate(chapters)) if indices is None else \
+            [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
+        for _, ch in targets:
+            self._rm_media(ch.media_path)
+            ch.media_path = ""
+            ch.prompt = ""
+            ch.score = 0
+            ch.score_note = ""
+            ch.status = "pending"
+            ch.error = ""
+        db.commit()
+        self._save(db, project)
+        return project
+
+    def move_clip(self, db, project: Project, season: Season, index: int, direction: str) -> Project:
         """上移 / 下移季内第 index 章（direction: up/down），交换后重新编号。"""
-        chapters = self._season_chapters(db, project, season)
+        chapters = self._episode_clips(db, project, season)
         j = index - 1 if direction == "up" else index + 1
         if not (0 <= j < len(chapters)) or j == index:
             return project
@@ -1243,7 +1425,7 @@ class DramaPipeline:
         if b.is_file() and b.resolve() != d.resolve():
             shutil.copy(b, d)
 
-    def set_season_cover_ref(self, db, project: Project, season: Season, enabled: bool) -> Season:
+    def set_episode_cover_ref(self, db, project: Project, season: Season, enabled: bool) -> Season:
         """设置是否把季封面作为本季第 1 章参考。"""
         season.cover_as_first_ref = bool(enabled)
         season.updated_at = _now()
@@ -1272,7 +1454,7 @@ class DramaPipeline:
         self._save(db, project)
         return project
 
-    def overlay_season_first_image_title(self, db, project: Project, season: Season,
+    def overlay_episode_first_image_title(self, db, project: Project, season: Season,
                                          lang: str = "zh", opts: dict | None = None) -> Season:
         """把季名叠加到现有季封面上（每次从原图重绘，反复调整不叠加）；文件就地覆写，不重新生图。"""
         path = (season.first_image or "").strip()
@@ -1283,7 +1465,7 @@ class DramaPipeline:
         if base:
             season.first_image_base = base
             self._restore_base(path, base)
-        self._overlay_title(Path(path), self._season_label(season, lang), **(opts or {}))
+        self._overlay_title(Path(path), self._episode_label(season, lang), **(opts or {}))
         season.updated_at = _now()
         self._save(db, project)
         return season
@@ -1375,7 +1557,8 @@ class DramaPipeline:
         scope = project.scope or {}
         system = ("你是封面美术提示词作者。请结合一句话创意、风格、故事大纲与角色设定，"
                   "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
-                  "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（作品名由程序叠加）。")
+                  "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
+                  "（作品名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
         agent = make_agent(build_model(llm_cfg), system)
         user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
         if (project.arc or "").strip():
@@ -1395,7 +1578,7 @@ class DramaPipeline:
         h = int(project.res_height or 0)
         params = {"width": w, "height": h} if (w and h) else {}
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
-        path = await run_sync(partial(dt.generate_image, prompt, params=params))
+        path = await run_sync(partial(dt.generate_image, prompt + _VIDEO_NO_TEXT_SUFFIX, params=params))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"first_{project.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
@@ -1413,7 +1596,7 @@ class DramaPipeline:
         return project
 
     # ---------------- 季封面 ----------------
-    def set_season_first_image_path(self, db, project: Project, season: Season, path: str) -> Season:
+    def set_episode_first_image_path(self, db, project: Project, season: Season, path: str) -> Season:
         """记录季封面路径（文件已由调用方落盘到 data/media），并把该图存为原图（叠字每次从原图重绘）。"""
         season.first_image = (path or "").strip()
         season.first_image_base = self._snapshot_base(season.first_image)
@@ -1422,12 +1605,12 @@ class DramaPipeline:
         return season
 
     @staticmethod
-    def _season_label(season: Season, lang: str = "zh") -> str:
-        """季名展示：有季名用季名，否则回退「第N季 / Season N」."""
-        return (season.title or "").strip() or L(lang, f"第{season.number}季",
-                                                  f"Season {season.number}")
+    def _episode_label(season: Season, lang: str = "zh") -> str:
+        """集名展示：有集名用集名，否则回退「第N集 / Episode N」."""
+        return (season.title or "").strip() or L(lang, f"第{season.number}集",
+                                                  f"Episode {season.number}")
 
-    async def generate_season_first_image(self, db, project: Project, season: Season,
+    async def generate_episode_first_image(self, db, project: Project, season: Season,
                                           prompt: str = "", lang: str = "zh",
                                           include_title: bool = True) -> Season:
         """用 DrawThings 生成季封面（文生图）。
@@ -1443,13 +1626,14 @@ class DramaPipeline:
         scope = project.scope or {}
         system = ("你是封面美术提示词作者。请结合一句话创意、风格、角色设定与本季标题/大纲/新增角色，"
                   "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
-                  "只输出提示词文本。不要包含任何文字/标题/字母渲染要求（季名由程序叠加）。")
+                  "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
+                  "（季名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
         agent = make_agent(build_model(llm_cfg), system)
         user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
         chars_text = chars_to_text(chars_from_raw(project.characters))
         if chars_text:
             user += f"\n核心角色：{chars_text}"
-        user += f"\n本季：{self._season_label(season, lang)}"
+        user += f"\n本季：{self._episode_label(season, lang)}"
         if (season.arc or "").strip():
             user += f"\n季大纲：{season.arc.strip()}"
         s_chars_text = chars_to_text(chars_from_raw(season.characters))
@@ -1467,7 +1651,7 @@ class DramaPipeline:
         h = int(project.res_height or 0)
         params = {"width": w, "height": h} if (w and h) else {}
         # Draw Things 生图为同步阻塞调用：放线程池，避免长时间占用事件循环
-        path = await run_sync(partial(dt.generate_image, prompt, params=params))
+        path = await run_sync(partial(dt.generate_image, prompt + _VIDEO_NO_TEXT_SUFFIX, params=params))
         media_dir = Path(self.data_dir) / "media"
         dest = media_dir / f"seasonfirst_{season.id}{Path(path).suffix or '.png'}"
         if Path(path).resolve() != dest.resolve():
@@ -1479,7 +1663,7 @@ class DramaPipeline:
             self._rm_media(old_base)
         if include_title:
             # 勾选「包含标题」：生成后用 PIL 叠加季名（纯本地快速操作，无需进线程池）
-            self._overlay_title(dest, self._season_label(season, lang))
+            self._overlay_title(dest, self._episode_label(season, lang))
         season.first_image = str(dest)
         season.updated_at = _now()
         self._save(db, project)
@@ -1492,7 +1676,7 @@ class DramaPipeline:
     def export_zip(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:
         """导出 ZIP：大纲/角色/各章剧本文本 + 媒体（图/视频）+ 首图。
         season 非空时仅导出该季章节（文件名带 S<季号> 后缀）。返回 (zip 绝对路径, 文件名)。"""
-        chapters = self._season_chapters(db, project, season) if season is not None else self._load_chapters(db, project)
+        chapters = self._episode_clips(db, project, season) if season is not None else self._load_chapters(db, project)
         scope = project.scope or {}
         export_dir = Path(self.data_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -1511,8 +1695,8 @@ class DramaPipeline:
             cover_lines.append(f"项目封面：media/00_first_{Path(project.first_image).name}")
         for s in seasons_all:
             if s.first_image and Path(s.first_image).is_file():
-                cover_lines.append(f"第{s.number}季封面：media/00_first_S{s.number}_{Path(s.first_image).name}")
-        scope_line = (f"导出范围：第{season.number}季" + (f"（{season.title}）" if season.title else "") + "\n") if season is not None else ""
+                cover_lines.append(f"第{s.number}集封面：media/00_first_S{s.number}_{Path(s.first_image).name}")
+        scope_line = (f"导出范围：第{season.number}集" + (f"（{season.title}）" if season.title else "") + "\n") if season is not None else ""
         readme = (
             f"标题：{project.title}\n类型：{project.kind}\n一句话创意：{project.origin}\n"
             + scope_line +
@@ -1536,15 +1720,36 @@ class DramaPipeline:
             for i, ch in enumerate(chapters):
                 chap_txt = (
                     f"标题：{ch.title}\n主题摘要：{ch.summary}\n剧本：{ch.description}\n"
-                    f"提示词：{ch.prompt}\n分辨率：{ch.width}×{ch.height}\n媒体：{ch.media_path}\n"
+                    f"提示词：{ch.prompt}\n分辨率：{ch.width}×{ch.height}\n时长：{ch.seconds or 0} 秒\n媒体：{ch.media_path}\n"
                 )
-                z.writestr(f"chapters/{i:02d}.txt", chap_txt.encode("utf-8"))
+                z.writestr(f"clips/{i:02d}.txt", chap_txt.encode("utf-8"))
                 if ch.media_path and Path(ch.media_path).is_file():
                     z.write(ch.media_path, f"media/{i:02d}_{Path(ch.media_path).name}")
         return str(zpath), fname
 
+    def export_video(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:
+        """把各章已生成的视频按章序首尾相接，合成为一段 mp4（短剧导出）。
+        season 非空时仅合成该季章节。返回 (mp4 绝对路径, 文件名)。
+        无可用视频时抛 ValueError（供接口转 400 提示）。"""
+        chapters = self._episode_clips(db, project, season) if season is not None else self._load_chapters(db, project)
+        clips = [ch.media_path for ch in chapters
+                 if (ch.media_path or "").strip() and Path(ch.media_path).is_file()
+                 and Path(ch.media_path).suffix.lower() in (".mp4", ".mov", ".webm", ".m4v")]
+        if not clips:
+            raise ValueError("本集还没有可合成的视频（请先生成片段视频）")
+        export_dir = Path(self.data_dir) / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        base = f"{self._safe_name(project)}_{project.id}"
+        if season is not None:
+            base = f"{base}_S{season.number}"
+        fname = f"{base}.mp4"
+        out = export_dir / fname
+        if not concat_videos(clips, out):
+            raise ValueError("合成视频失败（需要可用的 ffmpeg，或视频文件损坏）")
+        return str(out), fname
+
     def export_pdf(self, db, project: Project, season: Season | None = None) -> tuple[str, str]:
-        """短剧为视频，不支持导出 PDF（可导出 ZIP）；保留同名方法供调度门面统一调用。"""
-        raise ValueError("短剧为视频，暂不支持导出 PDF（可导出 ZIP）")
+        """短剧为视频，不支持导出 PDF（请用「合成视频」）；保留同名方法供调度门面统一调用。"""
+        raise ValueError("短剧为视频，请使用「合成视频」导出（不再支持 PDF）")
 
 

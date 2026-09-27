@@ -18,7 +18,10 @@ __all__ = [
 
 
 class Pipeline:
-    """调度门面：按 project.kind（comic / drama）把每个请求路由到对应流水线。"""
+    """调度门面：按 project.kind（comic / drama）把每个请求路由到对应流水线。
+
+    漫画用「月/章」命名（Season/Chapter），短剧用「集/片段」命名（Episode/Clip）；
+    两条线方法名可能不同，故按 kind 显式分发（不改动任何模型 / 数据库 / 路由契约）。"""
 
     def __init__(self, data_dir):
         self.comic = ComicPipeline(data_dir)
@@ -28,6 +31,10 @@ class Pipeline:
     def _of(self, project):
         """按项目类型取流水线实例。"""
         return self.comic if (project.kind or "") == "comic" else self.drama
+
+    @staticmethod
+    def _is_comic(project) -> bool:
+        return (project.kind or "") == "comic"
 
     # ---------------- 不带项目的方法 ----------------
     def get(self, db, project_id: str):
@@ -64,42 +71,62 @@ class Pipeline:
         return self._of(project).unlock_project(db, project, lang=lang)
 
     def ensure_first_season(self, db, project):
-        return self._of(project).ensure_first_season(db, project)
+        comic = self._is_comic(project)
+        if comic:
+            return self.comic.ensure_first_season(db, project)
+        return self.drama.ensure_first_episode(db, project)
 
     def add_season(self, db, project, title: str = ""):
-        return self._of(project).add_season(db, project, title=title)
+        if self._is_comic(project):
+            return self.comic.add_season(db, project, title=title)
+        return self.drama.add_episode(db, project, title=title)
 
     def _get_season(self, db, project, season_id: str):
-        return self._of(project)._get_season(db, project, season_id)
+        if self._is_comic(project):
+            return self.comic._get_season(db, project, season_id)
+        return self.drama._get_episode(db, project, season_id)
 
     def save_season(self, db, project, season, **kwargs):
-        return self._of(project).save_season(db, project, season, **kwargs)
+        if self._is_comic(project):
+            return self.comic.save_season(db, project, season, **kwargs)
+        return self.drama.save_episode(db, project, season, **kwargs)
 
     def delete_season(self, db, project, season_id: str):
-        return self._of(project).delete_season(db, project, season_id)
+        if self._is_comic(project):
+            return self.comic.delete_season(db, project, season_id)
+        return self.drama.delete_episode(db, project, season_id)
 
     def step_arc(self, db, project, lang: str = "zh",
                  res_width: int = 0, res_height: int = 0, extra_prompt: str = ""):
         return self._of(project).step_arc(db, project, lang, res_width, res_height, extra_prompt)
 
     def step_season_arc(self, db, project, season, lang: str = "zh", extra_prompt: str = ""):
-        return self._of(project).step_season_arc(db, project, season, lang, extra_prompt)
+        if self._is_comic(project):
+            return self.comic.step_season_arc(db, project, season, lang, extra_prompt)
+        return self.drama.step_episode_arc(db, project, season, lang, extra_prompt)
 
     def step_season_chars(self, db, project, season, lang: str = "zh", extra_prompt: str = ""):
-        return self._of(project).step_season_chars(db, project, season, lang, extra_prompt)
+        if self._is_comic(project):
+            return self.comic.step_season_chars(db, project, season, lang, extra_prompt)
+        return self.drama.step_episode_chars(db, project, season, lang, extra_prompt)
 
     def step_chars(self, db, project, lang: str = "zh", extra_prompt: str = ""):
         return self._of(project).step_chars(db, project, lang, extra_prompt)
 
     def step_chapters(self, db, project, season, lang: str = "zh",
                       count_min: int = 0, count_max: int = 0):
-        return self._of(project).step_chapters(db, project, season, lang, count_min, count_max)
+        if self._is_comic(project):
+            return self.comic.step_chapters(db, project, season, lang, count_min, count_max)
+        return self.drama.step_clips(db, project, season, lang, count_min, count_max)
 
     def step_chapters_stream(self, db, project, season, lang: str = "zh",
                              count_min: int = 0, count_max: int = 0, indices: list | None = None,
                              progress_cb=None, chapter_done_cb=None):
-        return self._of(project).step_chapters_stream(db, project, season, lang, count_min,
-                                                      count_max, indices, progress_cb, chapter_done_cb)
+        if self._is_comic(project):
+            return self.comic.step_chapters_stream(db, project, season, lang, count_min,
+                                                   count_max, indices, progress_cb, chapter_done_cb)
+        return self.drama.step_clips_stream(db, project, season, lang, count_min,
+                                            count_max, indices, progress_cb, chapter_done_cb)
 
     def step_generate(self, db, project, season, indices: list | None = None,
                       lang: str = "zh", progress_cb=None, chapter_done_cb=None, score_cb=None):
@@ -107,22 +134,34 @@ class Pipeline:
                                                progress_cb, chapter_done_cb, score_cb)
 
     def _season_chapters(self, db, project, season):
-        return self._of(project)._season_chapters(db, project, season)
+        if self._is_comic(project):
+            return self.comic._season_chapters(db, project, season)
+        return self.drama._episode_clips(db, project, season)
 
     def save_chapter_fields(self, db, project, season, index: int, prompt: str):
-        return self._of(project).save_chapter_fields(db, project, season, index, prompt)
+        if self._is_comic(project):
+            return self.comic.save_chapter_fields(db, project, season, index, prompt)
+        return self.drama.save_clip_fields(db, project, season, index, prompt)
 
     async def vlm_score_chapter(self, db, project, season, index: int, lang: str = "zh"):
-        return await self._of(project).vlm_score_chapter(db, project, season, index, lang)
+        if self._is_comic(project):
+            return await self.comic.vlm_score_chapter(db, project, season, index, lang)
+        return await self.drama.vlm_score_clip(db, project, season, index, lang)
 
     def add_chapter(self, db, project, season):
-        return self._of(project).add_chapter(db, project, season)
+        if self._is_comic(project):
+            return self.comic.add_chapter(db, project, season)
+        return self.drama.add_clip(db, project, season)
 
     def delete_chapter(self, db, project, season, index: int):
-        return self._of(project).delete_chapter(db, project, season, index)
+        if self._is_comic(project):
+            return self.comic.delete_chapter(db, project, season, index)
+        return self.drama.delete_clip(db, project, season, index)
 
     def move_chapter(self, db, project, season, index: int, direction: str):
-        return self._of(project).move_chapter(db, project, season, index, direction)
+        if self._is_comic(project):
+            return self.comic.move_chapter(db, project, season, index, direction)
+        return self.drama.move_clip(db, project, season, index, direction)
 
     def set_first_image_path(self, db, project, path: str):
         return self._of(project).set_first_image_path(db, project, path)
@@ -132,21 +171,29 @@ class Pipeline:
         return self._of(project).generate_first_image(db, project, prompt, lang, include_title)
 
     def set_season_first_image_path(self, db, project, season, path: str):
-        return self._of(project).set_season_first_image_path(db, project, season, path)
+        if self._is_comic(project):
+            return self.comic.set_season_first_image_path(db, project, season, path)
+        return self.drama.set_episode_first_image_path(db, project, season, path)
 
     def generate_season_first_image(self, db, project, season, prompt: str = "",
                                     lang: str = "zh", include_title: bool = True):
-        return self._of(project).generate_season_first_image(db, project, season, prompt, lang, include_title)
+        if self._is_comic(project):
+            return self.comic.generate_season_first_image(db, project, season, prompt, lang, include_title)
+        return self.drama.generate_episode_first_image(db, project, season, prompt, lang, include_title)
 
     def overlay_first_image_title(self, db, project, lang: str = "zh", opts: dict | None = None):
         return self._of(project).overlay_first_image_title(db, project, lang, opts)
 
     def set_season_cover_ref(self, db, project, season, enabled: bool):
-        return self._of(project).set_season_cover_ref(db, project, season, enabled)
+        if self._is_comic(project):
+            return self.comic.set_season_cover_ref(db, project, season, enabled)
+        return self.drama.set_episode_cover_ref(db, project, season, enabled)
 
     def overlay_season_first_image_title(self, db, project, season, lang: str = "zh",
                                          opts: dict | None = None):
-        return self._of(project).overlay_season_first_image_title(db, project, season, lang, opts)
+        if self._is_comic(project):
+            return self.comic.overlay_season_first_image_title(db, project, season, lang, opts)
+        return self.drama.overlay_episode_first_image_title(db, project, season, lang, opts)
 
     def set_char_image(self, db, project, char_id: str, path: str):
         return self._of(project).set_char_image(db, project, char_id, path)
@@ -162,3 +209,6 @@ class Pipeline:
 
     def export_pdf(self, db, project, season=None):
         return self._of(project).export_pdf(db, project, season)
+
+    def export_video(self, db, project, season=None):
+        return self._of(project).export_video(db, project, season)

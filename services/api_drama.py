@@ -16,7 +16,6 @@ from db import get_db
 from i18n import L
 from models import Chapter, Project, ProjectJob, Season
 from config_store import ConfigStore
-from services.drawthings import norm_ref_flag
 from services.pipeline import _now, chars_from_raw
 from services.runtime import pipeline
 from services import events as E
@@ -41,43 +40,37 @@ def _drama_project(db: Session, project_id: str, lang: str) -> Project:
 
 @router.post("")
 async def drama_create(request: Request, db: Session = Depends(get_db)):
-    """新建短剧创作：标题 + 主题（一句话）→ 短剧流水线。"""
+    """新建短剧创作（简化）：仅需 **模型（LLM 配置）** 与 **项目名称**。
+    名称同时作为初始标题与创作主题（seed）；正式标题由「生成大纲」一并产出；
+    DrawThings 配置取全局默认（未设则留空，可在项目「设置」中补选）。"""
     lang = _lang(request)
     body = await _json_body(request)
-    origin = str(body.get("origin") or "").strip()
-    if not origin:
+    name = str(body.get("name") or "").strip()
+    if not name:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "主题不能为空", "The idea (origin) cannot be empty"))
-    style = str(body.get("style_custom") or "").strip() or str(body.get("style") or "").strip()
+                            detail=L(lang, "项目名称不能为空", "Project name cannot be empty"))
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(str(body.get("llm_config_id") or ""))
-    dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
-    if not llm_cfg or not dt_cfg:
+    if not llm_cfg:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择有效的 VLM 与 DrawThings 配置",
-                                     "Please select valid VLM and DrawThings configs"))
-    # 功能级模型：项目侧自选；留空 = 跟随 DrawThings 配置里的模型（两边都空才拒绝）
-    dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
-    dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
-    # 功能级参考图开关：缺省 = 跟随配置；显式 0/1 = 覆盖
-    dt_ref_image = norm_ref_flag(body.get("dt_ref_image"))
-    dt_ref_video = norm_ref_flag(body.get("dt_ref_video"))
-    if not dt_model_video and not (dt_cfg.model_video or ""):
+                            detail=L(lang, "请选择有效的模型配置",
+                                     "Please select a valid model (LLM) config"))
+    # DrawThings 配置：显式指定 > 全局默认 > 首个可用配置（新建表单不再手选，项目可在「设置」中更换）
+    dt_id = str(body.get("drawthings_config_id") or "").strip()
+    if not dt_id:
+        dt_id = str(cs.get_settings().get("default_dt_config_id") or "").strip()
+    dt_cfg = cs.get_drawthing(dt_id) if dt_id else None
+    if dt_cfg is None:
+        dt_items = cs.list_drawthing()
+        if dt_items:
+            dt_cfg = dt_items[0]
+    if dt_cfg is None:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择出视频模型（DrawThings 配置里也未设置模型）",
-                                     "Please pick a video model (none set in the Draw Things config)"))
-    project = pipeline.drama.create(db, "drama", origin, llm_cfg.id, dt_cfg.id,
-                                    style=style, title=str(body.get("title") or "").strip()[:200])
-    if dt_model_image:
-        project.dt_model_image = dt_model_image
-    if dt_model_video:
-        project.dt_model_video = dt_model_video
-    if dt_ref_image is not None:
-        project.dt_ref_image = "1" if dt_ref_image else "0"
-    if dt_ref_video is not None:
-        project.dt_ref_video = "1" if dt_ref_video else "0"
-    if dt_model_image or dt_model_video or dt_ref_image is not None or dt_ref_video is not None:
-        db.commit()
+                            detail=L(lang, "请先在「配置管理」创建 DrawThings 配置，并在系统设置中设为默认",
+                                     "Create a DrawThings config in Config Management first (optionally set it as the default)"))
+    project = pipeline.drama.create(db, "drama", name, llm_cfg.id,
+                                    dt_cfg.id if dt_cfg else "",
+                                    style="", title=name)
     return {"id": project.id}
 
 
@@ -191,7 +184,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
     project = _drama_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    pipeline.drama.ensure_first_season(db, project)  # 保证存在第一季（旧项目懒迁移：自动建第一季并入孤儿章节）
+    pipeline.drama.ensure_first_episode(db, project)  # 保证存在第一季（旧项目懒迁移：自动建第一季并入孤儿章节）
     unknown = L(lang, "未知配置", "Unknown config")
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(project.llm_config_id)
@@ -210,7 +203,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
             "auto_score": project.auto_score or 0, "score_min": project.score_min or 60,
-            "auto_redo": project.auto_redo or 0,
+            "auto_redo": project.auto_redo or 0, "stop_on_low": project.stop_on_low or 0,
             "count_mode": project.count_mode or "range",
             "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
@@ -283,7 +276,7 @@ async def project_season_create(request: Request, project_id: str, db: Session =
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
-    season = pipeline.drama.add_season(db, project, title=str(body.get("title") or ""))
+    season = pipeline.drama.add_episode(db, project, title=str(body.get("title") or ""))
     return {"id": season.id, "number": season.number, "title": season.title or ""}
 
 
@@ -297,9 +290,9 @@ async def project_season_update(request: Request, project_id: str, season_id: st
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
-    season = pipeline.drama._get_season(db, project, season_id)
+    season = pipeline.drama._get_episode(db, project, season_id)
     if season is None:
-        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     raw = body.get("chapters")
     chapters = None
     if isinstance(raw, list):
@@ -312,7 +305,7 @@ async def project_season_update(request: Request, project_id: str, season_id: st
                         "description": str(c.get("description") or "")}
                        for c in raw_chars if isinstance(c, dict)]
     try:
-        pipeline.drama.save_season(
+        pipeline.drama.save_episode(
             db, project, season,
             title=body.get("title"), arc=body.get("arc"),
             characters=characters,
@@ -334,7 +327,7 @@ def project_season_delete(request: Request, project_id: str, season_id: str,
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     try:
-        pipeline.drama.delete_season(db, project, season_id)
+        pipeline.drama.delete_episode(db, project, season_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"ok": True}
@@ -354,7 +347,7 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
     season = None
     if step in ("chapters", "generate", "season_arc", "season_chars"):
         sid = str(body.get("season_id") or "")
-        season = pipeline.drama._get_season(db, project, sid) if sid else None
+        season = pipeline.drama._get_episode(db, project, sid) if sid else None
         if season is None:
             raise HTTPException(status_code=400,
                                 detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
@@ -366,16 +359,16 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
                 res_height=int(body.get("res_height") or 0),
                 extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "season_arc":
-            project = await pipeline.drama.step_season_arc(db, project, season, lang,
+            project = await pipeline.drama.step_episode_arc(db, project, season, lang,
                                                      extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "season_chars":
-            project = await pipeline.drama.step_season_chars(db, project, season, lang,
+            project = await pipeline.drama.step_episode_chars(db, project, season, lang,
                                                        extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "chars":
             project = await pipeline.drama.step_chars(db, project, lang,
                                                 extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "chapters":
-            project = await pipeline.drama.step_chapters(
+            project = await pipeline.drama.step_clips(
                 db, project, season, lang,
                 count_min=int(body.get("count_min") or 0),
                 count_max=int(body.get("count_max") or 0))
@@ -411,7 +404,7 @@ async def project_action_stream(request: Request, project_id: str, db: Session =
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
@@ -489,24 +482,29 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                                      "score": ch.score or 0, "score_note": ch.score_note or ""}))
 
     async def score_cb(ch, score, note, rd):
-        # 自动评分事件：score 为 None 时 note 携带阶段（scoring/redo），为数字时是评分结果
-        phase = "result" if score is not None else str(note or "")
+        # 自动评分事件：score 为 None 时 note 携带阶段（scoring/redo）；为数字时是评分结果
+        note = note or ""
+        phase = str(note) if score is None else "result"
+        if note == "stopped":
+            phase = "stopped"  # 低于阈值停止生成（score 仍为该章分数）
         await queue.put((E.SCORE, {"index": ch.index, "title": ch.title or "",
                                     "score": score,
-                                    "note": (note or "") if score is not None else "",
+                                    "note": "" if (score is None or note == "stopped") else note,
                                     "phase": phase, "redo": rd}))
 
     async def plan_cb(ch):
-        # 章节规划：单章规划完成 → 回传标题/摘要/状态，前端逐个补入
+        # 章节规划：单章规划完成 → 回传标题/摘要/时长/状态，前端逐个补入
         await queue.put((E.CHAPTER, {"index": ch.index, "title": ch.title or "",
-                                     "summary": ch.summary or "", "status": ch.status}))
+                                     "summary": ch.summary or "",
+                                     "seconds": int(getattr(ch, "seconds", 0) or 0),
+                                     "status": ch.status}))
 
     async def _run():
         try:
             if step == "chapters":
                 raw = body.get("indices")
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全季重规划
-                await pipeline.drama.step_chapters_stream(
+                await pipeline.drama.step_clips_stream(
                     db, project, season, lang=lang,
                     count_min=int(body.get("count_min") or 0),
                     count_max=int(body.get("count_max") or 0),
@@ -518,7 +516,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                 # VLM 批量评分：逐章评分（季内），单章失败不阻塞后续章节（error 阶段事件单独提示）
                 raw = body.get("indices")
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全季
-                chapters = pipeline.drama._season_chapters(db, project, season)
+                chapters = pipeline.drama._episode_clips(db, project, season)
                 targets = list(enumerate(chapters)) if indices is None \
                     else [(i, chapters[i]) for i in indices if 0 <= i < len(chapters)]
                 for pos, (i, ch) in enumerate(targets, start=1):
@@ -526,7 +524,7 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                     await progress_cb(pos, len(targets), ch.title)
                     await score_cb(ch, None, "scoring", 0)
                     try:
-                        score, note = await pipeline.drama.vlm_score_chapter(db, project, season, i, lang)
+                        score, note = await pipeline.drama.vlm_score_clip(db, project, season, i, lang)
                     except ValueError as e:
                         await queue.put((E.SCORE, {"index": ch.index, "title": ch.title or "",
                                                     "score": None, "note": str(e), "phase": "error", "redo": 0}))
@@ -628,17 +626,18 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
-    chapters = pipeline.drama._season_chapters(db, project, season)
+    chapters = pipeline.drama._episode_clips(db, project, season)
     if not (0 <= index < len(chapters)):
-        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "片段不存在", "Clip not found"))
     job, control = _new_project_job(db, project, "single")
     try:
         project = await pipeline.drama.step_generate(db, project, season, indices=[index], lang=lang,
-                                                     cancel_event=control.event)
+                                                     cancel_event=control.event,
+                                                     extra_prompt=str(body.get("extra_prompt") or ""))
         _finish_project_job(db, job, "done")
     except JobCancelled:
         _finish_project_job(db, job, "cancelled")
@@ -646,8 +645,8 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
     except Exception as e:
         _finish_project_job(db, job, "error", str(e))
         raise HTTPException(status_code=400,
-                             detail=L(lang, f"【生成第{index+1}章】失败：{e}",
-                                      f"[Generate chapter {index+1}] failed: {e}"))
+                             detail=L(lang, f"【生成本集第{index+1}段】失败：{e}",
+                                      f"[Generate clip {index+1}] failed: {e}"))
     finally:
         jobs.pop(job.id)
     return {"ok": True}
@@ -664,15 +663,15 @@ async def project_chapter_score(request: Request, project_id: str, index: int,
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     sid = str(body.get("season_id") or "")
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
-    chapters = pipeline.drama._season_chapters(db, project, season)
+    chapters = pipeline.drama._episode_clips(db, project, season)
     if not (0 <= index < len(chapters)):
-        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "片段不存在", "Clip not found"))
     try:
-        score, note = await pipeline.drama.vlm_score_chapter(db, project, season, index, lang)
+        score, note = await pipeline.drama.vlm_score_clip(db, project, season, index, lang)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
     return {"ok": True, "score": score, "note": note}
@@ -689,14 +688,21 @@ async def project_edit(request: Request, project_id: str, index: int,
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
-    chapters = pipeline.drama._season_chapters(db, project, season)
+    chapters = pipeline.drama._episode_clips(db, project, season)
     if not (0 <= index < len(chapters)):
-        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    pipeline.drama.save_chapter_fields(db, project, season, index, str(body.get("prompt") or ""))
+        raise HTTPException(status_code=404, detail=L(lang, "片段不存在", "Clip not found"))
+    def _int_or_none(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    pipeline.drama.save_clip_fields(db, project, season, index,
+                                       str(body.get("prompt") or ""),
+                                       seconds=_int_or_none(body.get("seconds")))
     return {"ok": True}
 
 
@@ -711,11 +717,11 @@ async def project_chapter_add(request: Request, project_id: str, db: Session = D
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
-    pipeline.drama.add_chapter(db, project, season)
+    pipeline.drama.add_clip(db, project, season)
     return {"ok": True}
 
 
@@ -734,14 +740,79 @@ async def project_chapter_delete(request: Request, project_id: str, index: int, 
             sid = str(body.get("season_id") or "")
         except Exception:
             pass
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
-    chapters = pipeline.drama._season_chapters(db, project, season)
+    chapters = pipeline.drama._episode_clips(db, project, season)
     if not (0 <= index < len(chapters)):
-        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    pipeline.drama.delete_chapter(db, project, season, index)
+        raise HTTPException(status_code=404, detail=L(lang, "片段不存在", "Clip not found"))
+    pipeline.drama.delete_clip(db, project, season, index)
+    return {"ok": True}
+
+
+@router.post("/{project_id}/chapters/delete-batch")
+async def project_chapters_delete_batch(request: Request, project_id: str,
+                                        db: Session = Depends(get_db)):
+    """批量删除季内片段（连同清理媒体文件），其余片段重新编号。body 需 season_id；
+    indices 可选（季内序号列表，缺省=删除该季全部片段）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _drama_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    sid = str(body.get("season_id") or "")
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    raw = body.get("indices")
+    indices = None if raw is None else [int(i) for i in raw]
+    pipeline.drama.delete_clips(db, project, season, indices)
+    return {"ok": True}
+
+
+@router.post("/{project_id}/chapters/clear")
+async def project_chapters_clear(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """批量清空季内章节产物（产物/出图提示词/评分）。body 需 season_id；
+    indices 可选（季内序号列表，缺省=该季全部章节）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _drama_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    sid = str(body.get("season_id") or "")
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    raw = body.get("indices")
+    indices = None if raw is None else [int(i) for i in raw]
+    pipeline.drama.clear_clips(db, project, season, indices)
+    return {"ok": True}
+
+
+@router.post("/{project_id}/chapters/{index}/clear")
+async def project_chapter_clear(request: Request, project_id: str, index: int,
+                                db: Session = Depends(get_db)):
+    """清空季内第 index 章的产物（产物/出图提示词/评分）。body 需 season_id。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _drama_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    sid = str(body.get("season_id") or "")
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline.drama._episode_clips(db, project, season)
+    if not (0 <= index < len(chapters)):
+        raise HTTPException(status_code=404, detail=L(lang, "片段不存在", "Clip not found"))
+    pipeline.drama.clear_clips(db, project, season, [index])
     return {"ok": True}
 
 
@@ -756,14 +827,14 @@ async def project_chapter_move(request: Request, project_id: str, index: int,
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
-    season = pipeline.drama._get_season(db, project, sid) if sid else None
+    season = pipeline.drama._get_episode(db, project, sid) if sid else None
     if season is None:
         raise HTTPException(status_code=400,
                              detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
-    chapters = pipeline.drama._season_chapters(db, project, season)
+    chapters = pipeline.drama._episode_clips(db, project, season)
     if not (0 <= index < len(chapters)):
-        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
-    pipeline.drama.move_chapter(db, project, season, index, str(body.get("direction") or ""))
+        raise HTTPException(status_code=404, detail=L(lang, "片段不存在", "Clip not found"))
+    pipeline.drama.move_clip(db, project, season, index, str(body.get("direction") or ""))
     return {"ok": True}
 
 
@@ -823,9 +894,9 @@ def season_first_image_upload(request: Request, project_id: str, season_id: str,
     project = _drama_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    season = pipeline.drama._get_season(db, project, season_id)
+    season = pipeline.drama._get_episode(db, project, season_id)
     if season is None:
-        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     _ensure_not_finished(project, lang)
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
@@ -840,7 +911,7 @@ def season_first_image_upload(request: Request, project_id: str, season_id: str,
                                      "Please upload an image file (png/jpg/webp/gif)"))
     dest = MEDIA_DIR / f"seasonfirst_{season.id}{ext}"
     dest.write_bytes(data)
-    pipeline.drama.set_season_first_image_path(db, project, season, str(dest))
+    pipeline.drama.set_episode_first_image_path(db, project, season, str(dest))
     return {"ok": True, "url": _media_url(str(dest))}
 
 
@@ -853,12 +924,12 @@ async def season_first_image_generate(request: Request, project_id: str, season_
     project = _drama_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    season = pipeline.drama._get_season(db, project, season_id)
+    season = pipeline.drama._get_episode(db, project, season_id)
     if season is None:
-        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     _ensure_not_finished(project, lang)
     try:
-        season = await pipeline.drama.generate_season_first_image(db, project, season,
+        season = await pipeline.drama.generate_episode_first_image(db, project, season,
                                                             str(body.get("prompt") or ""),
                                                             lang=lang,
                                                             include_title=bool(body.get("include_title", True)))
@@ -896,12 +967,12 @@ async def season_cover_ref(request: Request, project_id: str, season_id: str,
     project = _drama_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    season = pipeline.drama._get_season(db, project, season_id)
+    season = pipeline.drama._get_episode(db, project, season_id)
     if season is None:
-        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     _ensure_not_finished(project, lang)
     enabled = bool(body.get("enabled"))
-    pipeline.drama.set_season_cover_ref(db, project, season, enabled)
+    pipeline.drama.set_episode_cover_ref(db, project, season, enabled)
     return {"ok": True, "enabled": enabled}
 
 
@@ -914,12 +985,12 @@ async def season_first_image_overlay_title(request: Request, project_id: str, se
     project = _drama_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    season = pipeline.drama._get_season(db, project, season_id)
+    season = pipeline.drama._get_episode(db, project, season_id)
     if season is None:
-        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     _ensure_not_finished(project, lang)
     try:
-        season = pipeline.drama.overlay_season_first_image_title(db, project, season, lang, _overlay_opts(body))
+        season = pipeline.drama.overlay_episode_first_image_title(db, project, season, lang, _overlay_opts(body))
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【叠加季名】失败：{e}", f"[Overlay season name] failed: {e}"))
@@ -1019,7 +1090,7 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
             count_mode=body.get("count_mode"), count_min=body.get("count_min"),
             count_max=body.get("count_max"),
             auto_score=body.get("auto_score"), score_min=body.get("score_min"),
-            auto_redo=body.get("auto_redo"))
+            auto_redo=body.get("auto_redo"), stop_on_low=body.get("stop_on_low"))
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"保存大纲失败：{e}", f"Save outline failed: {e}"))
@@ -1037,9 +1108,9 @@ def project_export_zip(request: Request, project_id: str, season_id: str | None 
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     season = None
     if season_id:
-        season = pipeline.drama._get_season(db, project, season_id)
+        season = pipeline.drama._get_episode(db, project, season_id)
         if season is None:
-            raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+            raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     try:
         path, fname = pipeline.drama.export_zip(db, project, season)
     except Exception as e:
@@ -1048,10 +1119,10 @@ def project_export_zip(request: Request, project_id: str, season_id: str | None 
     return FileResponse(path, filename=fname, media_type="application/zip")
 
 
-@router.get("/{project_id}/export/pdf")
-def project_export_pdf(request: Request, project_id: str, season_id: str | None = None,
-                        preview: int = 0, db: Session = Depends(get_db)):
-    """导出 PDF（漫画：各章图片按序拼成多页；短剧/无图 → 400）；season_id 非空时仅导出该季章节。
+@router.get("/{project_id}/export/video")
+def project_export_video(request: Request, project_id: str, season_id: str | None = None,
+                          preview: int = 0, db: Session = Depends(get_db)):
+    """合成视频导出（短剧）：把该季各章视频按章序首尾相接为一段 mp4。
     preview=1：以 inline 返回（浏览器新标签直接预览，不触发下载）。"""
     lang = _lang(request)
     project = _drama_project(db, project_id, lang)
@@ -1059,17 +1130,28 @@ def project_export_pdf(request: Request, project_id: str, season_id: str | None 
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
     season = None
     if season_id:
-        season = pipeline.drama._get_season(db, project, season_id)
+        season = pipeline.drama._get_episode(db, project, season_id)
         if season is None:
-            raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
+            raise HTTPException(status_code=404, detail=L(lang, "集不存在", "Episode not found"))
     try:
-        path, fname = pipeline.drama.export_pdf(db, project, season)
+        path, fname = pipeline.drama.export_video(db, project, season)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
     except Exception as e:
         raise HTTPException(status_code=400,
-                             detail=L(lang, f"导出 PDF 失败：{e}", f"Export PDF failed: {e}"))
-    # preview=1 用 inline（浏览器直接渲染）；统一走 Starlette 的 filename 处理
-    #（非 ASCII 自动 UTF-8 百分号编码 filename*=utf-8''，中文文件名不会 500）
-    return FileResponse(path, media_type="application/pdf", filename=fname,
+                             detail=L(lang, f"合成视频失败：{e}", f"Compose video failed: {e}"))
+    return FileResponse(path, media_type="video/mp4", filename=fname,
                         content_disposition_type="inline" if preview else "attachment")
+
+
+@router.get("/{project_id}/export/pdf")
+def project_export_pdf(request: Request, project_id: str, season_id: str | None = None,
+                        preview: int = 0, db: Session = Depends(get_db)):
+    """短剧不再支持 PDF：一律 400，提示改用「合成视频」。保留路由以兼容旧调用。"""
+    lang = _lang(request)
+    project = _drama_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    msg = L(lang, "短剧为视频，请使用「合成视频」导出（不再支持 PDF）",
+            "Drama is video; use \"Compose video\" to export (PDF is no longer supported).")
+    raise HTTPException(status_code=400, detail=msg)

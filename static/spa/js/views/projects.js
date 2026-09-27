@@ -67,10 +67,10 @@ Views.projects = {
                      :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
       <!-- 新建弹框：漫画 / 短剧完全分开，各自独立组件 -->
-      <el-dialog v-model="newComicDlg" :title="I18N.t('proj.newDlgComic')" width="880px">
+      <el-dialog v-model="newComicDlg" :title="I18N.t('proj.newDlgComic')" width="560px">
         <create-form-comic @created="created" />
       </el-dialog>
-      <el-dialog v-model="newDramaDlg" :title="I18N.t('proj.newDlgDrama')" width="880px">
+      <el-dialog v-model="newDramaDlg" :title="I18N.t('proj.newDlgDrama')" width="560px">
         <create-form-drama @created="created" />
       </el-dialog>
 

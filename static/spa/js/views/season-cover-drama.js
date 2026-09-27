@@ -14,12 +14,12 @@ Views.dramaSeasonCover = {
   template: `
     <el-card class="first-card" shadow="never">
       <template #header>
-        <b>{{ I18N.t('p.seasonCover') }}</b>
-        <span class="muted small" style="margin-left: 8px;">{{ I18N.t('p.seasonCoverHint') }}</span>
+        <b>{{ I18N.t('d.epCover') }}</b>
+        <span class="muted small" style="margin-left: 8px;">{{ I18N.t('d.epCoverHint') }}</span>
       </template>
       <div class="first-row">
         <div class="first-preview">
-          <img v-if="season.first_image_url" :src="season.first_image_url" :alt="I18N.t('p.seasonCover')"
+          <img v-if="season.first_image_url" :src="season.first_image_url" :alt="I18N.t('d.epCover')"
                loading="lazy" decoding="async" @click="$emit('preview', season.first_image_url)">
           <el-empty v-else :description="I18N.t('p.noSeasonCover')" :image-size="54" />
         </div>
@@ -36,11 +36,11 @@ Views.dramaSeasonCover = {
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>
-            <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('p.seasonGenPromptPh')"
+            <el-input :model-value="prompt" type="textarea" :rows="2" :placeholder="I18N.t('d.epCoverPromptPh')"
                       @update:modelValue="(v) => $emit('update:prompt', v)" />
           </div>
           <div class="frow">
-            <el-checkbox v-model="coverRef" :disabled="locked" @change="onCoverRefChange">{{ I18N.t('p.seasonCoverAsFirstRef') }}</el-checkbox>
+            <el-checkbox v-model="coverRef" :disabled="locked" @change="onCoverRefChange">{{ I18N.t('d.epCoverRef') }}</el-checkbox>
           </div>
         </div>
       </div>

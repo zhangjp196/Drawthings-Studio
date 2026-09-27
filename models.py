@@ -57,7 +57,7 @@ class DrawThingConfig(Base):
     model_image = Column(String(200), default="")        # 图像模型文件名（可空）
     model_video = Column(String(200), default="")        # 视频模型文件名（可空）
     max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随预设）
-    max_seconds = Column(Integer, default=8)             # 视频最大时长（秒，0=用内置上限 8s；实际时长可由生成请求决定，不超过上限）
+    max_seconds = Column(Integer, default=10)            # 视频最大时长（秒，1–10；0=用内置上限 10s。实际时长由请求决定，不超过上限）
     ref_image = Column(Integer, default=0)               # 图像模型支持参考图片（图生图）；0=纯文生图
     ref_video = Column(Integer, default=0)               # 视频模型支持参考图片（图生视频）；0=纯文生视频
     created_at = Column(String(40), default=_now)
@@ -98,9 +98,10 @@ class Project(Base):
     count_mode = Column(String(10), default="range")       # 章节数量模式（遗留字段，仅范围；现按季存于 Season）
     count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
     count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
-    auto_score = Column(Integer, default=1)                # 自动评分：每章画面生成后按 0–100 评分（1=开启）
+    auto_score = Column(Integer, default=0)                # 自动评分：每章画面生成后按 0–100 评分（0=关闭，默认；手动点「评分」）
     score_min = Column(Integer, default=60)                # 评分阈值：低于该分且开启自动重做 → 重新生成
-    auto_redo = Column(Integer, default=1)                 # 低分自动重做：1=开启（最多重做 2 次）
+    auto_redo = Column(Integer, default=0)                 # 低分自动重做：0=关闭（默认）
+    stop_on_low = Column(Integer, default=0)               # 低于阈值停止生成：某章低于 score_min 时停止本批后续生成（0=关闭，默认）
     first_image = Column(String(500), default="")          # 封面路径（作品封面：列表缩略图/导出封面）
     first_image_base = Column(String(500), default="")     # 封面原图（无叠字）：叠字每次从原图重绘，反复调整不叠加
     created_at = Column(String(40), default=_now)
@@ -154,6 +155,7 @@ class Chapter(Base):
     prompt = Column(Text, default="")                      # 出图/出视频提示词
     width = Column(Integer, default=0)                     # 智能体决定的具体分辨率宽（0=跟随 app）
     height = Column(Integer, default=0)                    # 智能体决定的具体分辨率高（0=跟随 app）
+    seconds = Column(Integer, default=0)                   # 短剧：本章视频时长（秒；0=用配置上限/预设）
     ref_path = Column(String(500), default="")             # 参考（上一张图/上一视频末帧）
     media_path = Column(String(500), default="")           # 生成的图/视频路径
     status = Column(String(10), default="pending")         # pending|done|error
@@ -183,6 +185,7 @@ class MicroWork(Base):
     dt_ref_image = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_ref_video = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
     score_mode = Column(String(10), default="image")         # 自动评分依据：image=仅画面（忽略提示词）| prompt=结合提示词相符度
+    auto_score = Column(Integer, default=0)                  # 生成后自动评分：0=关闭（默认，手动点「评分」），1=开启
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     sessions = relationship("MicroSession", back_populates="work",

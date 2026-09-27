@@ -20,7 +20,8 @@ Views.comicChapterToolbar = {
     progressText: { type: String, default: '' },
     allSelected: { type: Boolean, default: false },
   },
-  emits: ['plan', 'save-plan', 'update:scoreFilter', 'toggle-all', 'gen-all', 'score-all', 'stop'],
+  emits: ['plan', 'save-plan', 'update:scoreFilter', 'toggle-all', 'gen-all', 'score-all', 'clear-all',
+          'plan-selected', 'delete-selected', 'stop'],
   template: `
     <div class="ch-toolbar">
       <div class="ch-tb-row">
@@ -41,6 +42,7 @@ Views.comicChapterToolbar = {
           <el-option v-for="o in scoreFilterOptions" :key="o.value" :label="o.label" :value="o.value" />
         </el-select>
         <el-checkbox :model-value="allSelected" @change="$emit('toggle-all')">{{ I18N.t('p.selAll') }}</el-checkbox>
+        <span class="ch-tb-sep"></span>
         <el-popconfirm :title="I18N.t('p.genAllConfirm')" @confirm="$emit('gen-all')">
           <template #reference>
             <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!hasChapters || locked">
@@ -60,6 +62,30 @@ Views.comicChapterToolbar = {
         </el-button>
         <span class="muted small" v-if="hasChapters">{{ I18N.t('p.progress', doneCount, total) }}</span>
         <span class="muted small" v-if="progressText">{{ progressText }}</span>
+      </div>
+      <div class="ch-tb-row">
+        <span class="ch-tb-cap">{{ I18N.t('p.batchOps') }}</span>
+        <el-popconfirm :title="selectedCount ? I18N.t('p.clearAllConfirmSel', selectedCount) : I18N.t('p.clearAllConfirm')" @confirm="$emit('clear-all')">
+          <template #reference>
+            <el-button size="small" type="warning" plain :disabled="!hasChapters || locked">
+              {{ selectedCount ? I18N.t('p.clearAllSel', selectedCount) : I18N.t('p.clearAll') }}
+            </el-button>
+          </template>
+        </el-popconfirm>
+        <el-popconfirm :title="I18N.t('p.replanSelConfirm', selectedCount)" @confirm="$emit('plan-selected')">
+          <template #reference>
+            <el-button size="small" type="success" plain :disabled="!selectedCount || locked">
+              {{ I18N.t('p.replanSelBtn', selectedCount) }}
+            </el-button>
+          </template>
+        </el-popconfirm>
+        <el-popconfirm :title="I18N.t('p.delSelConfirm', selectedCount)" @confirm="$emit('delete-selected')">
+          <template #reference>
+            <el-button size="small" type="danger" plain :disabled="!selectedCount || locked">
+              {{ I18N.t('p.delSelBtn', selectedCount) }}
+            </el-button>
+          </template>
+        </el-popconfirm>
       </div>
     </div>
   `,

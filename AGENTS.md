@@ -19,6 +19,14 @@
   不要往共享层塞类型特有逻辑。
 - 微创作（`/micro`）是第三条独立的轻量线（`services/api_micro.py` + `micro_agent.py`）。
 
+## 短剧术语（drama 专用）
+- 短剧线把「章」称为 **片段（clip）**、把「季」称为 **集（episode）**；漫画线仍用「章 / 季」。
+- 仅改**短剧线**的方法名 / 局部标识 / 前端组件与文案；**不改共享层**：
+  - 模型 `Season` / `Chapter`、数据库表 `seasons` / `chapters`、列 `season_id`、路由 `/seasons/*`、`/chapters/*`、
+    JSON 字段 `season_id` / `index`、SSE 事件名 `chapter` 等**全部保持不变**（漫画线共用）。
+  - `services/pipeline.py` 门面按 `kind` 显式分发（comic 用 章/季 方法名，drama 用 片段/集 方法名），避免耦合。
+- 文案：短剧专属字串放在 i18n 的 **`d.*`** 命名空间；漫画继续用 `p.*`，不要改共享 `p.*` 的值去适配短剧。
+
 ## 分层
 - `main.py` 只做 app 装配、配置/健康检查/SPA 外壳；业务路由在 `services/api_*.py`。
 - 业务逻辑在 `services/pipeline_*.py` / `services/micro_agent.py`；不要在路由里写业务。

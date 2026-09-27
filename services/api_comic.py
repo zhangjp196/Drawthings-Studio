@@ -16,7 +16,6 @@ from db import get_db
 from i18n import L
 from models import Chapter, Project, ProjectJob, Season
 from config_store import ConfigStore
-from services.drawthings import norm_ref_flag
 from services.pipeline import _now, chars_from_raw
 from services.runtime import pipeline
 from services import events as E
@@ -41,37 +40,37 @@ def _comic_project(db: Session, project_id: str, lang: str) -> Project:
 
 @router.post("")
 async def comic_create(request: Request, db: Session = Depends(get_db)):
-    """新建漫画创作：标题 + 主题（一句话）→ 漫画流水线。"""
+    """新建漫画创作（简化）：仅需 **模型（LLM 配置）** 与 **项目名称**。
+    名称同时作为初始标题与创作主题（seed）；正式标题由「生成大纲」一并产出；
+    DrawThings 配置取全局默认（未设则留空，可在项目「设置」中补选）。"""
     lang = _lang(request)
     body = await _json_body(request)
-    origin = str(body.get("origin") or "").strip()
-    if not origin:
+    name = str(body.get("name") or "").strip()
+    if not name:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "主题不能为空", "The idea (origin) cannot be empty"))
-    style = str(body.get("style_custom") or "").strip() or str(body.get("style") or "").strip()
+                            detail=L(lang, "项目名称不能为空", "Project name cannot be empty"))
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(str(body.get("llm_config_id") or ""))
-    dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
-    if not llm_cfg or not dt_cfg:
+    if not llm_cfg:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择有效的 VLM 与 DrawThings 配置",
-                                     "Please select valid VLM and DrawThings configs"))
-    # 功能级模型：项目侧自选；留空 = 跟随 DrawThings 配置里的模型（两边都空才拒绝）
-    dt_model_image = str(body.get("dt_model_image") or "").strip()[:200]
-    # 功能级参考图开关：缺省 = 跟随配置；显式 0/1 = 覆盖
-    dt_ref_image = norm_ref_flag(body.get("dt_ref_image"))
-    if not dt_model_image and not (dt_cfg.model_image or ""):
+                            detail=L(lang, "请选择有效的模型配置",
+                                     "Please select a valid model (LLM) config"))
+    # DrawThings 配置：显式指定 > 全局默认 > 首个可用配置（新建表单不再手选，项目可在「设置」中更换）
+    dt_id = str(body.get("drawthings_config_id") or "").strip()
+    if not dt_id:
+        dt_id = str(cs.get_settings().get("default_dt_config_id") or "").strip()
+    dt_cfg = cs.get_drawthing(dt_id) if dt_id else None
+    if dt_cfg is None:
+        dt_items = cs.list_drawthing()
+        if dt_items:
+            dt_cfg = dt_items[0]
+    if dt_cfg is None:
         raise HTTPException(status_code=400,
-                            detail=L(lang, "请选择出图模型（DrawThings 配置里也未设置模型）",
-                                     "Please pick an image model (none set in the Draw Things config)"))
-    project = pipeline.comic.create(db, "comic", origin, llm_cfg.id, dt_cfg.id,
-                                    style=style, title=str(body.get("title") or "").strip()[:200])
-    if dt_model_image:
-        project.dt_model_image = dt_model_image
-    if dt_ref_image is not None:
-        project.dt_ref_image = "1" if dt_ref_image else "0"
-    if dt_model_image or dt_ref_image is not None:
-        db.commit()
+                            detail=L(lang, "请先在「配置管理」创建 DrawThings 配置，并在系统设置中设为默认",
+                                     "Create a DrawThings config in Config Management first (optionally set it as the default)"))
+    project = pipeline.comic.create(db, "comic", name, llm_cfg.id,
+                                    dt_cfg.id if dt_cfg else "",
+                                    style="", title=name)
     return {"id": project.id}
 
 
@@ -204,7 +203,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
             "auto_score": project.auto_score or 0, "score_min": project.score_min or 60,
-            "auto_redo": project.auto_redo or 0,
+            "auto_redo": project.auto_redo or 0, "stop_on_low": project.stop_on_low or 0,
             "count_mode": project.count_mode or "range",
             "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
@@ -483,11 +482,14 @@ async def _project_action_stream(db: Session, project: Project, season: Season,
                                      "score": ch.score or 0, "score_note": ch.score_note or ""}))
 
     async def score_cb(ch, score, note, rd):
-        # 自动评分事件：score 为 None 时 note 携带阶段（scoring/redo），为数字时是评分结果
-        phase = "result" if score is not None else str(note or "")
+        # 自动评分事件：score 为 None 时 note 携带阶段（scoring/redo）；为数字时是评分结果
+        note = note or ""
+        phase = str(note) if score is None else "result"
+        if note == "stopped":
+            phase = "stopped"  # 低于阈值停止生成（score 仍为该章分数）
         await queue.put((E.SCORE, {"index": ch.index, "title": ch.title or "",
                                     "score": score,
-                                    "note": (note or "") if score is not None else "",
+                                    "note": "" if (score is None or note == "stopped") else note,
                                     "phase": phase, "redo": rd}))
 
     async def plan_cb(ch):
@@ -632,7 +634,8 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
     job, control = _new_project_job(db, project, "single")
     try:
         project = await pipeline.comic.step_generate(db, project, season, indices=[index], lang=lang,
-                                                     cancel_event=control.event)
+                                                     cancel_event=control.event,
+                                                     extra_prompt=str(body.get("extra_prompt") or ""))
         _finish_project_job(db, job, "done")
     except JobCancelled:
         _finish_project_job(db, job, "cancelled")
@@ -739,6 +742,71 @@ async def project_chapter_delete(request: Request, project_id: str, index: int, 
     return {"ok": True}
 
 
+@router.post("/{project_id}/chapters/delete-batch")
+async def project_chapters_delete_batch(request: Request, project_id: str,
+                                        db: Session = Depends(get_db)):
+    """批量删除季内章节（连同清理媒体文件），其余章节重新编号。body 需 season_id；
+    indices 可选（季内序号列表，缺省=删除该季全部章节）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _comic_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    sid = str(body.get("season_id") or "")
+    season = pipeline.comic._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    raw = body.get("indices")
+    indices = None if raw is None else [int(i) for i in raw]
+    pipeline.comic.delete_chapters(db, project, season, indices)
+    return {"ok": True}
+
+
+@router.post("/{project_id}/chapters/clear")
+async def project_chapters_clear(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """批量清空季内章节产物（产物/出图提示词/评分）。body 需 season_id；
+    indices 可选（季内序号列表，缺省=该季全部章节）。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _comic_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    sid = str(body.get("season_id") or "")
+    season = pipeline.comic._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    raw = body.get("indices")
+    indices = None if raw is None else [int(i) for i in raw]
+    pipeline.comic.clear_chapters(db, project, season, indices)
+    return {"ok": True}
+
+
+@router.post("/{project_id}/chapters/{index}/clear")
+async def project_chapter_clear(request: Request, project_id: str, index: int,
+                                db: Session = Depends(get_db)):
+    """清空季内第 index 章的产物（产物/出图提示词/评分）。body 需 season_id。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _comic_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    _ensure_not_finished(project, lang)
+    sid = str(body.get("season_id") or "")
+    season = pipeline.comic._get_season(db, project, sid) if sid else None
+    if season is None:
+        raise HTTPException(status_code=400,
+                             detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
+    chapters = pipeline.comic._season_chapters(db, project, season)
+    if not (0 <= index < len(chapters)):
+        raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
+    pipeline.comic.clear_chapters(db, project, season, [index])
+    return {"ok": True}
+
+
 @router.post("/{project_id}/chapters/{index}/move")
 async def project_chapter_move(request: Request, project_id: str, index: int,
                                 db: Session = Depends(get_db)):
@@ -763,7 +831,7 @@ async def project_chapter_move(request: Request, project_id: str, index: int,
 
 # ---------------- 封面 / 大纲 ----------------
 @router.post("/{project_id}/first-image")
-def project_first_image_upload(request: Request, project_id: str, file: UploadFile = File(...),
+async def project_first_image_upload(request: Request, project_id: str, file: UploadFile = File(...),
                                db: Session = Depends(get_db)):
     """上传封面（作品封面；可选作为第 1 章参考图）。"""
     lang = _lang(request)
@@ -1013,7 +1081,7 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
             count_mode=body.get("count_mode"), count_min=body.get("count_min"),
             count_max=body.get("count_max"),
             auto_score=body.get("auto_score"), score_min=body.get("score_min"),
-            auto_redo=body.get("auto_redo"))
+            auto_redo=body.get("auto_redo"), stop_on_low=body.get("stop_on_low"))
     except Exception as e:
         raise HTTPException(status_code=400,
                              detail=L(lang, f"保存大纲失败：{e}", f"Save outline failed: {e}"))

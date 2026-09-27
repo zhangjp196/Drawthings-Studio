@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'plan-dialog': Views.comicPlanDialog, 'cfg-dialog': Views.comicCfgDialog, 'reset-dialog': Views.comicResetDialog },
+  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog, 'reset-dialog': Views.comicResetDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -24,9 +24,6 @@ Views.projectComic = {
           <el-button :disabled="locked" @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
           <el-button :disabled="locked" @click="openReset">{{ I18N.t('p.reset') }}</el-button>
           <el-button @click="router.push(backTo())">{{ I18N.t('p.back') }}</el-button>
-          <el-popconfirm :title="I18N.t('proj.delConfirm')" @confirm="del">
-            <template #reference><el-button type="danger" plain>{{ I18N.t('p.del') }}</el-button></template>
-          </el-popconfirm>
         </div>
       </div>
 
@@ -66,6 +63,7 @@ Views.projectComic = {
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subStory') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'score' }" @click="oSub = 'score'">{{ I18N.t('p.subScore') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'finish' }" @click="oSub = 'finish'">{{ I18N.t('p.subFinish') }}</button>
         </nav>
         <div class="subtabs-body">
@@ -79,6 +77,9 @@ Views.projectComic = {
                     <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
                   <el-form label-position="top">
+                    <el-form-item :label="I18N.t('p.outTitle')" class="out-title">
+                      <el-input v-model="oTitle" size="large" maxlength="100" :placeholder="I18N.t('p.outTitlePh')" @blur="saveTitle" />
+                    </el-form-item>
                     <el-form-item :label="I18N.t('p.outStyle')">
                       <el-input v-model="oStyle" :placeholder="scope.style || ''" />
                     </el-form-item>
@@ -106,14 +107,6 @@ Views.projectComic = {
                           <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
                         </template>
                         <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
-                      </div>
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.scoreAuto')">
-                      <div class="res-row">
-                        <el-checkbox v-model="oScore">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
-                        <el-checkbox v-model="oRedo" :disabled="!oScore">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
-                        <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
-                        <el-input-number v-model="oScoreMin" :min="0" :max="100" size="small" :disabled="!oScore" />
                       </div>
                     </el-form-item>
                   </el-form>
@@ -167,6 +160,30 @@ Views.projectComic = {
                     <el-button :disabled="locked" @click="addChar">{{ I18N.t('p.charAdd') }}</el-button>
                   </div>
                   <el-empty v-if="!chars.length" :description="I18N.t('p.charsEmpty')" :image-size="48" />
+                </el-card>
+                <!-- ============ 自动评分：生成后评分 / 低分重做 / 低于阈值停止生成 ============ -->
+                <el-card v-else-if="oSub === 'score'" shadow="never">
+                  <template #header><b>{{ I18N.t('p.subScore') }}</b></template>
+                  <div class="actions outline-bar">
+                    <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveScore">
+                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.outSave') }}</el-button></template>
+                    </el-popconfirm>
+                    <span class="muted" v-if="busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
+                  </div>
+                  <el-form label-position="top">
+                    <el-form-item :label="I18N.t('p.scoreAuto')">
+                      <div class="score-opts">
+                        <el-checkbox v-model="oScore">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
+                        <el-checkbox v-model="oRedo" :disabled="!oScore">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
+                        <el-checkbox v-model="oStopLow" :disabled="!oScore">{{ I18N.t('p.scoreStopLowLabel') }}</el-checkbox>
+                        <div class="res-row" style="margin: 2px 0;">
+                          <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
+                          <el-input-number v-model="oScoreMin" :min="0" :max="100" size="small" :disabled="!oScore" />
+                        </div>
+                        <div class="hint" style="margin: 2px 0 0;">{{ I18N.t('p.scoreAutoHint') }}</div>
+                      </div>
+                    </el-form-item>
+                  </el-form>
                 </el-card>
                 <!-- ============ 完结：全部季章节完成才可完结；完结后锁定，需解锁才能操作 ============ -->
                 <el-card v-else-if="oSub === 'finish'" shadow="never">
@@ -239,7 +256,8 @@ Views.projectComic = {
                        <el-input v-model="seasonTitleText" :placeholder="I18N.t('p.seasonTitlePh')" />
                      </el-form-item>
                      <el-form-item :label="I18N.t('p.seasonArc')">
-                       <el-input v-model="seasonArcText" type="textarea" :rows="8" :placeholder="I18N.t('p.seasonArcPh')" />
+                       <el-input v-model="seasonArcText" type="textarea" :rows="10" :placeholder="I18N.t('p.seasonArcPh')" />
+                       <div class="hint">{{ I18N.t('p.seasonArcHint') }}</div>
                      </el-form-item>
                    </el-form>
                 </el-card>
@@ -294,7 +312,8 @@ Views.projectComic = {
                            :done-count="seasonDoneCount" :progress-text="progress.text"
                            :all-selected="allSelected"
                            @plan="openPlanDlg" @save-plan="savePlan" @update:score-filter="setScoreFilter"
-                           @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll" @stop="stopGen" />
+                           @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll" @clear-all="clearAll"
+                           @plan-selected="planSelected" @delete-selected="deleteSelected" @stop="stopGen" />
 
           <div class="md-layout ch-work">
             <!-- 左：章节列表（专属子组件） -->
@@ -333,12 +352,13 @@ Views.projectComic = {
                   @new-config="router.push('/configs?ctype=drawthings')" />
 
       <reset-dialog v-model="resetDlg" v-model:title="rtitle" v-model:origin="rogin" v-model:style="rstyle"
-                    v-model:custom="rstyleCustom" v-model:clear="rclear" :style-presets="stylePresets"
+                    v-model:custom="rstyleCustom" :style-presets="stylePresets"
                     @save="saveReset" />
 
       <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle"
                   :busy="actBusy" @confirm="confirmGen" />
 
+      <!-- 章节规划：数量 + 方式（新增 / 重做），确认后执行 SSE 逐章规划 -->
       <plan-dialog v-model="planDlg" v-model:count="planCount" v-model:mode="planMode"
                    :title="planDlgTitle" :hint="planModeHint" :busy="actBusy" @confirm="confirmPlan" />
 
@@ -479,6 +499,7 @@ Views.projectComic = {
     }
 
     // 大纲表单
+    const oTitle = ref('');        // 作品标题（放大输入，随「生成大纲」一并生成）
     const arcText = ref('');
     const oStyle = ref('');
     const chars = ref([]);       // 角色设定：[{id, name, description, image_url}]（id 为空 = 未保存的新角色）
@@ -489,6 +510,7 @@ Views.projectComic = {
     const oScore = ref(true);
     const oScoreMin = ref(60);
     const oRedo = ref(true);
+    const oStopLow = ref(false);
     // 分辨率：先选比例、再选固定分辨率（均为 64 的倍数；0×0 = 跟随出图端/智能体）
     const RES_RATIOS = [
       { key: '1:1',  label: 'p.ratio11',  sizes: ['512×512', '768×768', '1024×1024'] },
@@ -524,10 +546,10 @@ Views.projectComic = {
       applyRes();
     }
     function onResChange() { applyRes(); }
-    // 章节数量（固定值）与规划方式（新增/重做）
-    const planCount = ref(12);                      // 章节数量（固定值）
-    const planMode = ref('append');                 // 新增（现有章节之后新增）/ 重做（清空全部重规划 / 重写所选）
-    // 章节规划弹框（与新增章节融合）：章节数量固定值 + 方式仅在此弹框内显示
+    // 章节数量（固定值）与规划方式（新增：现有章节之后续加 / 重做：全季覆盖重规划）
+    const planCount = ref(12);
+    const planMode = ref('append');
+    // 章节规划弹框：数量 + 方式只在弹框内调整，确认后执行
     const planDlg = ref(false);
     const planDlgTitle = computed(() =>
       selected.value.length ? I18N.t('p.planSel', selected.value.length) : I18N.t('p.planChapters'));
@@ -536,8 +558,6 @@ Views.projectComic = {
       if (selected.value.length) return I18N.t('p.planSelConfirm', selected.value.length);
       return I18N.t('p.planRedoHint', planCount.value);
     });
-    function openPlanDlg() { planDlg.value = true; }
-    function confirmPlan() { planDlg.value = false; planChapters(); }
 
     // 整部作品完结：locked = 已完结（status=done，锁定只读）；finishRows = 各季完成进度
     const locked = computed(() => (data.value?.project.status) === 'done');
@@ -621,12 +641,12 @@ Views.projectComic = {
     const rogin = ref('');
     const rstyle = ref('');
     const rstyleCustom = ref('');   // 风格选「自定义」时的描述
-    const rclear = ref(false);
     // 与「新建创作」一致的风格预设下拉
     const stylePresets = computed(() => [0, 1, 2, 3, 4, 5].map(i => I18N.t('cf.preset.' + i)));
 
     function syncOutlineForm() {
       const p = data.value.project;
+      oTitle.value = p.title || '';
       arcText.value = p.arc || '';
       oStyle.value = (p.scope || {}).style || '';
       chars.value = (p.characters || []).map(c => ({ id: c.id || '', name: c.name || '',
@@ -637,6 +657,7 @@ Views.projectComic = {
       oScore.value = !!p.auto_score;
       oScoreMin.value = p.score_min || 60;
       oRedo.value = !!p.auto_redo;
+      oStopLow.value = !!p.stop_on_low;
       // 由已存 W×H 反推比例与分辨率选项（0×0=自动；不在固定列表的旧值=自定义）
       const cur = `${oW.value}×${oH.value}`;
       const r = RES_RATIOS.find(x => x.sizes.includes(cur));
@@ -916,8 +937,10 @@ Views.projectComic = {
         ovlBusy.value = false;
       }
     }
-    async function planChapters() {
-      // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），SSE 实时逐个补入
+    async function planChapters(opts = {}) {
+      // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），SSE 实时逐个补入。
+      // 方式：append（新增）= 不清空，现有章节之后续加；replan（重做）= 未勾选=全季覆盖重规划，勾选=仅重写所选。
+      // opts.mode 覆盖弹框方式；opts.indices 非空则只规划这些已有章节（批量重新规划，不清空其它/不新增）。
       if (!seasonId.value) {
         ElementPlus.ElMessage.warning(I18N.t('p.seasonAdd'));
         return;
@@ -926,12 +949,13 @@ Views.projectComic = {
         ElementPlus.ElMessage.warning(I18N.t('p.planNeedArc'));
         return;
       }
-      // mode=append（新增）：不清空，现有章节之后续加；replan（重做）：未勾选=全季重规划，勾选=仅重写勾选
-      const sel = selected.value.slice().sort((a, b) => a - b);
+      const mode = opts.mode || planMode.value;
+      const sel = (opts.indices != null ? opts.indices.slice() : selected.value.slice()).sort((a, b) => a - b);
       const subset = sel.length > 0;
-      const isAppend = planMode.value === 'append';
+      const isAppend = mode === 'append';
       actBusy.value = true; progress.text = '';
       if (!isAppend && !subset) {
+        // 全季重做：先清空本季旧章节（媒体保留，预览重新生成），SSE 逐个补入
         data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
         cur.value = 0;
       }
@@ -949,12 +973,34 @@ Views.projectComic = {
           else if (ev === EVENTS.CHAPTER) applyChapterPlan(d);
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
-        ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
+        ElementPlus.ElMessage.success(I18N.t('p.planSaved'));
+        selected.value = [];
         await load();
       } catch (e) {
         if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { actBusy.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+    }
+    // 工具条「章节规划 / 规划所选」：弹出规划弹框（数量 + 新增/重做 选择）
+    function openPlanDlg() { planDlg.value = true; }
+    function confirmPlan() { planDlg.value = false; planChapters(); }
+    // 批量重新规划所选：仅对已选中的现有章节重写标题与摘要（保留已生成画面；不新增、不清空其它章节）
+    async function planSelected() {
+      if (!seasonId.value || !selected.value.length) return;
+      await planChapters({ mode: 'replan', indices: selected.value });
+    }
+    // 批量删除所选章节（连同媒体文件，其余章节重新编号）
+    async function deleteSelected() {
+      if (!seasonId.value || !selected.value.length) return;
+      try {
+        await API.post(`/api/comics/${props.id}/chapters/delete-batch`, {
+          season_id: seasonId.value,
+          indices: selected.value.slice().sort((a, b) => a - b),
+        });
+        ElementPlus.ElMessage.success(I18N.t('p.delSelDone'));
+        selected.value = [];
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
 
     // 分页保存：每个子页只提交自己的字段（后端 /outline 部分更新，未提交的字段不动）
@@ -970,6 +1016,15 @@ Views.projectComic = {
         busySave.value = false;
       }
     }
+    // 作品标题：失焦即保存（标题也可随「生成大纲」一并生成）
+    async function saveTitle() {
+      const t = (oTitle.value || '').trim();
+      if (t === (data.value?.project?.title || '')) return;
+      try {
+        await API.post(`/api/comics/${props.id}/rename`, { title: t });
+        if (data.value) data.value.project.title = t;
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+    }
     // 总体（全局）：只保存全局字段（风格 / 整体大纲 / 全局提示词 / 分辨率）
     function saveStory() {
       busySave.value = true;
@@ -978,7 +1033,21 @@ Views.projectComic = {
           await API.post(`/api/comics/${props.id}/outline`, {
             arc: arcText.value, style: oStyle.value, global_prompt: oGlobal.value,
             res_width: oW.value, res_height: oH.value,
+          });
+          ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
+          await load();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); }
+        finally { busySave.value = false; }
+      })();
+    }
+    // 总体（全局）：只保存「自动评分」设置
+    function saveScore() {
+      busySave.value = true;
+      (async () => {
+        try {
+          await API.post(`/api/comics/${props.id}/outline`, {
             auto_score: oScore.value, score_min: oScoreMin.value, auto_redo: oRedo.value,
+            stop_on_low: oStopLow.value,
           });
           ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
           await load();
@@ -1052,6 +1121,10 @@ Views.projectComic = {
     function applyScoreLive(d) {
       if (d.phase === 'scoring') progress.text = I18N.t('p.scoreDoing', d.title);
       else if (d.phase === 'redo') progress.text = I18N.t('p.scoreRedoDo', d.title, d.redo, 2);
+      else if (d.phase === 'stopped') {
+        progress.text = I18N.t('p.scoreStopMsg', d.title, d.score);
+        ElementPlus.ElMessage.warning(I18N.t('p.scoreStopMsg', d.title, d.score));
+      }
       else if (d.phase === 'error') {
         progress.text = I18N.t('p.scoreFailMsg', d.title, d.note);
         ElementPlus.ElMessage.warning(I18N.t('p.scoreFailMsg', d.title, d.note));
@@ -1138,6 +1211,18 @@ Views.projectComic = {
       finally { busyScoreAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
 
+    // 批量清空章节产物：勾选章节则只清它们，未勾选则清全部（清理产物/出图提示词/评分，保留标题/摘要/剧本）
+    async function clearAll() {
+      if (!seasonId.value) return;
+      try {
+        const indices = selected.value.length ? selected.value : null;
+        await API.post(`/api/comics/${props.id}/chapters/clear`, { season_id: seasonId.value, indices });
+        ElementPlus.ElMessage.success(I18N.t('p.clearedAll'));
+        selected.value = [];
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+    }
+
     // 导出作用域为当前所选季（「完成」页签仅在选定季时可用）
     // 统一走 API.download：浏览器 = 常规下载；CS 桌面客户端 = 系统「另存为」对话框
     async function exportMedia(fmt) {
@@ -1185,7 +1270,6 @@ Views.projectComic = {
       } else {
         rstyle.value = ''; rstyleCustom.value = '';
       }
-      rclear.value = false;
       resetDlg.value = true;
     }
     async function saveReset() {
@@ -1197,7 +1281,6 @@ Views.projectComic = {
         await API.post(`/api/comics/${props.id}/reset`, {
           title: rtitle.value, origin: rogin.value,
           style: rstyle.value === 'custom' ? rstyleCustom.value.trim() : rstyle.value,
-          clear_downstream: rclear.value,
         });
         ElementPlus.ElMessage.success(I18N.t('p.resetSaved'));
         resetDlg.value = false;
@@ -1235,16 +1318,6 @@ Views.projectComic = {
       }
     }
 
-    async function del() {
-      try {
-        await API.post(`/api/comics/${props.id}/delete`);
-        ElementPlus.ElMessage.success(I18N.t('proj.msgDeleted'));
-        router.push(backTo());
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      }
-    }
-
     function openLb(list, idx) {
       lb.list = list;
       lb.idx = idx;
@@ -1261,12 +1334,12 @@ Views.projectComic = {
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
-      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan,
-      cfgDlg, cfgBusy, cfg, modelChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, rclear, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, oScore, oScoreMin, oRedo, oStopLow, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
+      cfgDlg, cfgBusy, cfg, modelChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, genDlg, genDlgTitle, genDlgExtra,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, saveScore, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded,
-      openReset, saveReset, openCfg, saveCfg, del, openLb, load, backTo, router,
+      openReset, saveReset, openCfg, saveCfg, openLb, load, backTo, router,
     };
   },
 };

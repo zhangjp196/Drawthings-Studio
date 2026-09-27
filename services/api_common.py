@@ -50,6 +50,7 @@ def _chapter_view(ch) -> dict:
         "prompt": ch.prompt,
         "width": ch.width or 0,
         "height": ch.height or 0,
+        "seconds": ch.seconds or 0,
         "media_url": _media_url(ch.media_path),
         "status": ch.status,
         "error": ch.error,
