@@ -976,34 +976,3 @@ button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-
   .pv-side { width: 100%; }
   .pv-side-body { max-height: 60vh; }
 }
-
-/* 新建创作：AI 生成标题/主题 对话框 */
-.idea-hint { margin-bottom: 6px; }
-.idea-body {
-  max-height: 46vh; overflow: auto; padding: 8px 10px;
-  border: 1px solid var(--line); border-radius: 10px; background: var(--chat-bubble);
-}
-.idea-msg { margin: 6px 0; }
-.idea-msg.user { text-align: right; }
-.idea-msg.user .md {
-  display: inline-block; text-align: left; max-width: 85%;
-  background: rgba(91, 91, 214, .12); padding: 6px 10px; border-radius: 10px;
-}
-.idea-msg.assistant .md { max-width: 92%; }
-.idea-input { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
-/* 对话中的「操作」块：显示 function call（写入标题/主题）及其结果 */
-.idea-applied {
-  margin: 8px 0; padding: 8px 10px; border: 1px dashed var(--primary);
-  border-radius: 10px; background: rgba(91, 91, 214, .06);
-}
-.idea-applied .ia-head {
-  font-size: 12px; font-weight: 600; color: var(--primary);
-  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
-}
-.idea-applied .ia-done {
-  font-weight: 400; font-size: 11px; color: var(--ok, #16a34a);
-  border: 1px solid currentColor; border-radius: 8px; padding: 0 6px;
-}
-.idea-applied .ia-row { display: flex; gap: 8px; font-size: 13px; margin: 2px 0; }
-.idea-applied .ia-k { color: var(--muted); flex-shrink: 0; }
-.idea-applied .ia-v { color: var(--ink); white-space: pre-wrap; }
