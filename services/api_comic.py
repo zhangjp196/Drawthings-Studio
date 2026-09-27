@@ -110,31 +110,6 @@ async def project_rename(request: Request, project_id: str, db: Session = Depend
     return {"ok": True, "title": title}
 
 
-@router.post("/{project_id}/reset")
-async def project_reset(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """重新设定：修改标题 / 一句话创意（主题）/ 风格。
-    默认不清空下游（保留大纲/章节/已生成媒体）；clear_downstream=true 时清空大纲/章节/媒体并回到 planning。"""
-    lang = _lang(request)
-    body = await _json_body(request)
-    project = _comic_project(db, project_id, lang)
-    if project is None:
-        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
-    try:
-        pipeline.comic.reset_settings(db, project,
-                                title=str(body.get("title") or ""),
-                                origin=str(body.get("origin") or ""),
-                                style=str(body.get("style") or ""),
-                                clear_downstream=bool(body.get("clear_downstream") or False),
-                                lang=lang)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
-    except Exception as e:
-        raise HTTPException(status_code=400,
-                             detail=L(lang, f"【重新设定】失败：{e}", f"[Re-set] failed: {e}"))
-    return {"ok": True}
-
-
 @router.post("/{project_id}/delete")
 def project_delete(request: Request, project_id: str, db: Session = Depends(get_db)):
     """删除创作（含全部章节与媒体文件）。"""

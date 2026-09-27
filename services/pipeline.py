@@ -59,11 +59,6 @@ class Pipeline:
     def delete_project(self, db, project):
         return self._of(project).delete_project(db, project)
 
-    def reset_settings(self, db, project, *, title, origin, style,
-                       clear_downstream: bool, lang: str = "zh"):
-        return self._of(project).reset_settings(db, project, title=title, origin=origin,
-                                                 style=style, clear_downstream=clear_downstream, lang=lang)
-
     def complete_project(self, db, project, lang: str = "zh"):
         return self._of(project).complete_project(db, project, lang=lang)
 

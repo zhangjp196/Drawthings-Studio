@@ -706,56 +706,6 @@ class ComicPipeline:
         self._save(db, project)
         return season
 
-    def reset_settings(self, db, project: Project, *, title: str, origin: str, style: str,
-                        clear_downstream: bool, lang: str = "zh") -> Project:
-        """重新设定：修改标题 / 一句话创意（主题）/ 风格。
-
-        默认不清空下游（保留大纲/章节/已生成媒体），项目停留在当前阶段，
-        用户可再按需「重新生成全部画面」或重排章节；
-        clear_downstream=True 时清空大纲/章节/媒体并回到 planning（相当于按新设定重开大纲）。"""
-        origin = (origin or "").strip()
-        if not origin:
-            raise ValueError(L(lang, "一句话创意不能为空", "The idea (origin) cannot be empty"))
-        if (title or "").strip():
-            project.title = title.strip()[:200]
-        project.origin = origin
-        scope = dict(project.scope or {})
-        scope["style"] = (style or "").strip()
-        project.scope = scope
-        if clear_downstream:
-            project.arc = ""
-            for c in chars_from_raw(project.characters):
-                self._rm_media(c.get("image"))
-            project.characters = ""
-            project.global_prompt = ""
-            project.res_width = 0
-            project.res_height = 0
-            project.count_mode = "range"
-            project.count_min = 0
-            project.count_max = 0
-            self._rm_media(project.first_image)
-            project.first_image = ""
-            project.first_image_base = ""
-            for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
-                self._rm_media(ch.media_path)
-                db.delete(ch)
-            # 季/篇章级内容一并清空（保留季本身与季名；封面/季大纲/季角色/数量设定回到初始）
-            for s in self._load_seasons(db, project):
-                for c in chars_from_raw(s.characters):
-                    self._rm_media(c.get("image"))
-                s.characters = ""
-                s.arc = ""
-                self._rm_media(s.first_image)
-                s.first_image = ""
-                s.first_image_base = ""
-                s.cover_as_first_ref = False
-                s.count_mode = "range"
-                s.count_min = 0
-                s.count_max = 0
-            project.status = "planning"
-        self._save(db, project)
-        return project
-
     # ---------------- 整部作品完结（finished）/ 解锁 ----------------
     def is_finished(self, project: Project) -> bool:
         """作品是否已完结（锁定）：status = done。"""

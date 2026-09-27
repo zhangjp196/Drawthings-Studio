@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog, 'reset-dialog': Views.comicResetDialog },
+  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -22,7 +22,6 @@ Views.projectComic = {
         </div>
         <div class="proj-head-actions">
           <el-button :disabled="locked" @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
-          <el-button :disabled="locked" @click="openReset">{{ I18N.t('p.reset') }}</el-button>
           <el-button @click="router.push(backTo())">{{ I18N.t('p.back') }}</el-button>
         </div>
       </div>
@@ -351,10 +350,6 @@ Views.projectComic = {
                   :model-choices="modelChoices" :busy="cfgBusy" @save="saveCfg"
                   @new-config="router.push('/configs?ctype=drawthings')" />
 
-      <reset-dialog v-model="resetDlg" v-model:title="rtitle" v-model:origin="rogin" v-model:style="rstyle"
-                    v-model:custom="rstyleCustom" :style-presets="stylePresets"
-                    @save="saveReset" />
-
       <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle"
                   :busy="actBusy" @confirm="confirmGen" />
 
@@ -636,13 +631,6 @@ Views.projectComic = {
     const pdfDlg = ref(false);
     const pdfUrl = ref('');
     const lb = reactive({ show: false, list: [], idx: 0 });
-    const resetDlg = ref(false);
-    const rtitle = ref('');
-    const rogin = ref('');
-    const rstyle = ref('');
-    const rstyleCustom = ref('');   // 风格选「自定义」时的描述
-    // 与「新建创作」一致的风格预设下拉
-    const stylePresets = computed(() => [0, 1, 2, 3, 4, 5].map(i => I18N.t('cf.preset.' + i)));
 
     function syncOutlineForm() {
       const p = data.value.project;
@@ -1257,39 +1245,6 @@ Views.projectComic = {
       load();
     }
 
-    function openReset() {
-      rtitle.value = data.value.project.title || '';
-      rogin.value = data.value.project.origin || '';
-      // 现有风格：命中预设则选中该预设；否则归入「自定义」并回填原文
-      const cur = (data.value.project.scope || {}).style || '';
-      const presets = stylePresets.value;
-      if (cur && presets.includes(cur)) {
-        rstyle.value = cur; rstyleCustom.value = '';
-      } else if (cur) {
-        rstyle.value = 'custom'; rstyleCustom.value = cur;
-      } else {
-        rstyle.value = ''; rstyleCustom.value = '';
-      }
-      resetDlg.value = true;
-    }
-    async function saveReset() {
-      if (!rogin.value.trim()) {
-        ElementPlus.ElMessage.warning(I18N.t('p.resetOriginReq'));
-        return;
-      }
-      try {
-        await API.post(`/api/comics/${props.id}/reset`, {
-          title: rtitle.value, origin: rogin.value,
-          style: rstyle.value === 'custom' ? rstyleCustom.value.trim() : rstyle.value,
-        });
-        ElementPlus.ElMessage.success(I18N.t('p.resetSaved'));
-        resetDlg.value = false;
-        await load();
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
-      }
-    }
-
     function openCfg() {
       cfg.llm = data.value.project.llm_config_id;
       cfg.dt = data.value.project.drawthings_config_id;
@@ -1335,11 +1290,11 @@ Views.projectComic = {
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
       arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, oScore, oScoreMin, oRedo, oStopLow, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
-      cfgDlg, cfgBusy, cfg, modelChoices, lb, resetDlg, rtitle, rogin, rstyle, rstyleCustom, stylePresets, genDlg, genDlgTitle, genDlgExtra,
+      cfgDlg, cfgBusy, cfg, modelChoices, lb, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, saveScore, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded,
-      openReset, saveReset, openCfg, saveCfg, openLb, load, backTo, router,
+      openCfg, saveCfg, openLb, load, backTo, router,
     };
   },
 };
