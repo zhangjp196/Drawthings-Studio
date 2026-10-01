@@ -104,19 +104,31 @@ Views.configs = {
             <span class="cfg-quota" :class="{ full: dtCount >= dtMax }">{{ dtCount }}/{{ dtMax }}</span>
             <span class="cfg-sec-sub muted">{{ I18N.t('cfg.secDtSub') }}</span>
           </div>
-          <el-button size="small" type="primary" :disabled="dtCount >= dtMax"
-                     :title="dtCount >= dtMax ? I18N.t('cfg.full', dtMax) : ''"
-                     @click="openNew('drawthings')">{{ I18N.t('cfg.new') }}</el-button>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <el-button size="small" :loading="checkingStatus" @click="checkAllStatus">
+              {{ I18N.t('cfg.dtStatusCheck') }}
+            </el-button>
+            <el-button size="small" type="primary" :disabled="dtCount >= dtMax"
+                       :title="dtCount >= dtMax ? I18N.t('cfg.full', dtMax) : ''"
+                       @click="openNew('drawthings')">{{ I18N.t('cfg.new') }}</el-button>
+          </div>
         </div>
         <div class="cfg-sec-body">
           <div class="cfg-grid" v-if="dtItems.length">
             <div class="cfg-card" v-for="row in dtItems" :key="row.id">
-              <div class="wc-top"><span class="cfg-name">{{ row.name }}</span></div>
+              <div class="wc-top" :title="statusTip(row.id)">
+                <span class="cfg-name">{{ row.name }}</span>
+                <span class="dt-dot" :class="statusClass(row.id)"></span>
+                <span class="cfg-meta muted">{{ statusText(row.id) }}</span>
+              </div>
               <div class="cfg-meta muted">{{ dtMeta(row) }}</div>
               <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
               <div class="wc-meta muted">{{ I18N.t('cfg.created', fmt(row.created_at)) }}</div>
               <div class="wc-actions">
                 <el-button size="small" @click="openEdit('drawthings', row)">{{ I18N.t('cfg.edit') }}</el-button>
+                <el-button size="small" :loading="checkingStatus" @click="checkStatusOne(row.id)">
+                  {{ I18N.t('cfg.dtStatusCheck') }}
+                </el-button>
                 <el-popconfirm :title="I18N.t('cfg.delConfirm')" @confirm="del('drawthings', row)">
                   <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
                 </el-popconfirm>
@@ -124,6 +136,7 @@ Views.configs = {
             </div>
           </div>
           <el-empty v-else :image-size="56" :description="I18N.t('cfg.empty', 'DrawThings')" />
+          <div class="hint" style="margin-top: 12px;">{{ I18N.t('cfg.dtStatusHint') }}</div>
         </div>
       </section>
 
@@ -174,6 +187,10 @@ Views.configs = {
                 <el-option :value="512" label="512" />
                 <el-option :value="768" label="768" />
                 <el-option :value="1024" label="1024" />
+                <el-option :value="1536" label="1536" />
+                <el-option :value="2048" label="2048" />
+                <el-option :value="3072" label="3072" />
+                <el-option :value="4096" label="4096 (4K)" />
               </el-select>
               <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
             </el-form-item>
@@ -211,6 +228,51 @@ Views.configs = {
       ref_image: false, ref_video: false,   // 勾选后才图生图 / 图生视频（默认不勾选 = 文生图 / 文生视频）
     });
 
+    // DrawThings 在线状态：config_id → {online, models, elapsed_ms, error}（后端 30s 自动轮询，此处只是展示）
+    const dtStatus = ref({});          // {config_id: {online, models, elapsed_ms, error}}
+    const checkingStatus = ref(false);
+
+    function statusText(id) {
+      const s = dtStatus.value[id];
+      if (!s) return I18N.t('cfg.dtStatusUnknown');
+      if (!s.online) return I18N.t('cfg.dtStatusOffline');
+      return I18N.t('cfg.dtStatusOnline', s.models || 0);
+    }
+
+    function statusClass(id) {
+      const s = dtStatus.value[id];
+      return s ? (s.online ? 'ok' : 'off') : 'unknown';
+    }
+
+    function statusTip(id) {
+      const s = dtStatus.value[id];
+      if (!s) return I18N.t('cfg.dtStatusUnknown');
+      if (!s.online) return I18N.t('cfg.dtStatusErrTip', s.error || '');
+      const row = dtItems.value.find(r => r.id === id);
+      return I18N.t('cfg.dtStatusOkTip', s.elapsed_ms, row ? row.base_url : '');
+    }
+
+    async function checkAllStatus() {
+      if (checkingStatus.value) return;
+      checkingStatus.value = true;
+      try {
+        const data = await API.get('/api/dt-status');
+        dtStatus.value = data.statuses || {};
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      } finally {
+        checkingStatus.value = false;
+      }
+    }
+
+    async function checkStatusOne(id) {
+      try {
+        dtStatus.value = { ...dtStatus.value, [id]: await API.get('/api/dt-status?config_id=' + encodeURIComponent(id)) };
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
+
     async function load() {
       try {
         const data = await API.get('/api/configs');
@@ -220,6 +282,7 @@ Views.configs = {
         dtCount.value = data.drawthing_count;
         llmMax.value = data.llm_max;
         dtMax.value = data.dt_max;
+        if (dtItems.value.length) checkAllStatus();   // 配置列表变化后刷新在线徽标
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       }
@@ -364,11 +427,18 @@ Views.configs = {
       p.push(r.max_seconds ? I18N.t('cfg.seconds', r.max_seconds) : I18N.t('cfg.secondsNone'));
       return p.join(' · ');
     }
-    onMounted(() => { load(); loadBasic(); scrollByQuery(); });
+    let statusTimer = null;
+    onMounted(() => {
+      load(); loadBasic(); scrollByQuery();
+      // 在线徽标轮询：30s 一次（后端有 3s 结果缓存，多个配置同端点只建一次连）；页面隐藏时不打扰
+      statusTimer = setInterval(() => { if (!document.hidden) checkAllStatus(); }, 30000);
+    });
+    onBeforeUnmount(() => { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } });
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
       urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,
+      checkingStatus, checkAllStatus, checkStatusOne, statusText, statusClass, statusTip,
     };
   },
 };

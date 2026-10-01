@@ -87,7 +87,7 @@ Views.projects = {
     const statusLabels = computed(() => {
       const t = I18N.t;
       return {
-        planning: t('proj.status.planning'), arced: t('proj.status.arced'),
+        planning: t('proj.status.planning'),
         chaptered: t('proj.status.chaptered'), done: t('proj.status.done'),
       };
     });

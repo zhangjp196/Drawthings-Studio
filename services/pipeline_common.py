@@ -118,3 +118,13 @@ def count_range(count_min, count_max) -> tuple[int, int]:
     hi = int(count_max or 0) or DEFAULT_COUNT_MAX
     lo = max(1, lo)
     return lo, max(lo, hi)
+
+
+def clip_text(s: str, limit: int) -> str:
+    """截断长文本到 limit 字（超出加省略号），用于把整段大纲压成提示词里的摘要。
+
+    多季作品逐季把大纲塞进上下文会迅速膨胀，按字数截断保证上下文可控。"""
+    t = (s or "").strip()
+    if limit <= 0:
+        return ""
+    return t if len(t) <= limit else t[:limit].rstrip() + "…"

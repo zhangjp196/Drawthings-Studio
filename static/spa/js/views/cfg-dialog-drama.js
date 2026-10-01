@@ -1,10 +1,10 @@
-// 短剧项目页 —— 项目设置弹框（短剧专属，不与漫画共享）：LLM / DrawThings / 图像+视频模型 / 参考图开关。
+// 短剧项目页 —— 项目设置弹框（短剧专属，不与漫画共享）：LLM / DrawThings / 图像+视频模型 / 参考图开关 / 自动评分。
 window.Views = window.Views || {};
 
 Views.dramaCfgDialog = {
   props: {
     modelValue: { type: Boolean, default: false },
-    cfg: { type: Object, required: true },       // {llm,dt,dt_model_i,dt_ref_i,dt_model_v,dt_ref_v}
+    cfg: { type: Object, required: true },       // {llm,dt,dt_model_i,dt_ref_i,dt_model_v,dt_ref_v,score,score_min,redo,stop_low}
     llmConfigs: { type: Array, default: () => [] },
     dtConfigs: { type: Array, default: () => [] },
     imgChoices: { type: Array, default: () => [] },
@@ -45,6 +45,18 @@ Views.dramaCfgDialog = {
             <el-option v-for="m in vidChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
           </el-select>
           <el-checkbox v-model="cfg.dt_ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+        </el-form-item>
+        <el-form-item :label="I18N.t('p.scoreAuto')">
+          <div class="score-opts">
+            <el-checkbox v-model="cfg.score">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
+            <el-checkbox v-model="cfg.redo" :disabled="!cfg.score">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
+            <el-checkbox v-model="cfg.stop_low" :disabled="!cfg.score">{{ I18N.t('p.scoreStopLowLabel') }}</el-checkbox>
+            <div class="res-row" style="margin: 2px 0;">
+              <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
+              <el-input-number v-model="cfg.score_min" :min="0" :max="100" size="small" :disabled="!cfg.score" />
+            </div>
+            <div class="hint" style="margin: 2px 0 0;">{{ I18N.t('p.scoreAutoHint') }}</div>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>

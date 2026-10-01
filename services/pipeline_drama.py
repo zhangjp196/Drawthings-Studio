@@ -12,12 +12,13 @@
 每个项目携带所选 LLMConfig / DrawThingConfig 的 id，运行时现场构建客户端，
 因此不同项目可用不同的端点/模型/模式。
 
-多季（篇章）设计（统一世界观 + 各季独立故事，类似七龙珠）：
-- 项目层：scope（风格）/ arc（总纲）/ characters（核心角色）/ global_prompt / 封面，全局共享；
-- 季层：每季有自己的 arc（季大纲）/ characters（本季新增角色）/ 章节数量设定 / 章节；
+多集（篇章）设计（统一世界观 + 各集独立故事）：
+- 项目层：global_prompt（全局要求：风格 + 要点）/ characters（核心角色）/ 封面，全局共享；
+- 季层：每季有自己的 arc（本集大纲）/ characters（本集新增角色）/ 章节数量设定 / 章节；
+- **不再有项目层总纲**：「生成本集大纲」一步同时负责全篇主线与本集路线，作品标题也随该步产出；
 - 章节 index 为扁平全局序号（按季连续），季内展示序号由分组位置计算；
-- 剧本/生成上下文 = 全局风格 + 核心角色 + 季大纲 + 季角色 + 全局要点；
-- 连续性：首章（第 1 季第 1 章）用封面（若开启），其余章用上一章媒体（跨季承接上季末章）。
+- 剧本/生成上下文 = 全局要求 + 核心角色 + 本集大纲 + 本集角色；
+- 连续性：首章（第 1 集第 1 章）用封面（若开启），其余章用上一章媒体（跨集承接上集末章）。
 """
 import logging
 import shutil
@@ -35,7 +36,6 @@ from models import Project, Chapter, Season, LLMConfig, DrawThingConfig
 
 from config_store import ConfigStore
 from .agent import (
-    ArcOut,
     CharsOut,
     CharDescOut,
     ChapterCount,
@@ -57,9 +57,13 @@ from .pipeline_common import (
     chars_from_raw,
     chars_to_raw,
     chars_to_text,
+    clip_text,
     count_range,
     run_sync,
 )
+
+# 全篇剧情线上下文里，单集大纲最多注入的字数（多集时按此截断，避免上下文膨胀）
+SEASON_ARC_CONTEXT_CHARS = 500
 
 
 logger = logging.getLogger("drawthings")
@@ -105,9 +109,8 @@ class DramaPipeline:
     # ---------------- 项目生命周期 ----------------
     def create(self, db, kind: str, origin: str,
                llm_config_id: str, drawthings_config_id: str,
-               style: str = "", title: str = "") -> Project:
+               title: str = "") -> Project:
         """新建短剧项目（kind 参数保留供调度门面兼容；短剧流水线固定 kind=drama）。"""
-        style = (style or "").strip()
         project = Project(
             id=uuid.uuid4().hex[:12],
             kind="drama",
@@ -118,8 +121,6 @@ class DramaPipeline:
             created_at=_now(),
             updated_at=_now(),
             status="planning",
-            # 用户指定风格优先；留空则由 LLM 在“设定篇幅”阶段推荐
-            scope={"style": style} if style else {},
         )
         db.add(project)
         db.commit()
@@ -210,9 +211,25 @@ class DramaPipeline:
             merged[c["id"]] = dict(c)
         return list(merged.values())
 
-    def _episode_arc(self, project: Project, season: Season) -> str:
-        """季大纲（为空则回退项目总纲）。"""
-        return (season.arc or "").strip() or (project.arc or "").strip()
+    def _require_episode_arc(self, season: Season, lang: str = "zh") -> str:
+        """取本集大纲；为空即抛错（拆章 / 集角色等步骤必须先有本集大纲）。
+
+        项目层不再有总纲兜底：本集大纲是唯一的剧情依据，为空时静默继续会让 LLM 凭空编剧情。"""
+        arc = (season.arc or "").strip()
+        if not arc:
+            raise RuntimeError(L(lang, "请先生成或填写本集大纲再继续",
+                                 "Please create or fill in this episode's outline first"))
+        return arc
+
+    def _overall_arc(self, db, project: Project) -> str:
+        """全篇主线（供项目级步骤参考：核心角色 / 封面提示词）。
+
+        已无项目层总纲，取**第一集大纲**作为全篇起点 —— 第 1 集的路线即作品开篇主线。
+        第 1 集大纲尚未生成时返回空串（调用方按「无大纲」处理）。"""
+        first = (db.query(Season)
+                 .filter(Season.project_id == project.id)
+                 .order_by(Season.number.asc()).first())
+        return (first.arc or "").strip() if first is not None else ""
 
     def _prev_episode_last_clip(self, db, project: Project, season: Season) -> Chapter | None:
         """上一季最后一章（用于新季第 1 章的参考图链）。"""
@@ -332,85 +349,40 @@ class DramaPipeline:
                 .filter(Chapter.project_id == project.id,
                         Chapter.season_id.in_(prev_ids)).count())
 
-    # ---------------- 企划（每步独立生成：故事大纲 / 角色设定）+ 章节规划 ----------------
-    async def step_arc(self, db, project: Project, lang: str = "zh",
-                       res_width: int = 0, res_height: int = 0, extra_prompt: str = "") -> Project:
-        """「生成大纲」：单独写整体故事大纲（基于一句话创意 + 风格/主题/基调），并设置默认分辨率。
-        不触碰风格 / 角色 / 章节。status: → arced。"""
-        llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
-        style = (scope.get("style") or "").strip()
-        theme = (scope.get("theme") or "").strip()
-        tone = (scope.get("tone") or "").strip()
-        system = ("你是资深漫画/短剧策划兼编剧。根据项目名称（主题）与风格设定：\n"
-                  "① 先给作品起一个吸引人的标题（title，简短精炼，5-15 字为宜）；\n"
-                  "② 再写整体故事大纲：分 开端、发展、高潮、结局 四段，每段 1-2 句讲清发生什么、"
-                  "如何承接到下一段，末尾附 1-3 条贯穿全篇的主线设定。")
-        agent = make_agent(build_model(llm_cfg), system, output_type=ArcOut)
-        user = f"项目名称（主题）：{project.origin or ''}"
-        if style:
-            user += f"\n风格：{style}"
-        if theme:
-            user += f"\n主题：{theme}"
-        if tone:
-            user += f"\n基调：{tone}"
-        if (extra_prompt or "").strip():
-            user += f"\n额外要求：{(extra_prompt or '').strip()}"
-        async with agent:
-            data = (await agent.run(user)).output
-        arc = (data.arc or "").strip()
-        if not arc:
-            raise RuntimeError(L(lang, "模型未返回大纲内容，请重试",
-                                 "The model returned no outline content — please retry"))
-        # 生成大纲时一并产出标题（标题可再在总览页手动修改）
-        if (data.title or "").strip():
-            project.title = (data.title or "").strip()[:200]
-        project.arc = arc
-        project.res_width = int(res_width or 0)
-        project.res_height = int(res_height or 0)
-        project.status = "arced"
-        self._save(db, project)
-        return project
-
+    # ---------------- 企划（每步独立生成：本集大纲 / 角色设定）+ 章节规划 ----------------
     async def step_episode_arc(self, db, project: Project, season: Season, lang: str = "zh",
                               extra_prompt: str = "") -> Project:
-        """「生成本季大纲」：基于整体故事大纲（全篇主线）+ 本季季号/季名 + 前后季衔接 + 角色，
-        为当前季单独写故事大纲（四段式 + 关键剧情节点 beats）。不触碰整体大纲 / 风格 / 角色 / 章节。"""
+        """「生成本集大纲」：**一次调用同时负责全篇主线与本集路线**（原「生成大纲」已并入本步）。
+
+        输入：项目名称（主题）+ 全局要求 + 核心角色 + 本集集号/集名 + 全篇已有剧情线（其他集的大纲）；
+        输出：本集四段式大纲 + 3-6 条关键剧情节点 beats，供后续拆章逐章落位。
+        作品标题也随本步产出（仅当尚未命名时采用，可在总体页手动改）。
+        不触碰全局要求 / 角色 / 章节。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
-        style = (scope.get("style") or "").strip()
-        theme = (scope.get("theme") or "").strip()
-        tone = (scope.get("tone") or "").strip()
-        overall_arc = (project.arc or "").strip()
+        gprompt = (project.global_prompt or "").strip()
         season_no = season.number
         season_title = (season.title or "").strip()
         chars = chars_to_text(self._combined_chars(project, season))
-        gprompt = (project.global_prompt or "").strip()
-        system = ("你是资深漫画/短剧策划兼编剧。根据整体故事大纲（全篇主线）与本季季号/季名，"
-                  "写本季的剧情大纲：说明本季承接主线的哪一段、本季的开端、发展、高潮、结局，"
-                  "以及与前后季的衔接。分 开端、发展、高潮、结局 四段，每段 1-2 句；"
-                  "再给出 3-6 条本季**关键剧情节点 beats**（按时间顺序的转折/冲突/爽点节拍，"
-                  "每条一句话、可独立成章的推进点），供后续分章逐章落位。\n"
-                  "要求：① 节点均匀覆盖本季全程（开端→高潮→结局），不要都堆在开头或结尾；"
-                  "② beats 之间为因果递进（前一个引发后一个），最后一条落到本季结局/下一季钩子；"
-                  "③ 与前后季不重复、不跳跃，若已给出前后季信息须顺畅衔接。\n"
-                  "若本季尚无合适名字，请在末尾附一个简洁的季名（篇章名）。")
+        system = ("你是资深短剧策划兼编剧。根据项目名称（主题）、全局要求与本集集号/集名，"
+                  "先在心里理清**整部作品的全篇主线**（开端/发展/高潮/结局，以及贯穿全篇的主线设定），"
+                  "再据此写**本集**的剧情大纲：说明本集承接主线的哪一段、本集的开端、发展、高潮、结局。\n"
+                  "大纲分 开端、发展、高潮、结局 四段，每段 1-2 句；"
+                  "再给出 3-6 条本集**关键剧情节点 beats**（按时间顺序的转折/冲突/爽点节拍，"
+                  "每条一句话、可独立成章的推进点），供后续拆章逐章落位。\n"
+                  "要求：① 节点均匀覆盖本集全程（开端→高潮→结局），不要都堆在开头或结尾；"
+                  "② beats 之间为因果递进（前一个引发后一个），最后一条落到本集结局/下一集钩子；"
+                  "③ 多集作品须对齐全篇已有剧情线：与更早的集保持一致（不推翻其已确立的设定）、承接紧邻前集的结局、"
+                  "为紧邻后集埋线，且不提前展开后续集的剧情。\n"
+                  "另请给出一个吸引人的**作品标题**（title，简短精炼，5-15 字为宜）与一个简洁的"
+                  "**集名**（篇章名，如「归来篇」）。")
         agent = make_agent(build_model(llm_cfg), system, output_type=SeasonArcOut)
-        user = f"季号：第 {season_no} 季"
+        user = f"项目名称（主题）：{project.origin or ''}\n集号：第 {season_no} 集"
         if season_title:
-            user += f"\n季名：{season_title}"
-        if overall_arc:
-            user += f"\n整体故事大纲（全篇主线）：\n{overall_arc}"
-        if style:
-            user += f"\n风格：{style}"
-        if theme:
-            user += f"\n主题：{theme}"
-        if tone:
-            user += f"\n基调：{tone}"
+            user += f"\n集名：{season_title}"
+        if gprompt:
+            user += f"\n全局要求（风格 + 务必涵盖/遵循的要点）：{gprompt}"
         if chars:
             user += f"\n角色设定（请保持一致）：\n{chars}"
-        if gprompt:
-            user += f"\n全局要点（务必涵盖/遵循）：{gprompt}"
         ctx = self._episode_neighbor_context(db, project, season)
         if ctx:
             user += f"\n{ctx}"
@@ -420,13 +392,15 @@ class DramaPipeline:
             data = (await agent.run(user)).output
         arc = (data.arc or "").strip()
         if not arc:
-            raise RuntimeError(L(lang, "模型未返回本季大纲内容，请重试",
-                                 "The model returned no season outline content — please retry"))
+            raise RuntimeError(L(lang, "模型未返回本集大纲内容，请重试",
+                                 "The model returned no episode outline content — please retry"))
         season.arc = self._compose_episode_arc(arc, data.beats)
-        # 若本季尚无名字且模型给出，则采用模型建议的季名
+        # 作品标题：仅在尚未命名（还是新建时的项目名）时采用模型建议
+        if (data.title or "").strip() and (project.title or "").strip() in ("", (project.origin or "").strip()):
+            project.title = (data.title or "").strip()[:200]
+        # 若本集尚无名字且模型给出，则采用模型建议的集名
         if not season_title and (data.title or "").strip():
             season.title = (data.title or "").strip()
-        project.status = "arced"
         self._save(db, project)
         return project
 
@@ -440,47 +414,48 @@ class DramaPipeline:
         return f"{arc}\n\n关键剧情节点：\n{lines}"
 
     def _episode_neighbor_context(self, db, project: Project, season: Season) -> str:
-        """前后季衔接信息：上一季末章 / 下一季大纲（若已存在），供本季大纲顺畅承接。"""
+        """全篇已有剧情线：**除本集外、已写过大纲的所有集**（按集号排序），供本集对齐全篇主线。
+
+        不只看紧邻前后集 —— 否则第 3 集完全不知道第 1、2 集讲过什么，多集之间会主线漂移
+        （项目层已无独立总纲，各集大纲就是全篇主线的唯一载体，必须互相可见）。
+        紧邻的前/后集额外给出「承接结局 / 埋下钩子」的明确约束；更早的集要求不得推翻其设定。
+        每集大纲按字数截断，保证多集时上下文不膨胀。"""
+        others = (db.query(Season)
+                  .filter(Season.project_id == project.id, Season.id != season.id)
+                  .order_by(Season.number.asc()).all())
         parts = []
-        prev_season = (db.query(Season)
-                       .filter(Season.project_id == project.id,
-                               Season.number < season.number)
-                       .order_by(Season.number.desc()).first())
-        if prev_season is not None:
-            prev_arc = (prev_season.arc or "").strip()
-            if prev_arc:
-                label = f"第{prev_season.number}季" + (f"（{prev_season.title}）" if prev_season.title else "")
-                parts.append(f"上一季大纲（本季需承接其结局，避免重复）：\n{label}：{prev_arc}")
-        next_season = (db.query(Season)
-                       .filter(Season.project_id == project.id,
-                               Season.number > season.number)
-                       .order_by(Season.number.asc()).first())
-        if next_season is not None and (next_season.arc or "").strip():
-            label = f"第{next_season.number}季" + (f"（{next_season.title}）" if next_season.title else "")
-            parts.append(f"下一季大纲（本季结局需为其埋线）：\n{label}：{(next_season.arc or '').strip()}")
-        return "\n".join(parts)
+        for s in others:
+            arc = clip_text(s.arc, SEASON_ARC_CONTEXT_CHARS)
+            if not arc:
+                continue
+            label = f"第{s.number}集" + (f"（{s.title}）" if s.title else "")
+            if s.number == season.number - 1:
+                parts.append(f"{label}（紧邻前集）：{arc}\n  → 本集须承接其结局，不要重复其剧情")
+            elif s.number == season.number + 1:
+                parts.append(f"{label}（紧邻后集）：{arc}\n  → 本集结局需为其埋线，但不要提前展开它的内容")
+            elif s.number < season.number:
+                parts.append(f"{label}（更早的集，已发生）：{arc}\n  → 本集须与之一致，不得推翻其已确立的设定")
+            else:
+                parts.append(f"{label}（后续的集）：{arc}\n  → 本集为其铺垫，不要抢跑它的剧情")
+        return ("全篇已有剧情线（其他集的大纲）：\n" + "\n".join(parts)) if parts else ""
 
     async def step_episode_chars(self, db, project: Project, season: Season, lang: str = "zh",
                                 extra_prompt: str = "") -> Project:
-        """「生成季角色」：基于本季大纲（为空则整体大纲）+ 风格 + 已有核心角色，生成本季新增角色。
-        不触碰整体大纲 / 风格 / 核心角色 / 章节。本季无新角色时可为空。"""
+        """「生成本集角色」：基于本集大纲 + 全局要求 + 已有核心角色，生成本集新增角色。
+        不触碰全局要求 / 核心角色 / 章节。本集无新角色时可为空。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
-        style = (scope.get("style") or "").strip()
-        season_arc = self._episode_arc(project, season)
-        if not season_arc:
-            raise RuntimeError(L(lang, "请先生成或填写本季大纲（或整体大纲）再生成季角色",
-                                 "Please create the season (or overall) outline before generating season characters"))
+        gprompt = (project.global_prompt or "").strip()
+        season_arc = self._require_episode_arc(season, lang)
         overall_chars = chars_from_raw(project.characters)
         overall_names = "、".join((c.get("name") or "").strip() for c in overall_chars
                                  if (c.get("name") or "").strip())
-        system = ("你是资深漫画/短剧策划。根据本季剧情大纲、风格与已有核心角色，列出本篇章新增的角色"
+        system = ("你是资深短剧策划。根据本集剧情大纲与已有核心角色，列出本篇章新增的角色"
                   "（即不在核心角色之列、本篇章才会出现的角色）：每个角色给出 名字 + 形象/性格（每人 2-4 句），"
-                  "供本篇章各章保持角色一致。不要重复已有核心角色；若本篇章没有新角色，返回空列表即可。")
+                  "供本篇章各段保持角色一致。不要重复已有核心角色；若本篇章没有新角色，返回空列表即可。")
         agent = make_agent(build_model(llm_cfg), system, output_type=CharsOut)
-        user = f"本季大纲：\n{season_arc}"
-        if style:
-            user += f"\n风格：{style}"
+        user = f"本集大纲：\n{season_arc}"
+        if gprompt:
+            user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
         if overall_names:
             user += f"\n已有核心角色（不要重复）：{overall_names}"
         if (extra_prompt or "").strip():
@@ -503,20 +478,21 @@ class DramaPipeline:
 
     async def step_chars(self, db, project: Project, lang: str = "zh",
                          extra_prompt: str = "") -> Project:
-        """「生成角色」：单独列出主要角色设定（基于一句话创意 + 风格 + 故事大纲），
-        输出为多个角色（名字 + 形象/性格）。不触碰风格 / 大纲 / 章节。"""
+        """「生成角色」：列出核心角色设定（基于项目名称/主题 + 全局要求 + 第一集大纲），
+        输出为多个角色（名字 + 形象/性格）。不触碰全局要求 / 章节。
+
+        剧情依据取**第一集大纲**（已无项目层总纲；第 1 集路线即作品开篇主线）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
-        style = (scope.get("style") or "").strip()
-        arc = (project.arc or "").strip()
-        system = ("你是资深漫画/短剧策划。根据一句话创意、风格与整体故事大纲，列出主要角色设定："
-                  "每个角色给出 名字 + 形象/性格/核心动机（每人 2-4 句），供后续各章保持角色一致。")
+        gprompt = (project.global_prompt or "").strip()
+        arc = self._overall_arc(db, project)
+        system = ("你是资深短剧策划。根据项目名称（主题）、全局要求与故事大纲，列出贯穿全篇的核心角色设定："
+                  "每个角色给出 名字 + 形象/性格/核心动机（每人 2-4 句），供后续各段保持角色一致。")
         agent = make_agent(build_model(llm_cfg), system, output_type=CharsOut)
-        user = project.origin
-        if style:
-            user += f"\n风格：{style}"
+        user = f"项目名称（主题）：{project.origin or ''}"
+        if gprompt:
+            user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
         if arc:
-            user += f"\n整体故事大纲：{arc}"
+            user += f"\n第一集大纲（故事主线）：\n{arc}"
         if (extra_prompt or "").strip():
             user += f"\n额外要求：{(extra_prompt or '').strip()}"
         async with agent:
@@ -541,26 +517,25 @@ class DramaPipeline:
     async def gen_char_description(self, db, project: Project, char_id: str, lang: str = "zh") -> str:
         """AI 生成单个角色的形象/性格描述（2-4 句）。
         该角色有参考图且 LLM 支持视觉时，以图片为形象基准（文设贴合图）；
-        并结合作品一句话创意 / 风格 / 故事大纲保持一致。返回写回后的描述。"""
+        并结合作品主题 / 全局要求 / 第一集大纲保持一致。返回写回后的描述。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         chars = chars_from_raw(project.characters)
         char = next((c for c in chars if c["id"] == char_id), None)
         if char is None:
             raise ValueError("角色不存在 (Character not found)")
-        scope = project.scope or {}
-        style = (scope.get("style") or "").strip()
-        arc = (project.arc or "").strip()
+        gprompt = (project.global_prompt or "").strip()
+        arc = self._overall_arc(db, project)
         name = (char.get("name") or "").strip()
-        system = ("你是资深漫画/短剧策划。为一个角色写 形象/性格/核心动机（2-4 句），供后续各章保持角色一致。"
+        system = ("你是资深短剧策划。为一个角色写 形象/性格/核心动机（2-4 句），供后续各段保持角色一致。"
                   "若附带了角色参考图，请以图片为依据描述外形（服饰 / 相貌 / 气质等），让文字设定与图片一致。")
         agent = make_agent(build_model(llm_cfg), system, output_type=CharDescOut)
-        user_text = f"一句话创意：{project.origin}"
-        if style:
-            user_text += f"\n风格：{style}"
+        user_text = f"项目名称（主题）：{project.origin}"
+        if gprompt:
+            user_text += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
         if name:
             user_text += f"\n角色名字：{name}"
         if arc:
-            user_text += f"\n整体故事大纲：{arc}"
+            user_text += f"\n第一集大纲（故事主线）：{arc}"
         user_text += "\n请写出这个角色的形象 / 性格 / 核心动机。"
         # 参考图：角色有图即附带（VLM 一律支持图片输入，多模态入图）
         img = (char.get("image") or "").strip()
@@ -595,22 +570,15 @@ class DramaPipeline:
         db.commit()
         self._reindex_flat(db, project)
 
-    def save_outline(self, db, project: Project, *, arc: str | None = None,
-                      characters: list[dict] | None = None, style: str | None = None,
+    def save_outline(self, db, project: Project, *,
+                      characters: list[dict] | None = None,
                       global_prompt: str | None = None,
                       res_width: int | None = 0, res_height: int | None = 0,
-                      count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
                       auto_score: int | None = None, score_min: int | None = None,
                       auto_redo: int | None = None, stop_on_low: int | None = None) -> Project:
-        """保存大纲页手动编辑：大纲 / 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 全局提示词 / 风格 / 默认分辨率 / 章节数量设定。
-        仅更新传入（非 None）的字段；不触碰章节（章节按季编辑，见 save_episode），
+        """保存总体页手动编辑：全局要求（风格 + 要点）/ 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 默认分辨率 / 评分设置。
+        仅更新传入（非 None）的字段；不触碰章节与各集大纲（季按季编辑，见 save_episode），
         也不触碰已生成的剧本/媒体（保存不触发生成）。"""
-        scope = dict(project.scope or {})
-        if style is not None:
-            scope["style"] = (style or "").strip()
-        project.scope = scope
-        if arc is not None:
-            project.arc = (arc or "").strip()
         if characters is not None:
             existing = {c["id"]: c for c in chars_from_raw(project.characters)}
             new_chars = []
@@ -640,10 +608,6 @@ class DramaPipeline:
             project.res_width = int(res_width or 0)
         if res_height is not None:
             project.res_height = int(res_height or 0)
-        if count_mode is not None:
-            project.count_mode = "range"          # 仅范围模式（遗留的项目级字段）
-        if count_min is not None or count_max is not None:
-            project.count_min, project.count_max = count_range(count_min, count_max)
         if auto_score is not None:
             project.auto_score = 1 if auto_score else 0
         if score_min is not None:
@@ -793,17 +757,15 @@ class DramaPipeline:
                                    count_min: int, count_max: int, model=None) -> int:
         """先定总章数：在 [count_min, count_max] 范围内选一个合适的数。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
         gprompt = (project.global_prompt or "").strip()
-        arc = self._episode_arc(project, season)
+        arc = self._require_episode_arc(season, lang)
         system = "你是分章策划。依据本季大纲判断应拆分为多少章，只给出章数（一个整数）。"
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterCount)
         lo, hi = count_range(count_min, count_max)
         if lo == hi:
             return lo                             # 固定值（min=max）：无需 LLM 挑选
         cnt = f"请从 {lo} 到 {hi} 之间选一个合适的章数（若大纲含「关键剧情节点」，章数宜不少于节点数）"
-        user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
-                + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
+        user = ((f"全局要求（风格 + 务必涵盖/遵循的要点）：{gprompt}\n" if gprompt else "")
                 + f"{cnt}\n\n本季大纲：\n{arc}")
         async with agent:
             data = (await agent.run(user)).output
@@ -815,21 +777,19 @@ class DramaPipeline:
         若本季大纲含「关键剧情节点」，则要求本章落位到对应节点，保证节点均匀覆盖整季。
         注意：规划**不写时长**（时长默认 0 = 跟随配置/预设上限；由用户在卡片手动设置或用工具条「批量时长」）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        scope = project.scope or {}
         chars = chars_to_text(self._combined_chars(project, season))
         gprompt = (project.global_prompt or "").strip()
-        arc = self._episode_arc(project, season)
+        arc = self._require_episode_arc(season, lang)
         system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
-                  "（讲清本章发生什么、如何承接前面章节并推进整体大纲）。"
+                  "（讲清本章发生什么、如何承接前面章节并推进本季大纲）。"
                   "若本季大纲给出了「关键剧情节点」，请让本章**落在对应比例的节点上**"
                   "（第 i/n 章对应节点序列中约第 ⌈i/n × 节点数⌉ 个），把该节点展开为本章内容；"
                   "不要提前消耗后面的节点，也不要跳过。")
         agent = make_agent(model or build_model(llm_cfg), system, output_type=ChapterOut)
         prior_text = "\n".join(f"第{k}章：{t}（{s}）" for k, (t, s, *_r) in enumerate(prior, 1)) \
             or "（本章为第一章，尚无前置章节）"
-        user = (f"主题：{scope.get('theme', '')}\n风格：{scope.get('style', '')}\n基调：{scope.get('tone', '')}\n"
+        user = ((f"全局要求（风格 + 务必涵盖/遵循的要点）：{gprompt}\n" if gprompt else "")
                 + (f"角色设定：{chars}\n" if chars else "")
-                + (f"全局要点（务必涵盖/遵循）：{gprompt}\n" if gprompt else "")
                 + f"共 {n} 章，现在规划第 {i} 章（进度 {i}/{n}）。\n已规划章节（承接其剧情）：\n{prior_text}\n\n"
                   f"本季大纲（含关键剧情节点，请按比例落位）：\n{arc}")
         async with agent:
@@ -947,9 +907,9 @@ class DramaPipeline:
 
     # ---------------- 阶段 4：剧本编写（按章 / 批量） ----------------
     def _script_agent_context(self, db, project: Project, lang: str):
-        """剧本生成所需的上下文：LLM 配置 / DrawThings 配置（判断是否图生视频提示词风格）/ 风格。"""
+        """剧本生成所需的上下文：LLM 配置 / DrawThings 配置（判断是否图生视频提示词风格）。"""
         llm_cfg, dt_cfg = self._configs(db, project, lang)
-        return llm_cfg, dt_cfg, (project.scope or {})
+        return llm_cfg, dt_cfg
 
     def _script_system(self, project: Project) -> str:
         """剧本/提示词写作的系统提示词（短剧）。"""
@@ -976,8 +936,8 @@ class DramaPipeline:
         """为第 i 章（季内序号）单独写剧本/提示词（供「按章生成」与「批量生成」复用）。
         chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。
         extra_prompt：人工「重新生成」时填写的补充修正要求，会作为额外指令交给 LLM 写进 prompt。"""
-        llm_cfg, dt_cfg, scope = self._script_agent_context(db, project, lang)
-        style = (scope.get("style") or "").strip()
+        llm_cfg, dt_cfg = self._script_agent_context(db, project, lang)
+        gprompt = (project.global_prompt or "").strip()
         media_dir = Path(self.data_dir) / "media"
         agent = make_agent(model or build_model(llm_cfg), self._script_system(project),
                            output_type=ScriptOut)
@@ -1080,20 +1040,18 @@ class DramaPipeline:
         return ("你是短剧制作的导演。根据当前章节生成视频的末帧抽帧，按 100 分制评估，"
                 "只输出一个 JSON 对象，字段：score（0-100 整数）与 note（一句话中文评语，不超过 30 字）。\n"
                 "评分标准（按权重）：1) 与本章场景描述 / 出视频提示词的内容是否相符；"
-                "2) 角色一致性（角色外形与既有设定一致）；3) 风格一致性（与整体风格 / 全局提示词一致）；"
+                "2) 角色一致性（角色外形与既有设定一致）；3) 风格一致性（与全局要求一致）；"
                 "4) 画面质量（清晰度、构图、色调、无明显畸变 / 伪影）；5) 与上一章画面内容是否连贯。"
                 "除 JSON 外不要输出任何文字。")
 
     async def _score_clip(self, db, project: Project, season: Season, ch: Chapter,
                              model) -> tuple[int, str]:
         """自动评分：对本章已生成的视频（抽末帧）打 0-100 分，返回 (分数, 评语)。"""
-        style = ((project.scope or {}).get("style") or "").strip()
         gprompt = (project.global_prompt or "").strip()
         user = (f"章节标题：{ch.title}\n"
                 f"场景描述：{ch.description or ch.summary or ''}\n"
                 f"出视频提示词：{ch.prompt}\n"
-                f"整体风格：{style}\n"
-                f"全局提示词：{gprompt}")
+                f"全局要求（风格 + 务必遵循的要点）：{gprompt}")
         media = (ch.media_path or "").strip()
         if not (media and Path(media).is_file()):
             raise ValueError("本章还没有生成视频，无法评分")
@@ -1496,7 +1454,7 @@ class DramaPipeline:
                                    lang: str = "zh", include_title: bool = True) -> Project:
         """用 DrawThings 生成封面（文生图）。
 
-        prompt 为「额外提示词」：基础提示词始终由 LLM 结合一句话创意 + 风格 + 故事大纲 +
+        prompt 为「额外提示词」：基础提示词始终由 LLM 结合项目名称/主题 + 全局要求 + 第一集大纲 +
         角色设定自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
         分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
         include_title 为真时在成品图上用 PIL 叠加作品名称（标题保持原文）。
@@ -1504,15 +1462,18 @@ class DramaPipeline:
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
         extra = (prompt or "").strip()
-        scope = project.scope or {}
-        system = ("你是封面美术提示词作者。请结合一句话创意、风格、故事大纲与角色设定，"
+        gprompt = (project.global_prompt or "").strip()
+        system = ("你是封面美术提示词作者。请结合项目名称（主题）、全局要求、故事大纲与角色设定，"
                   "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
                   "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
                   "（作品名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
         agent = make_agent(build_model(llm_cfg), system)
-        user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
-        if (project.arc or "").strip():
-            user += f"\n故事大纲：{project.arc.strip()}"
+        user = f"项目名称（主题）：{project.origin}"
+        if gprompt:
+            user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
+        overall = self._overall_arc(db, project)
+        if overall:
+            user += f"\n故事大纲（第一集主线）：{overall}"
         chars_text = chars_to_text(chars_from_raw(project.characters))
         if chars_text:
             user += f"\n角色设定：{chars_text}"
@@ -1565,21 +1526,23 @@ class DramaPipeline:
                                           include_title: bool = True) -> Season:
         """用 DrawThings 生成季封面（文生图）。
 
-        prompt 为「额外提示词」：基础提示词始终由 LLM 结合全局一句话创意 + 风格 + 核心角色与
-        季标题/季大纲/季新增角色自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
+        prompt 为「额外提示词」：基础提示词始终由 LLM 结合项目名称/主题 + 全局要求 + 核心角色与
+        集标题/集大纲/集新增角色自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
         分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
-        include_title 为真时在成品图上用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。
+        include_title 为真时在成品图上用 PIL 叠加集名（集名为空回退「第N集」，标题保持原文）。
         产物存为 data/media/seasonfirst_<季id>.<ext>（可重复生成覆盖）。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         dt = self._clients(db, project, lang)
         extra = (prompt or "").strip()
-        scope = project.scope or {}
-        system = ("你是封面美术提示词作者。请结合一句话创意、风格、角色设定与本季标题/大纲/新增角色，"
-                  "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+        gprompt = (project.global_prompt or "").strip()
+        system = ("你是封面美术提示词作者。请结合项目名称（主题）、全局要求、角色设定与本集标题/大纲/新增角色，"
+                  "写一段详细的集封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
                   "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
-                  "（季名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
+                  "（集名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
         agent = make_agent(build_model(llm_cfg), system)
-        user = f"一句话创意：{project.origin}\n风格：{scope.get('style', '')}"
+        user = f"项目名称（主题）：{project.origin}"
+        if gprompt:
+            user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
         chars_text = chars_to_text(chars_from_raw(project.characters))
         if chars_text:
             user += f"\n核心角色：{chars_text}"
@@ -1627,7 +1590,6 @@ class DramaPipeline:
         """导出 ZIP：大纲/角色/各章剧本文本 + 媒体（图/视频）+ 首图。
         season 非空时仅导出该季章节（文件名带 S<季号> 后缀）。返回 (zip 绝对路径, 文件名)。"""
         chapters = self._episode_clips(db, project, season) if season is not None else self._load_chapters(db, project)
-        scope = project.scope or {}
         export_dir = Path(self.data_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
         base = f"{self._safe_name(project)}_{project.id}"
@@ -1648,13 +1610,18 @@ class DramaPipeline:
                 cover_lines.append(f"第{s.number}集封面：media/00_first_S{s.number}_{Path(s.first_image).name}")
         scope_line = (f"导出范围：第{season.number}集" + (f"（{season.title}）" if season.title else "") + "\n") if season is not None else ""
         readme = (
-            f"标题：{project.title}\n类型：{project.kind}\n一句话创意：{project.origin}\n"
+            f"标题：{project.title}\n类型：{project.kind}\n项目名称（主题）：{project.origin}\n"
             + scope_line +
-            f"风格：{scope.get('style', '')}\n主题：{scope.get('theme', '')}\n基调：{scope.get('tone', '')}\n"
+            f"全局要求：{project.global_prompt or ''}\n"
             f"默认分辨率：{project.res_width}×{project.res_height}\n"
             + (("\n".join(cover_lines) + "\n") if cover_lines else "") +
-            f"\n角色设定：\n{chars_to_text(chars)}\n\n整体故事大纲：\n{project.arc}\n"
+            f"\n角色设定：\n{chars_to_text(chars)}\n"
         )
+        # 各集大纲（已无项目层总纲；剧情依据即各季 arc）
+        for s in seasons_all:
+            if (s.arc or "").strip():
+                label = f"第{s.number}集" + (f"（{s.title}）" if s.title else "")
+                readme += f"\n{label}大纲：\n{s.arc.strip()}\n"
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("README.txt", readme.encode("utf-8"))
             # 封面排最前（README 之后）：项目封面 + 各季封面

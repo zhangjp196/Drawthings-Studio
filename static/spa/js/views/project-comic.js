@@ -1,5 +1,5 @@
 // 项目详情 · 漫画版：头部/封面 + 季选择器（仅各季）+ 固定的「总体」入口（与各季用竖线分隔）
-// 总体：独立入口，直接显示写作子页签（风格/整体故事大纲/全局提示词/分辨率/角色/封面/完结），无二级页签
+// 总体：独立入口，直接显示写作子页签（基本信息/角色/封面/完结），无二级页签
 // 季：二级页签（企划 / 章节 / 预览 / 导出）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步，漫画版 chapter-card-comic）
 // 导出：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP/PDF（漫画支持 PDF）+ PDF 预览（新标签直接查看）
@@ -16,7 +16,6 @@ Views.projectComic = {
           <h1 class="ptitle">{{ data.project.title || data.project.origin }}</h1>
           <p class="meta muted">{{ I18N.t('p.metaIdea', data.project.origin) }}
             · {{ I18N.t('p.metaLength', data.chapters.length) }}
-            · {{ I18N.t('p.metaStyle', scope.style || '—') }}
             · {{ I18N.t('p.metaLlm', data.project.llm_name) }}
             · {{ I18N.t('p.metaDt', data.project.dt_name) }}</p>
         </div>
@@ -59,52 +58,32 @@ Views.projectComic = {
       <!-- ============ 总体：独立入口，直接显示写作子页签（无 企划/章节/预览/完成 二级页签，那些均为季作用域）============ -->
       <div v-if="isOverall" class="subtabs">
         <nav class="subtabs-nav">
-          <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subStory') }}</button>
+          <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subBasic') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
-          <button type="button" class="subtabs-item" :class="{ active: oSub === 'score' }" @click="oSub = 'score'">{{ I18N.t('p.subScore') }}</button>
           <button type="button" class="subtabs-item" :class="{ active: oSub === 'finish' }" @click="oSub = 'finish'">{{ I18N.t('p.subFinish') }}</button>
         </nav>
         <div class="subtabs-body">
-              <!-- 全局字段：风格 / 整体故事大纲 / 全局提示词 / 分辨率 / 角色 / 封面 / 完结 -->
+              <!-- 全局字段：标题 / 全局要求 / 分辨率 / 角色 / 封面 / 完结（评分设置在项目「设置」弹框） -->
                 <el-card v-if="oSub === 'story'" shadow="never">
                   <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy" :disabled="locked" @click="openGenDlg('arc', I18N.t('p.genArc'))">{{ I18N.t('p.genArc') }}</el-button>
                     <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveStory">
-                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.outSave') }}</el-button></template>
+                      <template #reference><el-button type="primary" :loading="busySave" :disabled="locked">{{ I18N.t('p.outSave') }}</el-button></template>
                     </el-popconfirm>
-                    <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
+                    <span class="muted" v-if="busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
                   </div>
                   <el-form label-position="top">
                     <el-form-item :label="I18N.t('p.outTitle')" class="out-title">
                       <el-input v-model="oTitle" size="large" maxlength="100" :placeholder="I18N.t('p.outTitlePh')" @blur="saveTitle" />
                     </el-form-item>
-                    <el-form-item :label="I18N.t('p.outStyle')">
-                      <el-input v-model="oStyle" :placeholder="scope.style || ''" />
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.arc')">
-                      <el-input v-model="arcText" type="textarea" :rows="6" :placeholder="I18N.t('p.arcPh')" />
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.globalPrompt')">
-                      <el-input v-model="oGlobal" type="textarea" :rows="4" :placeholder="I18N.t('p.globalPromptHint')" />
+                    <el-form-item :label="I18N.t('p.globalReq')">
+                      <el-input v-model="oGlobal" type="textarea" :rows="6" :placeholder="I18N.t('p.globalReqHint')" />
                     </el-form-item>
                     <el-form-item :label="I18N.t('p.outRes')">
                       <div class="res-row">
-                        <span class="muted small">{{ I18N.t('p.resRatio') }}</span>
-                        <el-select v-model="oRatio" size="small" style="width:150px" @change="onRatioChange">
-                          <el-option :label="I18N.t('p.resAuto')" value="" />
-                          <el-option v-for="r in resRatios" :key="r.key" :label="I18N.t(r.label)" :value="r.key" />
-                          <el-option :label="I18N.t('p.resCustom')" value="custom" />
-                        </el-select>
-                        <span class="muted small" style="margin-left:8px;">{{ I18N.t('p.resSize') }}</span>
-                        <el-select v-if="oRatio !== 'custom'" v-model="oRes" size="small" style="width:150px" @change="onResChange">
-                          <el-option v-for="s in resOptions" :key="s" :label="s" :value="s" />
-                        </el-select>
-                        <template v-else>
-                          <el-input-number v-model="oW" :min="0" :max="4096" :step="64" size="small" />
-                          <span>×</span>
-                          <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
-                        </template>
+                        <el-input-number v-model="oW" :min="0" :max="4096" :step="64" size="small" />
+                        <span>×</span>
+                        <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
                         <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
                       </div>
                     </el-form-item>
@@ -159,30 +138,6 @@ Views.projectComic = {
                     <el-button :disabled="locked" @click="addChar">{{ I18N.t('p.charAdd') }}</el-button>
                   </div>
                   <el-empty v-if="!chars.length" :description="I18N.t('p.charsEmpty')" :image-size="48" />
-                </el-card>
-                <!-- ============ 自动评分：生成后评分 / 低分重做 / 低于阈值停止生成 ============ -->
-                <el-card v-else-if="oSub === 'score'" shadow="never">
-                  <template #header><b>{{ I18N.t('p.subScore') }}</b></template>
-                  <div class="actions outline-bar">
-                    <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveScore">
-                      <template #reference><el-button :loading="busySave" :disabled="locked">{{ I18N.t('p.outSave') }}</el-button></template>
-                    </el-popconfirm>
-                    <span class="muted" v-if="busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
-                  </div>
-                  <el-form label-position="top">
-                    <el-form-item :label="I18N.t('p.scoreAuto')">
-                      <div class="score-opts">
-                        <el-checkbox v-model="oScore">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
-                        <el-checkbox v-model="oRedo" :disabled="!oScore">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
-                        <el-checkbox v-model="oStopLow" :disabled="!oScore">{{ I18N.t('p.scoreStopLowLabel') }}</el-checkbox>
-                        <div class="res-row" style="margin: 2px 0;">
-                          <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
-                          <el-input-number v-model="oScoreMin" :min="0" :max="100" size="small" :disabled="!oScore" />
-                        </div>
-                        <div class="hint" style="margin: 2px 0 0;">{{ I18N.t('p.scoreAutoHint') }}</div>
-                      </div>
-                    </el-form-item>
-                  </el-form>
                 </el-card>
                 <!-- ============ 完结：全部季章节完成才可完结；完结后锁定，需解锁才能操作 ============ -->
                 <el-card v-else-if="oSub === 'finish'" shadow="never">
@@ -372,7 +327,6 @@ Views.projectComic = {
   `,
   setup(props) {
     const data = ref(null);
-    const scope = computed(() => (data.value && data.value.project.scope) || {});
     const tab = ref('outline');
     const tabInit = ref(false);
     // 返回/删除/404 一律回到「漫画创作」列表（带 ?kind=comic，保持侧边栏高亮）
@@ -493,54 +447,13 @@ Views.projectComic = {
       selected.value = allSelected.value ? [] : visibleChapters.value.map(c => c.index);
     }
 
-    // 大纲表单
-    const oTitle = ref('');        // 作品标题（放大输入，随「生成大纲」一并生成）
-    const arcText = ref('');
-    const oStyle = ref('');
+    // 总体表单
+    const oTitle = ref('');        // 作品标题（放大输入；随「生成本季大纲」一并生成）
     const chars = ref([]);       // 角色设定：[{id, name, description, image_url}]（id 为空 = 未保存的新角色）
-    const oGlobal = ref('');     // 全局提示词（要点/约束，注入每次章节 LLM 调用）
-    const oW = ref(0);
-    const oH = ref(0);
-    // 自动评分：生成画面后按 0-100 评分；低于阈值自动重做（最多 2 次）
-    const oScore = ref(true);
-    const oScoreMin = ref(60);
-    const oRedo = ref(true);
-    const oStopLow = ref(false);
-    // 分辨率：先选比例、再选固定分辨率（均为 64 的倍数；0×0 = 跟随出图端/智能体）
-    const RES_RATIOS = [
-      { key: '1:1',  label: 'p.ratio11',  sizes: ['512×512', '768×768', '1024×1024'] },
-      { key: '3:4',  label: 'p.ratio34',  sizes: ['576×768', '768×1024', '864×1152', '960×1280'] },
-      { key: '4:3',  label: 'p.ratio43',  sizes: ['768×576', '1024×768', '1152×864', '1280×960'] },
-      { key: '2:3',  label: 'p.ratio23',  sizes: ['512×768', '640×960', '768×1152', '896×1344'] },
-      { key: '3:2',  label: 'p.ratio32',  sizes: ['768×512', '960×640', '1152×768', '1344×896'] },
-      { key: '9:16', label: 'p.ratio916', sizes: ['576×1024', '720×1280', '864×1536', '1080×1920'] },
-      { key: '16:9', label: 'p.ratio169', sizes: ['1024×576', '1280×720', '1536×864', '1920×1080'] },
-    ];
-    const oRatio = ref('');   // '' = 自动（跟随出图端）；'custom' = 旧数据里的自定义值
-    const oRes = ref('0×0');  // 当前选中的分辨率（'W×H'）
-    const resOptions = computed(() => {
-      if (oRatio.value === '') return ['0×0'];
-      const r = RES_RATIOS.find(x => x.key === oRatio.value);
-      const cur = `${oW.value}×${oH.value}`;
-      if (!r) return [cur];  // custom：仅展示当前（旧数据）值
-      const opts = r.sizes.slice();
-      if (oW.value && oH.value && !opts.includes(cur)) opts.push(cur);
-      return opts;
-    });
-    function applyRes() {
-      const m = /^(\d+)×(\d+)$/.exec(oRes.value || '');
-      oW.value = m ? parseInt(m[1], 10) : 0;
-      oH.value = m ? parseInt(m[2], 10) : 0;
-    }
-    function onRatioChange(key) {
-      if (key === '') { oRes.value = '0×0'; applyRes(); return; }
-      const r = RES_RATIOS.find(x => x.key === key);
-      if (!r) return;
-      const cur = `${oW.value}×${oH.value}`;
-      oRes.value = r.sizes.includes(cur) ? cur : r.sizes[0];
-      applyRes();
-    }
-    function onResChange() { applyRes(); }
+    const oGlobal = ref('');     // 全局要求（风格 + 要点/约束，注入每次 LLM 调用）
+    const oW = ref(0);            // 默认分辨率宽（0 = 跟随出图端/智能体）
+    const oH = ref(0);            // 默认分辨率高
+    // 自动评分设置在项目「设置」弹框内维护（见 cfg / saveCfg），此处不再单独保留表单字段。
     // 章节数量（固定值）与规划方式（新增：现有章节之后续加 / 重做：全季覆盖重规划）
     const planCount = ref(12);
     const planMode = ref('append');
@@ -604,7 +517,8 @@ Views.projectComic = {
 
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
-    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref: false });
+    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref: false,
+                        score: true, score_min: 60, redo: true, stop_low: false });
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（漫画只列图像模型）
     const dtModels = ref([]);
     const modelChoices = computed(() => dtModels.value
@@ -635,22 +549,11 @@ Views.projectComic = {
     function syncOutlineForm() {
       const p = data.value.project;
       oTitle.value = p.title || '';
-      arcText.value = p.arc || '';
-      oStyle.value = (p.scope || {}).style || '';
       chars.value = (p.characters || []).map(c => ({ id: c.id || '', name: c.name || '',
                                                       description: c.description || '', image_url: c.image_url || '' }));
       oGlobal.value = p.global_prompt || '';
       oW.value = p.res_width || 0;
       oH.value = p.res_height || 0;
-      oScore.value = !!p.auto_score;
-      oScoreMin.value = p.score_min || 60;
-      oRedo.value = !!p.auto_redo;
-      oStopLow.value = !!p.stop_on_low;
-      // 由已存 W×H 反推比例与分辨率选项（0×0=自动；不在固定列表的旧值=自定义）
-      const cur = `${oW.value}×${oH.value}`;
-      const r = RES_RATIOS.find(x => x.sizes.includes(cur));
-      oRatio.value = (oW.value || oH.value) ? (r ? r.key : 'custom') : '';
-      oRes.value = (oW.value || oH.value) ? cur : '0×0';
     }
     function syncTab() {
       // 默认落在「大纲」页（含已规划章节的进行中项目）；完成已是季级，不再按作品状态自动跳「完成」
@@ -698,7 +601,7 @@ Views.projectComic = {
         progress.text = '';
       }
     }
-    // 生成弹框：生成大纲 / 生成本季大纲 / 生成角色 共用（框内可填额外提示词）
+    // 生成弹框：生成本季大纲 / 生成角色 共用（框内可填额外提示词）
     function openGenDlg(step, title) {
       genDlgStep.value = step;
       genDlgTitle.value = title;
@@ -709,9 +612,7 @@ Views.projectComic = {
       const extra = genDlgExtra.value.trim();
       const step = genDlgStep.value;
       genDlg.value = false;
-      if (step === 'arc') {
-        doAction('arc', { res_width: oW.value, res_height: oH.value, extra_prompt: extra });
-      } else if (step === 'season_arc') {
+      if (step === 'season_arc') {
         if (isOverall.value) return;
         doAction('season_arc', { season_id: seasonId.value, extra_prompt: extra });
       } else if (step === 'season_chars') {
@@ -1013,29 +914,13 @@ Views.projectComic = {
         if (data.value) data.value.project.title = t;
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
-    // 总体（全局）：只保存全局字段（风格 / 整体大纲 / 全局提示词 / 分辨率）
+    // 总体（全局）：只保存全局字段（全局要求 / 分辨率）
     function saveStory() {
       busySave.value = true;
       (async () => {
         try {
           await API.post(`/api/comics/${props.id}/outline`, {
-            arc: arcText.value, style: oStyle.value, global_prompt: oGlobal.value,
-            res_width: oW.value, res_height: oH.value,
-          });
-          ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
-          await load();
-        } catch (e) { ElementPlus.ElMessage.error(e.message); }
-        finally { busySave.value = false; }
-      })();
-    }
-    // 总体（全局）：只保存「自动评分」设置
-    function saveScore() {
-      busySave.value = true;
-      (async () => {
-        try {
-          await API.post(`/api/comics/${props.id}/outline`, {
-            auto_score: oScore.value, score_min: oScoreMin.value, auto_redo: oRedo.value,
-            stop_on_low: oStopLow.value,
+            global_prompt: oGlobal.value, res_width: oW.value, res_height: oH.value,
           });
           ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
           await load();
@@ -1252,6 +1137,11 @@ Views.projectComic = {
       const p = data.value.project;
       cfg.dt_model = p.dt_model_image || (c ? (c.model_image || '') : '');
       cfg.dt_ref = (p.dt_ref_image === '1') || (p.dt_ref_image === '' && !!c && !!c.ref_image);
+      // 自动评分设置（原「总体 → 自动评分」子页签，已并入本弹框）
+      cfg.score = !!p.auto_score;
+      cfg.score_min = p.score_min || 60;
+      cfg.redo = !!p.auto_redo;
+      cfg.stop_low = !!p.stop_on_low;
       fetchModels();
       cfgDlg.value = true;
     }
@@ -1262,6 +1152,8 @@ Views.projectComic = {
           llm_config_id: cfg.llm, drawthings_config_id: cfg.dt,
           dt_model_image: cfg.dt_model,
           dt_ref_image: cfg.dt_ref ? 1 : 0,
+          auto_score: cfg.score, score_min: cfg.score_min,
+          auto_redo: cfg.redo, stop_on_low: cfg.stop_low,
         });
         ElementPlus.ElMessage.success(I18N.t('p.cfgSaved'));
         cfgDlg.value = false;
@@ -1283,15 +1175,15 @@ Views.projectComic = {
     watch(() => props.id, () => { tabInit.value = false; load(); });  // 同一路由切换不同项目时重载
     onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
-      data, scope, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, setScoreFilter, scoreFilterOptions, visibleChapters,
+      data, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, setScoreFilter, scoreFilterOptions, visibleChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
       locked, totalChCount, totalDoneCount, finishRows, finishReady, finishIssues, finishBusy, markFinished, unlock,
       selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
-      arcText, oStyle, chars, oGlobal, oW, oH, oRatio, oRes, oScore, oScoreMin, oRedo, oStopLow, resRatios: RES_RATIOS, resOptions, onRatioChange, onResChange, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
+      chars, oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, modelChoices, lb, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, saveScore, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded,
       openCfg, saveCfg, openLb, load, backTo, router,

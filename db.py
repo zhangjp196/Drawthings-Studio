@@ -111,16 +111,12 @@ def _migrate():
         },
         "projects": {
             "title": "VARCHAR(200) DEFAULT ''",
-            "arc": "TEXT DEFAULT ''",
             "first_image": "VARCHAR(500) DEFAULT ''",
             "first_image_base": "VARCHAR(500) DEFAULT ''",
             "characters": "TEXT DEFAULT ''",
             "global_prompt": "TEXT DEFAULT ''",
             "res_width": "INTEGER DEFAULT 0",
             "res_height": "INTEGER DEFAULT 0",
-            "count_mode": "VARCHAR(10) DEFAULT 'auto'",
-            "count_min": "INTEGER DEFAULT 0",
-            "count_max": "INTEGER DEFAULT 0",
             "auto_score": "INTEGER DEFAULT 0",
             "score_min": "INTEGER DEFAULT 60",
             "auto_redo": "INTEGER DEFAULT 0",
@@ -171,7 +167,10 @@ def _migrate():
         # 移除已废弃的列（SQLite >= 3.35 支持 DROP COLUMN）
         deprecated = {
             "llm_configs": ("mode",),
-            "projects": ("cover_as_first_ref",),  # 已移除：封面不再作为第 1 章参考
+            "projects": ("cover_as_first_ref",  # 已移除：封面不再作为第 1 章参考
+                         "arc",  # 已移除：整体故事大纲并入「生成本季大纲」（总纲不再单独存）
+                         "scope",  # 已移除：风格并入 global_prompt（单一「全局要求」字段）
+                         "count_mode", "count_min", "count_max"),  # 已移除：章节数量按季存于 Season
             "drawthing_configs": ("mode", "protocol", "shared_secret", "model_name", "media_type",
                                   "transport",  # 已移除：只保留 gRPC
                                   "model", "preset", "preset_image", "preset_video",  # 预设改为按模型名自动推断
@@ -217,6 +216,16 @@ def _migrate():
                     'INSERT INTO micro_messages (id, session_id, "index", role, content, media_url, prompt) '
                     'SELECT id, session_id, "index", role, content, media_url, prompt FROM _micro_messages_backup'))
                 conn.execute(text("DROP TABLE _micro_messages_backup"))
+        # 一次性修正：整体故事大纲已并入「生成本季大纲」，status 不再有 arced（总纲已定）态。
+        # 旧项目停在该态会被并入 chaptered（章节已定）——语义上它至少已规划过，向后兼容即可。
+        try:
+            done = conn.execute(text("SELECT v FROM app_flags WHERE k='arced_status_merge'")).scalar()
+            if not done:
+                conn.execute(text("UPDATE projects SET status='chaptered' WHERE status='arced'"))
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO app_flags (k, v) VALUES ('arced_status_merge','1')"))
+        except Exception:
+            pass  # 旧库尚无相关表：忽略
         # 一次性修正：短剧曾短暂支持「规划/剧本自动写时长」，会把 seconds(1–8) 传给 Draw Things
         # 导致 LTX 等模型因非原生帧数异常。这里把短剧片段的 seconds 归零一次（恢复「0=跟随预设上限」），
         # 用户之后仍可在界面手动设置时长。仅执行一次（app_flags 标记）。

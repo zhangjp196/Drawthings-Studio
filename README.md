@@ -13,7 +13,7 @@ so it runs fully offline; FastAPI falls back to serving the SPA shell, so refres
 
 Start from **one sentence** and run it through a single pipeline to produce a **continuous comic** or a **continuous short drama**:
 
-> one sentence → Outline (style / characters / chapter plan) → Chapters (per-chapter script + media) → Complete (export ZIP; comic PDF / drama composed video)
+> one sentence → Season outline (incl. whole-work storyline) / characters / chapter plan → Chapters (per-chapter script + media) → Complete (export ZIP; comic PDF / drama composed video)
 
 The generation step talks to a large model over the OpenAI protocol; images and video are produced by **Draw Things** on the Mac.
 Because images are supported, **the next chapter is generated with reference to the previous image (comic) / the last frame of the previous video (drama)**, keeping the visuals coherent
@@ -53,51 +53,52 @@ With it on, each chapter's prompt is auto-written as an **edit instruction based
 - **Info**: type tag, title/idea, status tag, chapter progress (generated/total chapters), first-image thumbnail (click to preview), last active (with created date);
   the toolbar shows the total count and a "＋ New Project" dialog (the same form component as the /new page).
 - **Simplified creation**: the new-project form only asks for a **model (LLM config) + project name**. The name is a
-  working name / creative seed — the **real title** is edited large in the project's **Overview → Story outline**
-  and is **generated together with the outline** ("Generate outline"). The one-line idea/theme field and the
+  working name / creative seed — the **real title** is edited large in the project's **Overview → Basics**
+  and is **generated together with the season outline** ("Generate season outline"). The one-line idea/theme field and the
   "✨ AI title/theme" multi-step flow have been removed to reduce duplication.
 
 ## Creation control (project page)
 
 The project page is organized into **three tabs — Outline / Chapters / Complete** — you can switch between them at any time (the Chapters tab has a one-click "Back to outline").
 
-- **First image**: the project page lets you **upload a first image** or **generate one from a prompt** (leave the prompt empty and the LLM writes one from the idea + style).
+- **First image**: the project page lets you **upload a first image** or **generate one from a prompt** (leave the prompt empty and the LLM writes one from the project name + global requirements).
   The first image is the reference for chapter 1 (comic = img2img reference; drama = the first video frame;
   requires "Supports reference image" for the work (config value as fallback),
   and serves as the character/style baseline for the whole work during scripting (visible to a multimodal LLM).
-- **Style selection (with custom)**: when creating a project, pick a preset style (Japanese manga / Chinese ink wash / chibi /
-  realistic cinematic / Pixar 3D / cyberpunk) or choose "Custom…" and type any description;
-  the style is stored in the outline and keeps every chapter consistent (a user-specified style takes priority over the LLM's recommendation).
 
-- **① Outline**: click "Generate outline" to plan, in one pass, **style / theme / tone + the overall story outline (beginning → development → climax → ending) + the characters**,
-  and to produce the **chapter plan** — each chapter's title + one-line topic summary — based on the "chapter count".
+- **① Season outline (the only story source)**: click "Generate season outline" and **one call produces both the
+  whole-work storyline (beginning → development → climax → ending) and this season's route**, plus the **work title**
+  (when the project still has only its working name) and the **season name**. Input: project name + **global
+  requirements** + core characters + **neighbouring seasons** (so it continues the previous and seeds the next).
+  The model also produces **3–6 key plot beats**, which are used to place each planned chapter evenly across the season (chapter count
+  follows the beat count), keeping pacing from collapsing into the opening.
+  > **There is no project-level "overall outline" any more**: the whole-work storyline is produced by this same step, is not
+  > stored separately, and is no longer used as a fallback — when a season outline is empty, **chapter planning / season
+  > characters fail fast with "create the season outline first"** (instead of letting the LLM invent a plot).
   > The toolbar's **"Chapter plan / Plan selected" opens a planning dialog**: pick the **count** and the **mode** —
   > **Append** (add after the existing ones, keeping existing chapters and media) or **Redo** (nothing selected = clear
   > the whole season then re-plan; selected = rewrite only the selected chapters' titles + summaries).
   > The drama line is the same (clip-plan dialog: Append / Overwrite).
-  The outline, characters, **default resolution** and the chapter plan (title / summary / count) are all **manually editable**, then "Save outline";
-  you can also "Regenerate outline" (redoes outline + characters + chapters from the current settings) or "Rebuild chapters from outline" (re-plans the chapters only).
+  The season outline, season characters and the chapter plan (title / summary / count) are all **manually editable**;
+  you can also "Regenerate season outline" or "Rebuild chapters from outline" (re-plans the chapters only).
   The character sheet keeps the cast consistent across chapters (fed into each chapter's prompt).
-  **Season outline**: each season has its own outline, generated from the overall outline plus the season number/name, the
-  neighbouring seasons (so it continues the previous and seeds the next), the characters, style and global notes; the model
-  also produces **3–6 key plot beats**, which are used to place each planned chapter evenly across the season (chapter count
-  follows the beat count), keeping pacing from collapsing into the opening.
 - **② Chapters**: produce the content for the planned chapters. **One-click generate** — "Generate all scripts / Generate all media / Regenerate all frames" (SSE per-chapter progress);
   each chapter's accordion card (**shows only its photo** by default; click to expand, one open at a time, auto-expands when generated) supports **per-chapter steps**:
-  "Generate script" (writes script/prompt/resolution, using the outline's style + characters + that chapter's summary) → "Generate media",
+  "Generate script" (writes script/prompt/resolution, using the global requirements + characters + that chapter's summary) → "Generate media",
   plus **Regenerate media / Save prompt / adjust resolution / Move up / Move down / Delete**.
   A comic chapter = **one multi-panel comic page** (several panels in a single image, portrait, with caption/dialogue text); a drama clip = one video clip.
   > **Drama terminology**: on the drama line the UI and code identifiers call a chapter a **clip** and a season an **episode**;
   > the comic line keeps "chapter / season". Drama clip cards also show **continuity info** (the reference source: previous
   > clip's last frame / episode cover / previous episode ending / next clip) and the **plot beat** a clip lands on; the
   > toolbar offers **batch duration** (set selected/whole-episode clips to N seconds), and prompts can be **copied / reverted**.
-- **③ Complete**: once generated, **Export ZIP** (all media + the outline/characters/per-chapter script text); the comic also offers
+- **③ Complete**: once generated, **Export ZIP** (all media + the outlines/characters/per-chapter script text); the comic also offers
   **Export PDF / Preview PDF** (chapter images combined into a multi-page PDF), while the drama instead offers **Export composed
   video / Preview composed video** (its chapter clips concatenated in order into one MP4 via **ffmpeg concat**; stream-copy
   first, re-encode to h264/aac if the clips differ) — then click "Complete" to mark the project as done.
-- **Title / style edit directly**: the **title** has a large input at the top of **Overview → Story outline**
-  (saved on blur; also generated by the AI together with the outline). The **style** is edited on the same page
-  then saved with "Save outline". The old "Re-set" dialog has been removed.
+- **Title / global requirements edit directly**: the **title** has a large input at the top of **Overview → Basics**
+  (saved on blur; also generated by the AI together with the season outline). The **global requirements** (style +
+  the key points every generation must follow) are on the same page, saved with "Save". **Overview now has only 4
+  sub-tabs**: Basics / Characters / Cover / Finish.
 - **Per-chapter progress for long steps (SSE)**: "Generate all scripts / Generate all media / Regenerate all frames" are long steps
   (the LLM writes chapter by chapter / media renders chapter by chapter; blocking calls run in a thread pool so the event loop stays responsive),
   streamed over SSE with per-chapter progress (chapter x/y "title"), then auto-refreshes; a single chapter can still generate its script/media or regenerate from its own card buttons.
@@ -161,8 +162,9 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   with a one-line comment; videos use the last frame); right-click → **Redo (improve by score)** rewrites the prompt using
   that score & comment and regenerates as a **new message** (the original is kept). The scoring basis is per work
   (image only / image + prompt).
-- **Project-side scoring + retry/stop**: each chapter card has a manual **VLM score** button; the project's *Overall* section has
-  a dedicated **Auto scoring** tab where you can turn on **auto scoring** with a **threshold**, plus two independent
+- **Project-side scoring + retry/stop**: each chapter card has a manual **VLM score** button; **auto scoring is configured
+  in the project's "⚙ Project settings" dialog** (it used to be a dedicated **Auto scoring** sub-tab under *Overall*, which
+  has been removed), where you can turn on **auto scoring** with a **threshold**, plus two independent
   switches — **low-score auto-retry** (regenerate below threshold, max 2×) and **stop when below threshold** (halt the
   remaining batch once a chapter scores below the threshold). Off by default.
 - **Regenerate with extra prompt**: each chapter's **Regenerate media** button opens a dialog with an optional **extra
@@ -203,7 +205,8 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   (`model_image` / `model_video`) is kept only as a fallback default (each may be empty). The generation preset
   (steps / sampler / size) is **inferred from the model name**, no input needed. Any project/work can use any
   Draw Things config.
-  Personalized params: `max_side` (max resolution, longest side only; caps both images and video) and
+  **Online status**: each config card shows an online/offline dot (green = online with the model count, red = offline; hover for the reason and latency), with a manual "Check online" button and a 30s auto-refresh. The check opens a single gRPC connection (`GET /api/dt-status`, 4s timeout, 3s result cache) and **never triggers a generation**.
+  Personalized params: `max_side` (max resolution, longest side only; caps both images and video; **512/768/1024/1536/2048/3072/4096 (4K)**, 0 = unlimited / follow app) and
   `max_seconds` (max video duration in seconds; **default 10, settable 1–10**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap). **Drama clips each have their own duration (seconds) field**, **manual by design**: leave it **0 to follow the preset/config cap** (recommended for LTX — a non-native frame count can make some models return no frames or crash the app), or set a shorter value in the clip card / with the toolbar **Batch duration**.
   **Supports reference image** (now picked per feature in the project / micro-creation create form; the config-level
   `ref_image` / `ref_video` is kept as a fallback default, **off by default**): per type, whether the generation uses
@@ -455,5 +458,5 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
 - Continuity: comics reference the previous image, dramas the last frame of the previous clip (extracted automatically);
   requires "Supports reference image" on the work (config value as fallback) — off = text-to-image / text-to-video.
 
-Resolution priority (projects): the chapter's own width/height > the outline's **default resolution** > the agent's
-per-scene choice during scripting (`ScriptOut.width/height`, multiples of 64); then capped by `max_side`.
+Resolution priority (projects): the **default resolution** (Overview → Basics, plain W×H inputs) > the preset size;
+then capped by `max_side`. `0×0` = follow the preset / renderer.

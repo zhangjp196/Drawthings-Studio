@@ -157,15 +157,10 @@ def to_message_history(items: list[dict]) -> list[ModelMessage]:
 
 
 # ---------------- 流水线结构化输出 ----------------
-class ArcOut(BaseModel):
-    """企划步骤 1：整体故事大纲（生成大纲时一并产出作品标题）。"""
-    title: str = ""
-    arc: str = ""
-
-
 class SeasonArcOut(BaseModel):
-    """季大纲：本季名（篇章名，如「赛亚人篇」）+ 本季故事大纲 + 关键剧情节点。
+    """季/集大纲：作品标题 + 本季名（篇章名，如「赛亚人篇」）+ 本季故事大纲 + 关键剧情节点。
 
+    title：作品标题（仅当项目尚未命名时采用）+ 季名；
     arc：四段式（开端/发展/高潮/结局）的故事路线；
     beats：3-6 条本季关键剧情节点（起承转合/爽点节拍），供分章时逐章落位。"""
     title: str = ""

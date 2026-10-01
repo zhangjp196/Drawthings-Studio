@@ -88,16 +88,11 @@ class Project(Base):
     dt_model_video = Column(String(200), default="")             # 功能级模型：本项目出视频模型（空=跟随 DrawThings 配置）
     dt_ref_image = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_ref_video = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
-    status = Column(String(20), default="planning")       # planning|arced|done（done 为遗留值；完成已下沉到季，不再由 UI 设置）
-    scope = Column(JSON, default=dict)                     # 风格/主题/基调（整体，供后续保持一致）
-    arc = Column(Text, default="")                         # 总纲（整部作品主线；各季 arc 为其分段，可编辑）
+    status = Column(String(20), default="planning")       # planning|chaptered|done（完成已下沉到季，不再由 UI 设置）
+    global_prompt = Column(Text, default="")               # 全局要求（风格 + 要点/约束）：注入到每次 LLM 调用
     characters = Column(Text, default="")                  # 核心角色设定（贯穿各季的主要角色，名字/形象/性格）
-    global_prompt = Column(Text, default="")               # 全局提示词（要点/约束）：注入到每次章节 LLM 调用
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
     res_height = Column(Integer, default=0)                # 默认分辨率高（0=跟随智能体/出图端）
-    count_mode = Column(String(10), default="range")       # 章节数量模式（遗留字段，仅范围；现按季存于 Season）
-    count_min = Column(Integer, default=0)                 # range 模式：最少章节数（遗留）
-    count_max = Column(Integer, default=0)                 # range 模式：最多章节数（遗留）
     auto_score = Column(Integer, default=0)                # 自动评分：每章画面生成后按 0–100 评分（0=关闭，默认；手动点「评分」）
     score_min = Column(Integer, default=60)                # 评分阈值：低于该分且开启自动重做 → 重新生成
     auto_redo = Column(Integer, default=0)                 # 低分自动重做：0=关闭（默认）
@@ -116,7 +111,7 @@ class Season(Base):
     """季（篇章/弧）：统一世界观下的独立故事段（类似七龙珠的赛亚人篇/弗利萨篇）。
 
     一个项目下可有多个季；每季有自己的 大纲 / 新增角色 / 章节数量设定 / 章节。
-    项目层的 arc（总纲）/ characters（核心角色）/ scope（风格）/ global_prompt 为全局共享。
+    项目层的 characters（核心角色）/ global_prompt（全局要求）为全局共享。
     季内章节按 Chapter.index（扁平全局序号）连续排列，季内展示序号由分组位置计算。
     """
 

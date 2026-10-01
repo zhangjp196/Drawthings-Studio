@@ -12,7 +12,7 @@ from config import MEDIA_DIR, media_url as _media_url
 from i18n import L, lang_of
 from models import Project
 from config_store import ConfigStore
-from services.drawthings import MAX_VIDEO_SECONDS, norm_ref_flag
+from services.drawthings import MAX_SIDE_LIMIT, MAX_VIDEO_SECONDS, norm_ref_flag
 from services.pipeline import hex_to_rgb
 from services.runtime import pipeline
 
@@ -120,7 +120,7 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
     return {
         "model_image": model_image,
         "model_video": model_video,
-        "max_side": int(num("max_side", int, 2048)),
+        "max_side": int(num("max_side", int, MAX_SIDE_LIMIT)),
         "max_seconds": int(num("max_seconds", int, MAX_VIDEO_SECONDS)),
         # 能力开关：模型已在功能级选择，配置只声明「支持参考图片」
         "ref_image": flag("ref_image"),
@@ -129,11 +129,9 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
 
 
 def _project_view(p: Project, chapter_count: int = 0) -> dict:
-    scope = p.scope or {}
     return {
         "id": p.id, "kind": p.kind, "title": p.title or "", "origin": p.origin,
         "status": p.status, "created_at": p.created_at, "updated_at": p.updated_at,
-        "scope": scope,
         "first_image_url": _media_url(p.first_image or ""),
         "chapter_count": chapter_count,
     }

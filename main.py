@@ -221,6 +221,43 @@ def dt_models(request: Request, base_url: str = "", refresh: int = 1):
     return {"models": models}
 
 
+@app.get("/api/dt-status")
+def dt_status(request: Request, base_url: str = "", config_id: str = "",
+              db: Session = Depends(get_db)):
+    """Draw Things 在线状态检测（配置页显示在线徽标）。
+
+    - `base_url`（新建/编辑弹框里手填的端点）或 `config_id` → 检测该端点；
+    - 都不带 → 一次返回全部 DrawThings 配置的状态（配置页卡片徽标，并发探测避免串行等待）。
+
+    离线不报错，返回 {online: false, error} 由前端显示原因；只连一次 gRPC，不触发生成。"""
+    lang = _lang(request)
+    from concurrent.futures import ThreadPoolExecutor
+    from services.drawthings import parse_endpoint, probe_endpoint
+
+    def _probe(url: str) -> dict:
+        try:
+            host, port = parse_endpoint(url)
+            return probe_endpoint(host, port)
+        except Exception as e:
+            return {"online": False, "models": 0, "elapsed_ms": 0,
+                    "error": str(e).strip() or e.__class__.__name__}
+
+    cs = ConfigStore(db)
+    if base_url.strip():
+        return _probe(base_url)
+    if config_id:
+        cfg = cs.get_drawthing(config_id)
+        if not cfg:
+            raise HTTPException(status_code=404, detail=L(lang, "配置不存在", "Config not found"))
+        return _probe(cfg.base_url)
+    cfgs = cs.list_drawthing()
+    if not cfgs:
+        return {"statuses": {}}
+    with ThreadPoolExecutor(max_workers=min(8, len(cfgs))) as pool:
+        results = list(pool.map(lambda c: _probe(c.base_url), cfgs))
+    return {"statuses": {c.id: s for c, s in zip(cfgs, results)}}
+
+
 
 
 @app.post("/api/configs")

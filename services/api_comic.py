@@ -70,7 +70,7 @@ async def comic_create(request: Request, db: Session = Depends(get_db)):
                                      "Create a DrawThings config in Config Management first (optionally set it as the default)"))
     project = pipeline.comic.create(db, "comic", name, llm_cfg.id,
                                     dt_cfg.id if dt_cfg else "",
-                                    style="", title=name)
+                                    title=name)
     return {"id": project.id}
 
 
@@ -171,7 +171,6 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
         "project": {
             "id": project.id, "kind": project.kind, "title": project.title or "",
             "origin": project.origin, "status": project.status,
-            "scope": project.scope or {}, "arc": project.arc or "",
             "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
                              "image_url": _media_url(c["image"])}
                             for c in chars_from_raw(project.characters)],
@@ -179,8 +178,6 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
             "auto_score": project.auto_score or 0, "score_min": project.score_min or 60,
             "auto_redo": project.auto_redo or 0, "stop_on_low": project.stop_on_low or 0,
-            "count_mode": project.count_mode or "range",
-            "count_min": project.count_min or 0, "count_max": project.count_max or 0,
             "first_image_url": _media_url(project.first_image or ""),
             "created_at": project.created_at, "updated_at": project.updated_at,
             "llm_config_id": project.llm_config_id,
@@ -215,7 +212,7 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
 
 @router.post("/{project_id}/config")
 async def project_config_update(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """随时调整项目使用的 LLM / DrawThings 配置（下一步起生效）。"""
+    """随时调整项目设置：所用 LLM / DrawThings 配置 + 自动评分开关（下一步起生效）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = _comic_project(db, project_id, lang)
@@ -236,6 +233,12 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     project.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
     project.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
     project.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
+    # 自动评分（设置弹框内调整；未传 = 不改）
+    for key in ("auto_score", "auto_redo", "stop_on_low"):
+        if key in body:
+            setattr(project, key, 1 if body.get(key) else 0)
+    if "score_min" in body:
+        project.score_min = max(0, min(100, int(body.get("score_min") or 0)))
     project.updated_at = _now()
     db.commit()
     return {"ok": True}
@@ -310,8 +313,8 @@ def project_season_delete(request: Request, project_id: str, season_id: str,
 
 @router.post("/{project_id}/action")
 async def project_action(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """推进流水线：arc（故事大纲）/ season_arc（本季大纲）/ season_chars（季角色）/ chars（角色设定）/ chapters（拆章）/ generate（生成未完成章节）。
-    season_arc / season_chars / chapters / generate 需 body 传 season_id。"""
+    """推进流水线：season_arc（本季大纲，同时产出作品标题）/ season_chars（季角色）/ chars（角色设定）/ chapters（拆章）/ generate（生成未完成章节）。
+    除 chars 外均需 body 传 season_id。"""
     lang = _lang(request)
     body = await _json_body(request)
     step = str(body.get("step") or "")
@@ -327,13 +330,7 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
             raise HTTPException(status_code=400,
                                 detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id"))
     try:
-        if step == "arc":
-            project = await pipeline.comic.step_arc(
-                db, project, lang,
-                res_width=int(body.get("res_width") or 0),
-                res_height=int(body.get("res_height") or 0),
-                extra_prompt=str(body.get("extra_prompt") or ""))
-        elif step == "season_arc":
+        if step == "season_arc":
             project = await pipeline.comic.step_season_arc(db, project, season, lang,
                                                      extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "season_chars":
@@ -1033,7 +1030,7 @@ async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
 
 @router.post("/{project_id}/outline")
 async def project_outline_save(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """保存大纲页手动编辑：大纲 / 角色设定 / 风格 / 默认分辨率（章节按季编辑，见 /seasons）。"""
+    """保存总体页手动编辑：全局要求（风格 + 要点）/ 角色设定 / 默认分辨率 / 评分设置（章节按季编辑，见 /seasons）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = _comic_project(db, project_id, lang)
@@ -1050,11 +1047,9 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
     try:
         pipeline.comic.save_outline(
             db, project,
-            arc=body.get("arc"), characters=body.get("characters"), style=body.get("style"),
+            characters=body.get("characters"),
             global_prompt=body.get("global_prompt"),
             res_width=body.get("res_width"), res_height=body.get("res_height"),
-            count_mode=body.get("count_mode"), count_min=body.get("count_min"),
-            count_max=body.get("count_max"),
             auto_score=body.get("auto_score"), score_min=body.get("score_min"),
             auto_redo=body.get("auto_redo"), stop_on_low=body.get("stop_on_low"))
     except Exception as e:

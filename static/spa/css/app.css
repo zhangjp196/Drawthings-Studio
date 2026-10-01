@@ -615,6 +615,15 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .cfg-sec-body .el-empty { padding: 18px 0; }
 
+/* DrawThings 在线状态指示点（配置卡片） */
+.dt-dot {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted); opacity: .5;
+}
+.dt-dot.ok { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px rgba(34, 197, 94, .18); }
+.dt-dot.off { background: var(--err); opacity: 1; box-shadow: 0 0 0 3px rgba(239, 68, 68, .18); }
+.dt-dot.unknown { background: var(--warn); }
+
 /* ---------- 微创作：作品页（tab：对话 / 作品 / 设置） ---------- */
 .mc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
 /* 页面骨架：撑满「视口 − 顶栏」，内容区自适应高度（不再用易碎的固定 calc 偏移） */

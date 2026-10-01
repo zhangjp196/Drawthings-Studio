@@ -12,6 +12,7 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
 - 崩溃自愈：生成中 app 闪退 / 断连（Draw Things 图生图已知缺陷，社区 issue #121）时，自动等待 app
   重启（每轮上限 2 分钟）并自动重试生成（最多 2 轮），无法恢复才报错；等待过程经 on_status 回调上报。
 - 模型清单可从 app 读取（`get_models`，需 refresh_cache），生成前会校验模型已下载。
+- 在线状态检测：`probe_endpoint` 连一次 gRPC 判在线/离线（配置页徽标用），带超时与短 TTL 缓存，不触发生成。
 
 图像分辨率：调用方 params > 预设，受 max_side（最长边）限幅。
 视频尺寸：调用方 params（width/height）> 预设，同样受 max_side 限幅（0 = 用预设尺寸）。
@@ -79,6 +80,9 @@ _VIDEO_TOKENS = {"wan", "ltx", "animate", "animation", "motion", "animatediff", 
 # 单视频时长硬上限（秒）：上限帧数 = fps × MAX_VIDEO_SECONDS（fps 由 video_fps(model) / 预设显式值确定）。
 # 10 秒 = 可配置时长上限；LTX-2 官方支持更长，但为兼容多数模型/显存，这里取 10s。
 MAX_VIDEO_SECONDS = 10
+
+# max_side（最大分辨率 · 最长边）可配置上限：4096 = 4K。0 = 不限（跟随 app / 预设）。
+MAX_SIDE_LIMIT = 4096
 
 
 def is_video_model(model_name: str) -> bool:
@@ -490,6 +494,48 @@ async def _fetch_models_async(host: str, port: int, refresh: bool = True) -> lis
 def fetch_models(host: str, port: int, refresh: bool = True) -> list[dict]:
     """同步包装：gRPC 模型清单。"""
     return asyncio.run(_fetch_models_async(host, port, refresh))
+
+
+_PROBE_TTL = 3.0   # 在线检测结果缓存秒数：配置页多张卡片同时检测时避免反复建连
+_PROBE_TIMEOUT = 4.0   # 单次检测超时（秒）：离线端点尽快判负，不拖住页面
+_PROBE_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def probe_endpoint(host: str, port: int, timeout: float = _PROBE_TIMEOUT) -> dict:
+    """Draw Things 在线状态检测：连得上 gRPC = 在线（顺带读 app 当前已缓存的模型数量）。
+
+    返回 {online, models, elapsed_ms, error}，**离线不抛异常**（前端要显示「离线 + 原因」）。
+    按 host:port 缓存 _PROBE_TTL 秒，避免同一端点被多张卡片反复建连。"""
+    key = f"{host}:{port}"
+    now = time.monotonic()
+    hit = _PROBE_CACHE.get(key)
+    if hit and now - hit[0] < _PROBE_TTL:
+        return dict(hit[1])
+
+    async def _probe() -> int:
+        from drawthings_py import DrawThings
+        svc = DrawThings.grpc(host=host, port=port, progressbar=False, disable_messages=True)
+        await svc.connect()
+        try:
+            mi = await svc.get_models(refresh_cache=False)   # 不刷新缓存：只读 app 当前可见的模型
+        finally:
+            try:
+                await svc.close()
+            except Exception:
+                pass
+        return len(_model_files(mi))
+
+    t0 = time.monotonic()
+    online, models, err = False, 0, ""
+    try:
+        models = asyncio.run(asyncio.wait_for(_probe(), timeout))
+        online = True
+    except Exception as e:
+        err = str(e).strip() or e.__class__.__name__
+    out = {"online": online, "models": models,
+           "elapsed_ms": int((time.monotonic() - t0) * 1000), "error": err}
+    _PROBE_CACHE[key] = (time.monotonic(), out)
+    return dict(out)
 
 
 class DrawThingsClient:

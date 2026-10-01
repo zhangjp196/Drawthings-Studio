@@ -42,10 +42,10 @@ class Pipeline:
 
     def create(self, db, kind: str, origin: str,
                llm_config_id: str, drawthings_config_id: str,
-               style: str = "", title: str = ""):
+               title: str = ""):
         """新建：按 kind 参数路由（comic→漫画流水线 / 其他→短剧流水线）。"""
         return (self.comic if kind == "comic" else self.drama).create(
-            db, kind, origin, llm_config_id, drawthings_config_id, style=style, title=title)
+            db, kind, origin, llm_config_id, drawthings_config_id, title=title)
 
     def list_projects(self, db, kind=None, status=None, q=None, sort="desc",
                       limit: int = 10, offset: int = 0):
@@ -90,10 +90,6 @@ class Pipeline:
         if self._is_comic(project):
             return self.comic.delete_season(db, project, season_id)
         return self.drama.delete_episode(db, project, season_id)
-
-    def step_arc(self, db, project, lang: str = "zh",
-                 res_width: int = 0, res_height: int = 0, extra_prompt: str = ""):
-        return self._of(project).step_arc(db, project, lang, res_width, res_height, extra_prompt)
 
     def step_season_arc(self, db, project, season, lang: str = "zh", extra_prompt: str = ""):
         if self._is_comic(project):

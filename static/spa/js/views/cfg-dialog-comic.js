@@ -1,10 +1,10 @@
-// 漫画项目页 —— 项目设置弹框（漫画专属，不与短剧共享）：LLM / DrawThings / 模型 / 参考图开关。
+// 漫画项目页 —— 项目设置弹框（漫画专属，不与短剧共享）：LLM / DrawThings / 模型 / 参考图开关 / 自动评分。
 window.Views = window.Views || {};
 
 Views.comicCfgDialog = {
   props: {
     modelValue: { type: Boolean, default: false },
-    cfg: { type: Object, required: true },       // {llm,dt,dt_model,dt_ref}
+    cfg: { type: Object, required: true },       // {llm,dt,dt_model,dt_ref,score,score_min,redo,stop_low}
     llmConfigs: { type: Array, default: () => [] },
     dtConfigs: { type: Array, default: () => [] },
     modelChoices: { type: Array, default: () => [] },
@@ -36,6 +36,18 @@ Views.comicCfgDialog = {
             <el-option v-for="m in modelChoices" :key="m.file" :value="m.file" :label="m.label" />
           </el-select>
           <el-checkbox v-model="cfg.dt_ref" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
+        </el-form-item>
+        <el-form-item :label="I18N.t('p.scoreAuto')">
+          <div class="score-opts">
+            <el-checkbox v-model="cfg.score">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
+            <el-checkbox v-model="cfg.redo" :disabled="!cfg.score">{{ I18N.t('p.scoreRedoLabel') }}</el-checkbox>
+            <el-checkbox v-model="cfg.stop_low" :disabled="!cfg.score">{{ I18N.t('p.scoreStopLowLabel') }}</el-checkbox>
+            <div class="res-row" style="margin: 2px 0;">
+              <span class="muted small">{{ I18N.t('p.scoreMin') }}</span>
+              <el-input-number v-model="cfg.score_min" :min="0" :max="100" size="small" :disabled="!cfg.score" />
+            </div>
+            <div class="hint" style="margin: 2px 0 0;">{{ I18N.t('p.scoreAutoHint') }}</div>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
