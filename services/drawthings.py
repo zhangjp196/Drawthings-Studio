@@ -84,6 +84,12 @@ MAX_VIDEO_SECONDS = 10
 # max_side（最大分辨率 · 最长边）可配置上限：4096 = 4K。0 = 不限（跟随 app / 预设）。
 MAX_SIDE_LIMIT = 4096
 
+# 功能级 max_steps（最大 Step 数）可配上限：0 = 跟随预设自带步数。
+# 图像与视频**分开**配置：两者需求差别很大（图像如 qwen-image 需补到 50~100；
+# 视频如 LTX 蒸馏版预设仅 8 步，反而宜少步）。取 200 封顶，避免误设上千步跑数小时。
+# 步数不足时去噪不彻底 —— 典型表现是出图半透明、颜色发灰。
+MAX_STEPS_LIMIT = 200
+
 
 def is_video_model(model_name: str) -> bool:
     """按模型名判断是否视频模型（不确定时按图像）。"""
@@ -547,6 +553,8 @@ class DrawThingsClient:
         self.model_video = str(getattr(cfg, "model_video", "") or "").strip()
         self.max_side = int(getattr(cfg, "max_side", 0) or 0)
         self.max_seconds = int(getattr(cfg, "max_seconds", 0) or 0)
+        self.max_steps_image = 0   # 功能级（随模型走，见 build_drawthings_client）
+        self.max_steps_video = 0   # 图像 / 视频分开，两者步数需求差别很大
         self.ref_image = bool(getattr(cfg, "ref_image", 0))   # 图像模型支持参考图片（图生图）
         self.ref_video = bool(getattr(cfg, "ref_video", 0))   # 视频模型支持参考图片（图生视频）
         self.media_dir = Path(data_dir) / "media"
@@ -662,7 +670,7 @@ class DrawThingsClient:
         return corrected
 
     # ---------------- 内部 ----------------
-    def _gen_config(self, model: str):
+    def _gen_config(self, model: str, video: bool = False):
         try:
             from drawthings_py import Configs
         except Exception as e:  # 未安装 drawthings-py
@@ -681,6 +689,13 @@ class DrawThingsClient:
             raise RuntimeError(f"无法加载 Draw Things 预设 {preset}：{e} / Cannot load preset {preset}: {e}")
         if model:
             cfg["model"] = model
+        # 步数：按图像 / 视频取对应的功能级 max_steps，> 0 时覆盖预设自带步数；0 = 跟随预设。
+        steps = self.max_steps_video if video else self.max_steps_image
+        if steps > 0:
+            try:
+                cfg["steps"] = int(steps)
+            except Exception:
+                pass
         return cfg
 
     async def _port_open(self, timeout: float = 2.0) -> bool:
@@ -821,7 +836,7 @@ class DrawThingsClient:
             raise RuntimeError(
                 f"未配置{kind}模型：请在 DrawThings 配置里填写{kind}模型文件名。"
                 f" / No {kind} model configured.")
-        cfg = self._gen_config(model)
+        cfg = self._gen_config(model, video)
         # 尺寸：图片 = 调用方 params > 预设，再受 max_side 限幅；视频尺寸由预设/模型决定
         # 帧率：预设**显式声明**优先，否则按模型族推断。
         # 不能直接读 cfg["fps"]：GenConfig 会给未声明的键回填 schema 默认值 5，
@@ -1067,12 +1082,15 @@ def norm_ref_flag(v) -> int | None:
 
 def build_drawthings_client(cfg, data_dir: Path,
                              model_image: str = "", model_video: str = "",
-                             ref_image: int | None = None, ref_video: int | None = None) -> DrawThingsClient:
+                             ref_image: int | None = None, ref_video: int | None = None,
+                             max_steps_image: int = 0, max_steps_video: int = 0) -> DrawThingsClient:
     """构造 Draw Things 客户端（仅 gRPC）。
 
     model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）；
     留空 = 跟随 DrawThings 配置里的模型。
     ref_image / ref_video：功能级「支持参考图片」覆盖；None = 跟随配置，0/1 = 显式关/开。
+    max_steps_image / max_steps_video：功能级最大 Step 数（随所选模型一起配，两者分开）；
+    0 = 跟随预设自带步数。
     """
     c = DrawThingsClient(cfg, data_dir)
     if model_image:
@@ -1083,4 +1101,8 @@ def build_drawthings_client(cfg, data_dir: Path,
         c.ref_image = bool(ref_image)
     if ref_video is not None:
         c.ref_video = bool(ref_video)
+    if max_steps_image > 0:
+        c.max_steps_image = int(max_steps_image)
+    if max_steps_video > 0:
+        c.max_steps_video = int(max_steps_video)
     return c

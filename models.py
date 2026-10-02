@@ -88,6 +88,8 @@ class Project(Base):
     dt_model_video = Column(String(200), default="")             # 功能级模型：本项目出视频模型（空=跟随 DrawThings 配置）
     dt_ref_image = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_ref_video = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
+    dt_max_steps_image = Column(Integer, default=0)         # 图像最大 Step 数（0=跟随预设；步数不足会出图半透明/偏色）
+    dt_max_steps_video = Column(Integer, default=0)         # 视频最大 Step 数（0=跟随预设；与图像分开，蒸馏视频模型宜少步）
     status = Column(String(20), default="planning")       # planning|chaptered（无「完结/锁定」态：作品始终可继续编辑生成）
     global_prompt = Column(Text, default="")               # 全局要求（风格 + 要点/约束）：注入到每次 LLM 调用
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
@@ -179,6 +181,8 @@ class MicroWork(Base):
     dt_model_video = Column(String(200), default="")         # 功能级模型：本作品出视频模型（空=跟随 DrawThings 配置）
     dt_ref_image = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_ref_video = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
+    dt_max_steps_image = Column(Integer, default=0)         # 图像最大 Step 数（0=跟随预设；步数不足会出图半透明/偏色）
+    dt_max_steps_video = Column(Integer, default=0)         # 视频最大 Step 数（0=跟随预设；与图像分开，蒸馏视频模型宜少步）
     score_mode = Column(String(10), default="image")         # 自动评分依据：image=仅画面（忽略提示词）| prompt=结合提示词相符度
     auto_score = Column(Integer, default=0)                  # 生成后自动评分：0=关闭（默认，手动点「评分」），1=开启
     created_at = Column(String(40), default=_now)

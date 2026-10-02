@@ -38,6 +38,10 @@ Views.dramaCfgDialog = {
           </el-select>
           <el-checkbox v-model="cfg.dt_ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
         </el-form-item>
+        <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsImage')">
+          <el-input-number v-model="cfg.dt_steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
+          <div class="hint">{{ I18N.t('cfg.maxStepsHint') }}</div>
+        </el-form-item>
         <el-form-item v-if="cfg.dt" :label="I18N.t('cf.dtModelVideo')">
           <el-select v-model="cfg.dt_model_v" filterable allow-create clearable style="width: 100%"
                      :placeholder="I18N.t('cf.dtModelPh')">
@@ -45,6 +49,10 @@ Views.dramaCfgDialog = {
             <el-option v-for="m in vidChoices" :key="'v' + m.file" :value="m.file" :label="m.label" />
           </el-select>
           <el-checkbox v-model="cfg.dt_ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
+        </el-form-item>
+        <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsVideo')">
+          <el-input-number v-model="cfg.dt_steps_v" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
+          <div class="hint">{{ I18N.t('cfg.maxStepsHintVideo') }}</div>
         </el-form-item>
         <el-form-item :label="I18N.t('p.scoreAuto')">
           <div class="score-opts">

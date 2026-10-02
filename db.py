@@ -124,12 +124,16 @@ def _migrate():
             "dt_model_video": "VARCHAR(200) DEFAULT ''",
             "dt_ref_image": "VARCHAR(1) DEFAULT ''",
             "dt_ref_video": "VARCHAR(1) DEFAULT ''",
+            "dt_max_steps_image": "INTEGER DEFAULT 0",
+            "dt_max_steps_video": "INTEGER DEFAULT 0",
         },
         "micro_works": {
             "dt_model_image": "VARCHAR(200) DEFAULT ''",
             "dt_model_video": "VARCHAR(200) DEFAULT ''",
             "dt_ref_image": "VARCHAR(1) DEFAULT ''",
             "dt_ref_video": "VARCHAR(1) DEFAULT ''",
+            "dt_max_steps_image": "INTEGER DEFAULT 0",
+            "dt_max_steps_video": "INTEGER DEFAULT 0",
             "score_mode": "VARCHAR(10) DEFAULT 'image'",
             "auto_score": "INTEGER DEFAULT 0",
         },
@@ -194,14 +198,16 @@ def _migrate():
                          "characters",  # 已移除：角色只挂在季上（各季 characters）
                          "arc",  # 已移除：整体故事大纲并入「生成本季大纲」（总纲不再单独存）
                          "scope",  # 已移除：风格并入 global_prompt（单一「全局要求」字段）
-                         "count_mode", "count_min", "count_max"),  # 已移除：章节数量按季存于 Season
+                         "count_mode", "count_min", "count_max",  # 已移除：章节数量按季存于 Season
+                         "dt_max_steps"),  # 已拆分：图像/视频分开（dt_max_steps_image / _video）
             "drawthing_configs": ("mode", "protocol", "shared_secret", "model_name", "media_type",
                                   "transport",  # 已移除：只保留 gRPC
                                   "model", "preset", "preset_image", "preset_video",  # 预设改为按模型名自动推断
                                   "max_frames",  # 已改为 max_seconds（秒）
                                   "steps", "guidance_scale", "num_frames", "fps",
                                   "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）
-            "micro_works": ("media_type",),  # 产出类型改由 app 当前模型自动判断
+            "micro_works": ("media_type",  # 产出类型改由 app 当前模型自动判断
+                            "dt_max_steps"),  # 已拆分：图像/视频分开（dt_max_steps_image / _video）
         }
         for table, cols in deprecated.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}

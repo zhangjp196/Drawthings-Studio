@@ -20,7 +20,7 @@ from db import get_db
 from i18n import L
 from models import Asset, GenerationJob, MicroMessage, MicroSession, MicroWork
 from services.api_common import (
-    MEDIA_DIR, _clamp_page, _dt_ref_field, _dt_view, _json_body, _lang,
+    MEDIA_DIR, _clamp_page, _dt_ref_field, _dt_steps_field, _dt_view, _json_body, _lang,
     _llm_view, _sse,
 )
 from services import events as E
@@ -104,6 +104,8 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "dt_model_video": work.dt_model_video or "",
             "dt_ref_image": work.dt_ref_image or "",
             "dt_ref_video": work.dt_ref_video or "",
+            "dt_max_steps_image": work.dt_max_steps_image or 0,
+            "dt_max_steps_video": work.dt_max_steps_video or 0,
             "score_mode": work.score_mode or "image",
             "auto_score": int(work.auto_score or 0),
             "created_at": work.created_at,
@@ -182,6 +184,8 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
         dt_model_video=str(body.get("dt_model_video") or "").strip()[:200],
         dt_ref_image=_dt_ref_field(body, "dt_ref_image"),
         dt_ref_video=_dt_ref_field(body, "dt_ref_video"),
+        dt_max_steps_image=_dt_steps_field(body, "dt_max_steps_image", lang),
+        dt_max_steps_video=_dt_steps_field(body, "dt_max_steps_video", lang),
         score_mode=norm_score_mode(body.get("score_mode")),
         auto_score=(1 if body.get("auto_score") else 0),
         created_at=_now(), updated_at=_now(),
@@ -424,6 +428,8 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     work.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
     work.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
     work.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
+    work.dt_max_steps_image = _dt_steps_field(body, "dt_max_steps_image", lang)
+    work.dt_max_steps_video = _dt_steps_field(body, "dt_max_steps_video", lang)
     work.score_mode = norm_score_mode(body.get("score_mode"))
     work.auto_score = 1 if body.get("auto_score") else 0
     work.updated_at = _now()

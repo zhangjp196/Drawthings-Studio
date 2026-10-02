@@ -74,6 +74,10 @@ Views.microWork = {
             </el-select>
             <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
           </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsImage')">
+            <el-input-number v-model="cfg.steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
+            <div class="hint">{{ I18N.t('cfg.maxStepsHint') }}</div>
+          </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelVideo')">
             <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
@@ -83,6 +87,11 @@ Views.microWork = {
             <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
             <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsVideo')">
+            <el-input-number v-model="cfg.steps_v" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
+            <div class="hint">{{ I18N.t('cfg.maxStepsHintVideo') }}</div>
+          </el-form-item>
+
           <el-form-item :label="I18N.t('mc.scoreMode')">
             <el-select v-model="cfg.score_mode" style="width: 100%">
               <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
@@ -146,7 +155,7 @@ Views.microWork = {
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
     const cfgDlg = ref(false);
-    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, score_mode: 'image', auto_score: false });
+    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0, score_mode: 'image', auto_score: false });
     function openCfg() { syncCfg(); cfgDlg.value = true; }  // 作品选项弹框：打开前同步当前值
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
@@ -179,6 +188,8 @@ Views.microWork = {
       cfg.mv = w.dt_model_video || (c ? (c.model_video || '') : '');
       cfg.ref_i = (w.dt_ref_image === '1') || (w.dt_ref_image === '' && !!c && !!c.ref_image);
       cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
+      cfg.steps_i = w.dt_max_steps_image || 0;
+      cfg.steps_v = w.dt_max_steps_video || 0;
       fetchModels();
     }
     watch(() => cfg.dt, (id) => {
@@ -188,6 +199,8 @@ Views.microWork = {
       cfg.mv = w.dt_model_video || (c ? (c.model_video || '') : '');
       cfg.ref_i = (w.dt_ref_image === '1') || (w.dt_ref_image === '' && !!c && !!c.ref_image);
       cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
+      cfg.steps_i = w.dt_max_steps_image || 0;
+      cfg.steps_v = w.dt_max_steps_video || 0;
       fetchModels();
     });
 
@@ -300,6 +313,8 @@ Views.microWork = {
           drawthings_config_id: cfg.dt,
           dt_model_image: cfg.mi, dt_model_video: cfg.mv,
           dt_ref_image: cfg.ref_i ? 1 : 0, dt_ref_video: cfg.ref_v ? 1 : 0,
+          dt_max_steps_image: cfg.steps_i,
+          dt_max_steps_video: cfg.steps_v,
           score_mode: cfg.score_mode,
           auto_score: cfg.auto_score ? 1 : 0,
         });

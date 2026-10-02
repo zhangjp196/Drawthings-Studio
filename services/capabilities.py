@@ -2,7 +2,9 @@
 
 功能级字段在 `Project` 与 `MicroWork` 上语义完全一致：
 - `dt_model_image` / `dt_model_video`：本作品自选出图/出视频模型，空 = 跟随 DrawThings 配置；
-- `dt_ref_image` / `dt_ref_video`：是否用参考图（图生图 / 图生视频），'' = 跟随配置，'0'/'1' = 显式覆盖。
+- `dt_ref_image` / `dt_ref_video`：是否用参考图（图生图 / 图生视频），'' = 跟随配置，'0'/'1' = 显式覆盖；
+- `dt_max_steps_image` / `dt_max_steps_video`：图像 / 视频各自的最大 Step 数
+  （随所选模型一起配，两者需求差别很大），0 = 跟随预设自带步数。
 
 把这些「覆盖规则」集中到这里，避免项目侧与微创作各写一份而漂移。
 """
@@ -43,6 +45,8 @@ def dt_client(cfg, data_dir, subject):
         model_video=getattr(subject, "dt_model_video", "") or "",
         ref_image=norm_ref_flag(getattr(subject, "dt_ref_image", "")),
         ref_video=norm_ref_flag(getattr(subject, "dt_ref_video", "")),
+        max_steps_image=int(getattr(subject, "dt_max_steps_image", 0) or 0),
+        max_steps_video=int(getattr(subject, "dt_max_steps_video", 0) or 0),
     )
 
 

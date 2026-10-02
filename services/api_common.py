@@ -12,7 +12,7 @@ from config import MEDIA_DIR, media_url as _media_url
 from i18n import L, lang_of
 from models import Project
 from config_store import ConfigStore
-from services.drawthings import MAX_SIDE_LIMIT, MAX_VIDEO_SECONDS, norm_ref_flag
+from services.drawthings import MAX_SIDE_LIMIT, MAX_STEPS_LIMIT, MAX_VIDEO_SECONDS, norm_ref_flag
 from services.pipeline import hex_to_rgb
 from services.runtime import pipeline
 
@@ -87,6 +87,23 @@ def _dt_ref_field(body: dict, key: str) -> str:
     if key not in body:
         return ""
     return "1" if norm_ref_flag(body.get(key)) else "0"
+
+
+def _dt_steps_field(body: dict, key: str = "dt_max_steps_image", lang: str = "zh") -> int:
+    """功能级最大 Step 数（图像 / 视频分开，随所选模型一起配）：缺省 / 空 = 0（跟随预设自带步数）。非法值 400。"""
+    v = body.get(key)
+    if v in (None, ""):
+        return 0
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"{key} 需为整数", f"{key} must be an integer"))
+    if v < 0 or v > MAX_STEPS_LIMIT:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"{key} 超出范围（0~{MAX_STEPS_LIMIT}，0=跟随预设）",
+                                     f"{key} out of range (0~{MAX_STEPS_LIMIT}, 0 = follow the preset)"))
+    return v
 
 
 def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:

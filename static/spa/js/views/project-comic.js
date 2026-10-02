@@ -365,7 +365,7 @@ Views.projectComic = {
 
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
-    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref: false,
+    const cfg = reactive({ llm: '', dt: '', dt_model: '', dt_ref: false, dt_steps_i: 0,
                         score: true, score_min: 60, redo: true, stop_low: false });
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（漫画只列图像模型）
     const dtModels = ref([]);
@@ -952,6 +952,7 @@ Views.projectComic = {
       const p = data.value.project;
       cfg.dt_model = p.dt_model_image || (c ? (c.model_image || '') : '');
       cfg.dt_ref = (p.dt_ref_image === '1') || (p.dt_ref_image === '' && !!c && !!c.ref_image);
+      cfg.dt_steps_i = p.dt_max_steps_image || 0;
       // 自动评分设置（原「总体 → 自动评分」子页签，已并入本弹框）
       cfg.score = !!p.auto_score;
       cfg.score_min = p.score_min || 60;
@@ -967,6 +968,7 @@ Views.projectComic = {
           llm_config_id: cfg.llm, drawthings_config_id: cfg.dt,
           dt_model_image: cfg.dt_model,
           dt_ref_image: cfg.dt_ref ? 1 : 0,
+          dt_max_steps_image: cfg.dt_steps_i,
           auto_score: cfg.score, score_min: cfg.score_min,
           auto_redo: cfg.redo, stop_on_low: cfg.stop_low,
         });

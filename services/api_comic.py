@@ -23,7 +23,7 @@ from services import jobs
 from services.jobs import JobCancelled
 from services.api_common import (
     MEDIA_DIR, MAX_IMAGE_UPLOAD, _overlay_opts, _lang, _json_body, _media_url,
-    _chapter_view, _dt_ref_field, _project_view, _config_lists, _clamp_page, _sse,
+    _chapter_view, _dt_ref_field, _dt_steps_field, _project_view, _config_lists, _clamp_page, _sse,
 )
 
 router = APIRouter(prefix="/api/comics", tags=["comic"])
@@ -153,6 +153,8 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "llm_config_id": project.llm_config_id,
             "drawthings_config_id": project.drawthings_config_id,
             "dt_model_image": project.dt_model_image or "",
+            "dt_max_steps_image": project.dt_max_steps_image or 0,
+            "dt_max_steps_video": project.dt_max_steps_video or 0,
             "dt_model_video": project.dt_model_video or "",
             "dt_ref_image": project.dt_ref_image or "",
             "dt_ref_video": project.dt_ref_video or "",
@@ -202,6 +204,11 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     project.dt_model_video = str(body.get("dt_model_video") or "").strip()[:200]
     project.dt_ref_image = _dt_ref_field(body, "dt_ref_image")
     project.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
+    # 最大 Step 数（图像 / 视频分开，随所选模型一起配；未传 = 不改）
+    if "dt_max_steps_image" in body:
+        project.dt_max_steps_image = _dt_steps_field(body, "dt_max_steps_image", lang)
+    if "dt_max_steps_video" in body:
+        project.dt_max_steps_video = _dt_steps_field(body, "dt_max_steps_video", lang)
     # 自动评分（设置弹框内调整；未传 = 不改）
     for key in ("auto_score", "auto_redo", "stop_on_low"):
         if key in body:

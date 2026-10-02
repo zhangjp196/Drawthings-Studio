@@ -211,6 +211,14 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   (`model_image` / `model_video`) is kept only as a fallback default (each may be empty). The generation preset
   (steps / sampler / size) is **inferred from the model name**, no input needed. Any project/work can use any
   Draw Things config.
+  Other generation params that travel **with the model** live in the same place (project "Project settings" / micro-creation settings / create form):
+  **`dt_max_steps_image` / `dt_max_steps_video` (max steps, **separate for image and video**, each settable 1-200, 0 = follow the step count baked into the preset)**.
+  > **Translucent / washed-out images -> raise the *image* step count**: too few steps leave denoising unfinished, so noise and
+  > a colour cast survive. The `qwen-image` preset ships just **30 steps**, which measures visibly pale/translucent; raising it to
+  > **50-100** fixes it. The cost is roughly linear (double the steps ~ double the time) and more VRAM at large sizes.
+  > **Video is the opposite**: common video models are distilled (the LTX preset ships just 8 steps) and want *fewer* steps —
+  > usually leave it at 0; only raise it for a non-distilled video model. Likewise **distilled image models (lightning / turbo)
+  > want fewer steps** — leave those at 0.
   **Online status**: each config card shows an online/offline dot (green = online with the model count, red = offline; hover for the reason and latency), with a manual "Check online" button and a 30s auto-refresh. The check opens a single gRPC connection (`GET /api/dt-status`, 4s timeout, 3s result cache) and **never triggers a generation**.
   Personalized params: `max_side` (max resolution, longest side only; caps both images and video; **512/768/1024/1536/2048/3072/4096 (4K)**, 0 = unlimited / follow app) and
   `max_seconds` (max video duration in seconds; **default 10, settable 1–10**; 0 = use the built-in cap) — the model may choose a shorter duration per request (never above the cap). **Drama clips each have their own duration (seconds) field**, **manual by design**: leave it **0 to follow the preset/config cap** (recommended for LTX — a non-native frame count can make some models return no frames or crash the app), or set a shorter value in the clip card / with the toolbar **Batch duration**.

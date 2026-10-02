@@ -37,6 +37,10 @@ Views.comicCfgDialog = {
           </el-select>
           <el-checkbox v-model="cfg.dt_ref" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
         </el-form-item>
+        <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsImage')">
+          <el-input-number v-model="cfg.dt_steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
+          <div class="hint">{{ I18N.t('cfg.maxStepsHint') }}</div>
+        </el-form-item>
         <el-form-item :label="I18N.t('p.scoreAuto')">
           <div class="score-opts">
             <el-checkbox v-model="cfg.score">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>
