@@ -1,4 +1,4 @@
-"""短剧（视频）流水线（独立）：一句话 -> 全局(风格/总纲/核心角色/封面) -> 各季(季大纲/季角色/章节规划) -> 剧本编写 -> 逐章生视频。
+"""短剧（视频）流水线（独立）：一句话 -> 全局(全局要求/封面) -> 各集(本集大纲/本集角色/片段规划) -> 剧本编写 -> 逐段生视频。
 
 与漫画流水线（pipeline_comic.py）完全独立、互不共享业务逻辑：
 - 剧本系统提示词面向短剧（连贯视频画面，横/竖构图按场景自选）；
@@ -13,11 +13,11 @@
 因此不同项目可用不同的端点/模型/模式。
 
 多集（篇章）设计（统一世界观 + 各集独立故事）：
-- 项目层：global_prompt（全局要求：风格 + 要点）/ characters（核心角色）/ 封面，全局共享；
-- 季层：每季有自己的 arc（本集大纲）/ characters（本集新增角色）/ 章节数量设定 / 章节；
+- 项目层：global_prompt（全局要求：风格 + 要点）/ 封面，全局共享；**角色只挂在集上**（无项目层核心角色）；
+- 季层：每集有自己的 arc（本集大纲）/ characters（本集角色）/ 片段数量设定 / 片段；
 - **不再有项目层总纲**：「生成本集大纲」一步同时负责全篇主线与本集路线，作品标题也随该步产出；
 - 章节 index 为扁平全局序号（按季连续），季内展示序号由分组位置计算；
-- 剧本/生成上下文 = 全局要求 + 核心角色 + 本集大纲 + 本集角色；
+- 剧本/生成上下文 = 全局要求 + 本集大纲 + 截至本集（季）的全部角色；
 - 连续性：首章（第 1 集第 1 章）用封面（若开启），其余章用上一章媒体（跨集承接上集末章）。
 """
 import logging
@@ -597,7 +597,7 @@ class DramaPipeline:
     def save_episode(self, db, project: Project, season: Season, *,
                     title: str | None = None, arc: str | None = None,
                     characters: list[dict] | None = None,
-                    count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
+                    count_min: int | None = None, count_max: int | None = None,
                     chapters: list[dict] | None = None) -> Season:
         """保存季（篇章）级编辑：季名 / 季大纲 / 季角色（名字+描述，按 id 保留参考图）/ 章节数量设定 / 每章(标题+摘要)。
         仅更新传入（非 None）的字段；章节按季内序号对账。"""
@@ -623,8 +623,6 @@ class DramaPipeline:
                 if cid not in kept and c.get("image"):
                     self._rm_media(c["image"])
             season.characters = chars_to_raw(new_chars)
-        if count_mode is not None:
-            season.count_mode = "range"           # 仅范围模式（兼容旧参数：一律按范围处理）
         if count_min is not None or count_max is not None:
             lo, hi = count_range(count_min if count_min is not None else season.count_min,
                                  count_max if count_max is not None else season.count_max)
@@ -659,7 +657,6 @@ class DramaPipeline:
         会清空该季已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
         self._require_episode_arc(season, lang)
         self._require_season_chars(season, lang)
-        season.count_mode = "range"              # 仅范围模式
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         n = await self._plan_clip_count(db, project, season, lang,
@@ -729,7 +726,6 @@ class DramaPipeline:
         status → chaptered。progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后。"""
         self._require_episode_arc(season, lang)
         self._require_season_chars(season, lang)
-        season.count_mode = "range"              # 仅范围模式（固定值即 min=max）
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         if mode == "append":

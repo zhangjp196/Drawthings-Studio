@@ -840,7 +840,6 @@ Views.projectDrama = {
       (async () => {
         try {
           await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, {
-            count_mode: 'range',
             count_min: planCount.value,
             count_max: planCount.value,
             chapters: seasonChapters.value.map(c => ({ title: c.title, summary: c.summary })),

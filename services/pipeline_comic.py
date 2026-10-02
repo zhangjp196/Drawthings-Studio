@@ -1,4 +1,4 @@
-"""漫画流水线（独立）：一句话 -> 全局(全局要求/核心角色/封面) -> 各季(季大纲/季角色/章节规划) -> 剧本编写 -> 逐章生图。
+"""漫画流水线（独立）：一句话 -> 全局(全局要求/封面) -> 各季(季大纲/季角色/章节规划) -> 剧本编写 -> 逐章生图。
 
 与短剧流水线（pipeline_drama.py）完全独立、互不共享业务逻辑：
 - 剧本系统提示词面向漫画（一页多格、格内带文字、竖版构图）；
@@ -13,11 +13,11 @@
 因此不同项目可用不同的端点/模型/模式。
 
 多季（篇章）设计（统一世界观 + 各季独立故事，类似七龙珠）：
-- 项目层：global_prompt（全局要求：风格 + 要点）/ characters（核心角色）/ 封面，全局共享；
+- 项目层：global_prompt（全局要求：风格 + 要点）/ 封面，全局共享；**角色只挂在季上**（无项目层核心角色）；
 - 季层：每季有自己的 arc（季大纲）/ characters（本季新增角色）/ 章节数量设定 / 章节；
 - **不再有项目层总纲**：「生成本季大纲」一步同时负责全篇主线与本季路线，作品标题也随该步产出；
 - 章节 index 为扁平全局序号（按季连续），季内展示序号由分组位置计算；
-- 剧本/生成上下文 = 全局要求 + 核心角色 + 季大纲 + 季角色；
+- 剧本/生成上下文 = 全局要求 + 季大纲 + 截至本季的全部季角色；
 - 连续性：首章（第 1 季第 1 章）用封面（若开启），其余章用上一章媒体（跨季承接上季末章）。
 """
 import logging
@@ -243,7 +243,7 @@ class ComicPipeline:
         return arc
 
     def _overall_arc(self, db, project: Project) -> str:
-        """全篇主线（供项目级步骤参考：核心角色 / 封面提示词）。
+        """全篇主线（供项目级步骤参考：作品封面提示词）。
 
         已无项目层总纲，取**第一季大纲**作为全篇起点 —— 第 1 季的路线即作品开篇主线。
         第 1 季大纲尚未生成时返回空串（调用方按「无大纲」处理）。"""
@@ -375,7 +375,7 @@ class ComicPipeline:
                               extra_prompt: str = "") -> Project:
         """「生成本季大纲」：**一次调用同时负责全篇主线与本季路线**（原「生成大纲」已并入本步）。
 
-        输入：项目名称（主题）+ 全局要求 + 核心角色 + 本季季号/季名 + 全篇已有剧情线（其他季的大纲）；
+        输入：项目名称（主题）+ 全局要求 + 本季季号/季名 + 全篇已有剧情线（其他季的大纲）；
         输出：本季四段式大纲 + 3-6 条关键剧情节点 beats，供后续分章逐章落位。
         作品标题也随本步产出（仅当尚未命名时采用，可在总体页手动改）。
         不触碰全局要求 / 角色 / 章节。"""
@@ -605,7 +605,7 @@ class ComicPipeline:
     def save_season(self, db, project: Project, season: Season, *,
                     title: str | None = None, arc: str | None = None,
                     characters: list[dict] | None = None,
-                    count_mode: str | None = None, count_min: int | None = None, count_max: int | None = None,
+                    count_min: int | None = None, count_max: int | None = None,
                     chapters: list[dict] | None = None) -> Season:
         """保存季（篇章）级编辑：季名 / 季大纲 / 季角色（名字+描述，按 id 保留参考图）/ 章节数量设定 / 每章(标题+摘要)。
         仅更新传入（非 None）的字段；章节按季内序号对账。"""
@@ -631,8 +631,6 @@ class ComicPipeline:
                 if cid not in kept and c.get("image"):
                     self._rm_media(c["image"])
             season.characters = chars_to_raw(new_chars)
-        if count_mode is not None:
-            season.count_mode = "range"           # 仅范围模式（兼容旧参数：一律按范围处理）
         if count_min is not None or count_max is not None:
             lo, hi = count_range(count_min if count_min is not None else season.count_min,
                                  count_max if count_max is not None else season.count_max)
@@ -667,7 +665,6 @@ class ComicPipeline:
         会清空该季已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
         self._require_season_arc(season, lang)
         self._require_season_chars(season, lang)
-        season.count_mode = "range"              # 仅范围模式
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         n = await self._plan_chapter_count(db, project, season, lang,
@@ -736,7 +733,6 @@ class ComicPipeline:
         status → chaptered。progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后。"""
         self._require_season_arc(season, lang)
         self._require_season_chars(season, lang)
-        season.count_mode = "range"              # 仅范围模式（固定值即 min=max）
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
         if mode == "append":
@@ -1403,7 +1399,7 @@ class ComicPipeline:
                                           include_title: bool = True) -> Season:
         """用 DrawThings 生成季封面（文生图）。
 
-        prompt 为「额外提示词」：基础提示词始终由 LLM 结合项目名称/主题 + 全局要求 + 核心角色与
+        prompt 为「额外提示词」：基础提示词始终由 LLM 结合项目名称/主题 + 全局要求 + 第 1 季角色与
         季标题/季大纲/季新增角色自动撰写，额外提示词原样追加在末尾作为补充（留空 = 只用基础提示词）。
         分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
         include_title 为真时在成品图上用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。

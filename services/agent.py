@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx
 import httpx2
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext, ModelSettings
+from pydantic_ai import Agent, ModelSettings
 from pydantic_ai.models import Model
 from pydantic_ai.messages import (
     ImageUrl,

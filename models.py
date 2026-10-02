@@ -6,7 +6,6 @@
 多季（篇章）设计：项目 = 统一世界观（总纲/核心角色/风格/封面），季 = 独立故事段（自己的大纲/新增角色/章节）。
 章节 index 为扁平全局序号（按季连续），季内展示序号由分组位置计算。
 """
-import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, JSON, Boolean, UniqueConstraint
@@ -128,8 +127,7 @@ class Season(Base):
     first_image = Column(String(500), default="")             # 季封面（媒体路径，语义同项目封面）
     first_image_base = Column(String(500), default="")        # 季封面原图（无叠字），同项目封面
     cover_as_first_ref = Column(Boolean, default=False)       # 是否把季封面作为本季第 1 章参考（漫画 img2img / 短剧首帧）
-    count_mode = Column(String(10), default="range")          # 本季章节数量（仅范围 min~max）
-    count_min = Column(Integer, default=0)                   # range：最少章节数
+    count_min = Column(Integer, default=0)               # 本季章节数量范围（仅范围 min~max）                   # range：最少章节数
     count_max = Column(Integer, default=0)                   # range：最多章节数
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)

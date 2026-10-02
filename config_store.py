@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import or_
 
-from db import SessionLocal
 from models import LLMConfig, DrawThingConfig, AppSettings, Project
 
 # 基础配置（单行 JSON）：新建创作的默认 LLM / DrawThings 配置

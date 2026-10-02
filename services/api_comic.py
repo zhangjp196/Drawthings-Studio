@@ -170,7 +170,6 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
                 "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
                                  "image_url": _media_url(c["image"])}
                                 for c in chars_from_raw(s.characters)],
-                "count_mode": s.count_mode or "range",
                 "count_min": s.count_min or 0, "count_max": s.count_max or 0,
             }
             for s in (db.query(Season).filter(Season.project_id == project.id)
@@ -261,7 +260,7 @@ async def project_season_update(request: Request, project_id: str, season_id: st
             db, project, season,
             title=body.get("title"), arc=body.get("arc"),
             characters=characters,
-            count_mode=body.get("count_mode"), count_min=body.get("count_min"),
+            count_min=body.get("count_min"),
             count_max=body.get("count_max"), chapters=chapters)
     except Exception as e:
         raise HTTPException(status_code=400,
@@ -593,7 +592,7 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
 async def project_chapter_score(request: Request, project_id: str, index: int,
                                 db: Session = Depends(get_db)):
     """VLM 自动评分：调用 VLM 对指定章节（季内）重新评分（与流水线自动评分同款）；
-    body 需 season_id（无需分值）。评分不涉及生成，已完结作品也允许。"""
+    body 需 season_id（无需分值）。评分不涉及生成，可随时调用。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = _comic_project(db, project_id, lang)
