@@ -991,19 +991,12 @@ async def season_char_gen_desc(request: Request, project_id: str, season_id: str
 
 @router.post("/{project_id}/outline")
 async def project_outline_save(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """保存总体页手动编辑：全局要求（风格 + 要点）/ 角色设定 / 默认分辨率 / 评分设置（章节按季编辑，见 /seasons）。"""
+    """保存总体页手动编辑：全局要求（风格 + 要点）/ 默认分辨率 / 评分设置（章节与角色按季编辑，见 /seasons）。"""
     lang = _lang(request)
     body = await _json_body(request)
     project = _drama_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    raw_chars = body.get("characters")
-    characters = None
-    if isinstance(raw_chars, list):
-        # 参考图不随保存传（按 id 由后端保留）；这里只同步 名字 / 描述
-        characters = [{"id": str(c.get("id") or ""), "name": str(c.get("name") or ""),
-                        "description": str(c.get("description") or "")}
-                       for c in raw_chars if isinstance(c, dict)]
     try:
         pipeline.drama.save_outline(
             db, project,

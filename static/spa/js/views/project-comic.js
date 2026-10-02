@@ -565,14 +565,15 @@ Views.projectComic = {
       let c = seasonChars.value[i];
       if (!c) return null;
       if (c.id) return c;
-      try {
-        await saveSeasonChars();
-        c = seasonChars.value[i];
-        return c && c.id ? c : null;
-      } catch (e) {
-        ElementPlus.ElMessage.error(e.message);
+      // saveSeasonChars 失败时内部已提示并返回 null，这里不重复弹
+      const saved = await saveSeasonChars();
+      if (!saved) return null;
+      c = saved[i];                      // load() 后是后端返回的新对象，顺序不变
+      if (!c || !c.id) {
+        ElementPlus.ElMessage.warning(I18N.t('p.msgCharSaveFirst'));
         return null;
       }
+      return c;
     }
     async function genFirst(includeTitle = true) {
       busyFirst.value = true;
@@ -767,17 +768,21 @@ Views.projectComic = {
     }
     // 企划（每季）：保存本季角色
     function saveSeasonChars() {
-      if (!seasonId.value) return;
+      if (!seasonId.value) return Promise.resolve();
       busySave.value = true;
-      (async () => {
+      // 返回 promise：新增角色存参考图 / AI 描述前需先落盘取 id（ensureSeasonCharSaved 会 await）
+      return (async () => {
         try {
           await API.patch(`/api/comics/${props.id}/seasons/${seasonId.value}`, {
             characters: seasonChars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
           });
           ElementPlus.ElMessage.success(I18N.t('p.seasonSaved'));
           await load();
-        } catch (e) { ElementPlus.ElMessage.error(e.message); }
-        finally { busySave.value = false; }
+          return seasonChars.value;   // 保存成功：把刷新后的角色交给调用方（ensureSeasonCharSaved）
+        } catch (e) {
+          ElementPlus.ElMessage.error(e.message);
+          return null;               // 失败返回 null（不抛异常：按钮 @confirm 直接调用它）
+        } finally { busySave.value = false; }
       })();
     }
     function savePlan() {

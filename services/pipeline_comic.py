@@ -215,6 +215,13 @@ class ComicPipeline:
                 merged[key if key else c["id"]] = dict(c)
         return list(merged.values())
 
+    def _first_season_chars(self, db, project: Project) -> list[dict]:
+        """开篇季的角色（作品封面用）：取第 1季的角色；还没有任何季时返回空。
+
+        只读——生成封面提示词不该顺手新建季。"""
+        seasons = self._load_seasons(db, project)
+        return self._combined_chars(db, project, seasons[0]) if seasons else []
+
     def _require_season_chars(self, season: Season, lang: str = "zh") -> list[dict]:
         """本季角色不得为空：角色是各章提示词保持人物一致的唯一依据。
 
@@ -1344,7 +1351,7 @@ class ComicPipeline:
         overall = self._overall_arc(db, project)
         if overall:
             user += f"\n故事大纲（第一季主线）：{overall}"
-        chars_text = chars_to_text(self._combined_chars(db, project, self.ensure_first_season(db, project)))
+        chars_text = chars_to_text(self._first_season_chars(db, project))
         if chars_text:
             user += f"\n角色设定：{chars_text}"
         async with agent:
