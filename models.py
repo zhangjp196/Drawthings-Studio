@@ -90,7 +90,6 @@ class Project(Base):
     dt_ref_video = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
     status = Column(String(20), default="planning")       # planning|chaptered（无「完结/锁定」态：作品始终可继续编辑生成）
     global_prompt = Column(Text, default="")               # 全局要求（风格 + 要点/约束）：注入到每次 LLM 调用
-    characters = Column(Text, default="")                  # 核心角色设定（贯穿各季的主要角色，名字/形象/性格）
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
     res_height = Column(Integer, default=0)                # 默认分辨率高（0=跟随智能体/出图端）
     auto_score = Column(Integer, default=0)                # 自动评分：每章画面生成后按 0–100 评分（0=关闭，默认；手动点「评分」）
@@ -111,7 +110,8 @@ class Season(Base):
     """季（篇章/弧）：统一世界观下的独立故事段（类似七龙珠的赛亚人篇/弗利萨篇）。
 
     一个项目下可有多个季；每季有自己的 大纲 / 新增角色 / 章节数量设定 / 章节。
-    项目层的 characters（核心角色）/ global_prompt（全局要求）为全局共享。
+    项目层的 global_prompt（全局要求）为全局共享；**角色只挂在季上**（无项目层核心角色），
+    后一季生成角色时会沿用前面各季已建立的人物。
     季内章节按 Chapter.index（扁平全局序号）连续排列，季内展示序号由分组位置计算。
     """
 
@@ -122,7 +122,7 @@ class Season(Base):
     number = Column(Integer, nullable=False)                # 季序号（1 起）
     title = Column(String(200), default="")                 # 季名（如「赛亚人篇」，空=第N季）
     arc = Column(Text, default="")                           # 季大纲（本段故事路线，可编辑）
-    characters = Column(Text, default="")                    # 本季新增角色（JSON，结构同 project.characters）
+    characters = Column(Text, default="")                    # 本季角色（JSON：id/name/description/image）
     first_image = Column(String(500), default="")             # 季封面（媒体路径，语义同项目封面）
     first_image_base = Column(String(500), default="")        # 季封面原图（无叠字），同项目封面
     cover_as_first_ref = Column(Boolean, default=False)       # 是否把季封面作为本季第 1 章参考（漫画 img2img / 短剧首帧）

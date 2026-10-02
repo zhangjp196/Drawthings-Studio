@@ -65,7 +65,7 @@ def hex_to_rgb(s: str) -> tuple[int, int, int]:
 
 # ---------------- 角色设定（多个角色：id / 名字 / 形象性格 / 参考图） ----------------
 def chars_from_raw(raw: str) -> list[dict]:
-    """解析 project.characters（JSON 列表）为 [{id, name, description, image}]。
+    """解析 Season.characters（JSON 列表）为 [{id, name, description, image}]。
 
     兼容旧版纯文本角色设定：整体视为一个未命名角色的描述。"""
     raw = (raw or "").strip()
@@ -91,7 +91,7 @@ def chars_from_raw(raw: str) -> list[dict]:
 
 
 def chars_to_raw(chars: list[dict]) -> str:
-    """角色列表 -> JSON 字符串（存 project.characters）。"""
+    """角色列表 -> JSON 字符串（存 Season.characters）。"""
     return json.dumps(chars or [], ensure_ascii=False)
 
 

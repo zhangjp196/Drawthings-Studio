@@ -1,6 +1,6 @@
 // 项目详情 · 漫画版：头部/封面 + 季选择器（仅各季）+ 固定的「总体」入口（与各季用竖线分隔）
-// 总体：独立入口，直接显示写作子页签（基本信息/角色/封面/完结），无二级页签
-// 季：二级页签（企划 / 章节 / 预览 / 导出）；企划内含子页签（本季大纲 / 季角色 / 季封面 / 章节规划）
+// 总体：单页（无二级页签）—— 基本信息（标题 / 全局要求 / 分辨率）与封面合并在同一张卡片
+// 季：二级页签（企划 / 章节 / 预览 / 导出）；企划内含子页签（本季大纲 / 季角色 / 季封面）；角色只挂在季上，参考图与 AI 描述入口在季角色页
 // 章节：一键生成（剧本/画面）+ 手风琴卡片（多步，漫画版 chapter-card-comic）
 // 导出：当前所选季的完成情况（X/Y、整季完成提示）+ 按季导出 ZIP/PDF（漫画支持 PDF）+ PDF 预览（新标签直接查看）
 // 与短剧版（project-drama.js）完全独立：章节固定为图片预览、PDF 导出恒可用，不含任何视频逻辑
@@ -42,98 +42,40 @@ Views.projectComic = {
         </el-popconfirm>
       </div>
 
-      <!-- ============ 总体：独立入口，直接显示写作子页签（无 企划/章节/预览/完成 二级页签，那些均为季作用域）============ -->
+      <!-- ============ 总体：单页（无二级页签）—— 标题 / 全局要求 / 分辨率 / 封面 ============ -->
       <div v-if="isOverall" class="subtabs">
-        <nav class="subtabs-nav">
-          <button type="button" class="subtabs-item" :class="{ active: oSub === 'story' }" @click="oSub = 'story'">{{ I18N.t('p.subBasic') }}</button>
-          <button type="button" class="subtabs-item" :class="{ active: oSub === 'chars' }" @click="oSub = 'chars'">{{ I18N.t('p.subChars') }}</button>
-          <button type="button" class="subtabs-item" :class="{ active: oSub === 'cover' }" @click="oSub = 'cover'">{{ I18N.t('p.subCover') }}</button>
-        </nav>
         <div class="subtabs-body">
-              <!-- 全局字段：标题 / 全局要求 / 分辨率 / 角色 / 封面 / 完结（评分设置在项目「设置」弹框） -->
-                <el-card v-if="oSub === 'story'" shadow="never">
-                  <div class="actions outline-bar">
-                    <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveStory">
-                      <template #reference><el-button type="primary" :loading="busySave" >{{ I18N.t('p.outSave') }}</el-button></template>
-                    </el-popconfirm>
-                    <span class="muted" v-if="busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
-                  </div>
-                  <el-form label-position="top">
-                    <el-form-item :label="I18N.t('p.outTitle')" class="out-title">
-                      <el-input v-model="oTitle" size="large" maxlength="100" :placeholder="I18N.t('p.outTitlePh')" @blur="saveTitle" />
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.globalReq')">
-                      <el-input v-model="oGlobal" type="textarea" :rows="6" :placeholder="I18N.t('p.globalReqHint')" />
-                    </el-form-item>
-                    <el-form-item :label="I18N.t('p.outRes')">
-                      <div class="res-row">
-                        <el-input-number v-model="oW" :min="0" :max="4096" :step="64" size="small" />
-                        <span>×</span>
-                        <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
-                        <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
-                      </div>
-                    </el-form-item>
-                  </el-form>
-                </el-card>
-                <el-card v-else-if="oSub === 'chars'" shadow="never">
-                  <div class="actions outline-bar">
-                    <el-button type="primary" :loading="actBusy"  @click="openGenDlg('chars', I18N.t('p.genChars'))">{{ I18N.t('p.genChars') }}</el-button>
-                    <el-popconfirm :title="I18N.t('p.charsSaveConfirm')" @confirm="saveChars">
-                      <template #reference><el-button :loading="busySave" >{{ I18N.t('p.charsSave') }}</el-button></template>
-                    </el-popconfirm>
-                    <span class="muted" v-if="actBusy || busySave" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
-                  </div>
-                  <div v-for="(c, i) in chars" :key="c.id || ('new' + i)" class="char-card">
-                    <div class="row-between" style="margin-bottom:6px;">
-                      <b class="muted small">{{ I18N.t('p.char', i + 1) }}</b>
-                      <el-button size="small" type="danger" plain  @click="delChar(i)">{{ I18N.t('p.charDel') }}</el-button>
-                    </div>
-                    <el-form label-position="top">
-                      <el-form-item :label="I18N.t('p.charName')">
-                        <el-input v-model="c.name" size="small" :placeholder="I18N.t('p.charNamePh')" />
-                      </el-form-item>
-                      <el-form-item>
-                        <template #label>
-                          <span>{{ I18N.t('p.charDesc') }}</span>
-                          <el-popconfirm :title="I18N.t('p.charDescGenConfirm')" @confirm="genCharDesc(i)">
-                            <template #reference>
-                              <el-button size="small" type="primary" plain :loading="genDescBusy === c.id"
-                                         style="margin-left:8px;">{{ I18N.t('p.charDescGen') }}</el-button>
-                            </template>
-                          </el-popconfirm>
-                        </template>
-                        <el-input v-model="c.description" type="textarea" :rows="4" :placeholder="I18N.t('p.charDescPh')" />
-                      </el-form-item>
-                      <el-form-item :label="I18N.t('p.charRef')">
-                        <div class="char-ref">
-                          <img v-if="c.image_url" :src="c.image_url" class="char-ref-img" :alt="c.name || ''"
-                               loading="lazy" decoding="async" @click="openLb([c.image_url], 0)">
-                          <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :on-change="(f) => uploadCharImage(i, f)">
-                            <el-button size="small" >{{ c.image_url ? I18N.t('p.charRefChange') : I18N.t('p.uploadBtn') }}</el-button>
-                          </el-upload>
-                          <el-button v-if="c.image_url" size="small" type="danger" plain
-
-                                     @click="removeCharImage(i)">{{ I18N.t('p.charRefDel') }}</el-button>
-                        </div>
-                        <div class="hint" style="margin-top:4px;">{{ I18N.t('p.charRefHint') }}</div>
-                      </el-form-item>
-                    </el-form>
-                  </div>
-                  <div class="actions" style="margin-top:10px;">
-                    <el-button  @click="addChar">{{ I18N.t('p.charAdd') }}</el-button>
-                  </div>
-                  <el-empty v-if="!chars.length" :description="I18N.t('p.charsEmpty')" :image-size="48" />
-                </el-card>
-                <div v-else>
-                  <div class="actions outline-bar">
-                    <el-button type="primary" :loading="busyFirst"  @click="openCoverGenDlg('project')">{{ I18N.t('p.genFirst') }}</el-button>
-                    <span class="muted" v-if="busyFirst" style="margin-left:10px;">{{ I18N.t('p.busy') }}</span>
-                  </div>
-                  <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt" @preview="openLb([$event], 0)" @reloaded="load"
-                               @overlay="openOvlDlg('project')" />
-                </div>
-              </div>
+          <el-card shadow="never">
+            <div class="actions outline-bar">
+              <el-popconfirm :title="I18N.t('p.saveOutlineConfirm')" @confirm="saveStory">
+                <template #reference><el-button type="primary" :loading="busySave">{{ I18N.t('p.outSave') }}</el-button></template>
+              </el-popconfirm>
+              <el-button :loading="busyFirst" @click="openCoverGenDlg('project')">{{ I18N.t('p.genFirst') }}</el-button>
+              <span class="muted" v-if="busySave || busyFirst" style="margin-left:10px;">{{ progress.text || I18N.t('p.busy') }}</span>
             </div>
+            <el-form label-position="top">
+              <el-form-item :label="I18N.t('p.outTitle')" class="out-title">
+                <el-input v-model="oTitle" size="large" maxlength="100" :placeholder="I18N.t('p.outTitlePh')" @blur="saveTitle" />
+              </el-form-item>
+              <el-form-item :label="I18N.t('p.globalReq')">
+                <el-input v-model="oGlobal" type="textarea" :rows="5" :placeholder="I18N.t('p.globalReqHint')" />
+              </el-form-item>
+              <el-form-item :label="I18N.t('p.outRes')">
+                <div class="res-row">
+                  <el-input-number v-model="oW" :min="0" :max="4096" :step="64" size="small" />
+                  <span>×</span>
+                  <el-input-number v-model="oH" :min="0" :max="4096" :step="64" size="small" />
+                  <span class="muted small" style="margin-left:6px;">{{ I18N.t('p.outResHint') }}</span>
+                </div>
+              </el-form-item>
+            </el-form>
+            <div class="divider"></div>
+            <first-image :project="data.project" :project-id="data.project.id" v-model:prompt="coverPrompt" @preview="openLb([$event], 0)" @reloaded="load"
+                         @overlay="openOvlDlg('project')" />
+          </el-card>
+        </div>
+      </div>
+
 
       <!-- ============ 季：二级页签 企划 / 章节 / 预览 / 完成（随所选季作用域）============ -->
       <el-tabs v-else v-model="tab" class="proj-tabs">
@@ -181,7 +123,22 @@ Views.projectComic = {
                         <el-input v-model="c.name" size="small" :placeholder="I18N.t('p.charNamePh')" />
                       </el-form-item>
                       <el-form-item :label="I18N.t('p.charDesc')">
-                        <el-input v-model="c.description" type="textarea" :rows="3" :placeholder="I18N.t('p.charDescPh')" />
+                        <div class="row" style="gap:6px;">
+                          <el-input v-model="c.description" type="textarea" :rows="3" :placeholder="I18N.t('p.charDescPh')" />
+                          <el-button size="small" :loading="genDescBusy === (c.id || '')" @click="genSeasonCharDesc(i)">{{ I18N.t('p.charDescGen') }}</el-button>
+                        </div>
+                      </el-form-item>
+                      <el-form-item :label="I18N.t('p.charRef')">
+                        <div class="char-ref">
+                          <img v-if="c.image_url" :src="c.image_url" class="char-ref-img" :alt="c.name || ''"
+                               loading="lazy" decoding="async" @click="openLb([c.image_url], 0)">
+                          <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :on-change="(f) => uploadSeasonCharImage(i, f)">
+                            <el-button size="small" >{{ c.image_url ? I18N.t('p.charRefChange') : I18N.t('p.uploadBtn') }}</el-button>
+                          </el-upload>
+                          <el-button v-if="c.image_url" size="small" type="danger" plain
+                                     @click="removeSeasonCharImage(i)">{{ I18N.t('p.charRefDel') }}</el-button>
+                        </div>
+                        <div class="hint" style="margin-top:4px;">{{ I18N.t('p.charRefHint') }}</div>
                       </el-form-item>
                     </el-form>
                   </div>
@@ -284,8 +241,8 @@ Views.projectComic = {
     const progress = reactive({ text: '' });
     let sseCtrl = null;            // 当前流式任务（规划/生成）：离开页面或重开时中断，服务端随之清理
 
-    // 企划子页签：总体模式 story（故事大纲）/ chars（角色）/ cover（封面）；季模式 arc（本季大纲）/ chars（季角色）/ plan（章节规划）
-    const oSub = ref('story');
+    // 企划子页签（仅季作用域）：arc（本季大纲）/ chars（季角色）/ cover（季封面）；总体已合并为单页
+    const oSub = ref('arc');
     // 季（篇章）：seasonId = 'overall' 表示选中「总体」（全局），否则为某季 id
     // 注意：必须声明在引用 seasonChapters 的 computed / watch 之前——
     // Vue 的 watch 注册时会立即执行一次 getter 取旧值，声明靠后会触发 TDZ ReferenceError
@@ -381,7 +338,6 @@ Views.projectComic = {
 
     // 总体表单
     const oTitle = ref('');        // 作品标题（放大输入；随「生成本季大纲」一并生成）
-    const chars = ref([]);       // 角色设定：[{id, name, description, image_url}]（id 为空 = 未保存的新角色）
     const oGlobal = ref('');     // 全局要求（风格 + 要点/约束，注入每次 LLM 调用）
     const oW = ref(0);            // 默认分辨率宽（0 = 跟随出图端/智能体）
     const oH = ref(0);            // 默认分辨率高
@@ -403,7 +359,7 @@ Views.projectComic = {
 
     // 生成弹框（生成大纲 / 生成本季大纲 / 生成角色 共用）：额外提示词
     const genDlg = ref(false);
-    const genDlgStep = ref('');   // 'arc' / 'season_arc' / 'chars'
+    const genDlgStep = ref('');   // 'season_arc' / 'season_chars'
     const genDlgTitle = ref('');
     const genDlgExtra = ref('');
 
@@ -441,8 +397,6 @@ Views.projectComic = {
     function syncOutlineForm() {
       const p = data.value.project;
       oTitle.value = p.title || '';
-      chars.value = (p.characters || []).map(c => ({ id: c.id || '', name: c.name || '',
-                                                      description: c.description || '', image_url: c.image_url || '' }));
       oGlobal.value = p.global_prompt || '';
       oW.value = p.res_width || 0;
       oH.value = p.res_height || 0;
@@ -477,7 +431,7 @@ Views.projectComic = {
       }
     }
 
-    // 非流式推进：arc（故事大纲）/ chars（角色设定）
+    // 非流式推进：season_arc（本季大纲）/ season_chars（季角色）
     async function doAction(step, payload) {
       actBusy.value = true;
       progress.text = '';
@@ -510,8 +464,6 @@ Views.projectComic = {
       } else if (step === 'season_chars') {
         if (isOverall.value) return;
         doAction('season_chars', { season_id: seasonId.value, extra_prompt: extra });
-      } else if (step === 'chars') {
-        doAction('chars', { extra_prompt: extra });
       }
     }
     // 季（篇章）管理
@@ -519,10 +471,8 @@ Views.projectComic = {
       seasonId.value = id;
       selected.value = [];
       cur.value = 0;
-      if (id === 'overall') {
-        oSub.value = 'story';   // 总体模式首个子页签
-      } else {
-        oSub.value = 'arc';     // 季模式首个子页签
+      if (id !== 'overall') {
+        oSub.value = 'arc';     // 季模式首个子页签（总体为单页，无子页签）
         syncSeasonForm();
       }
       // 总体模式没有「章节 / 完成」（两者都按具体季作用域），切到总体时回落到「企划」
@@ -555,91 +505,73 @@ Views.projectComic = {
       }
       seasonArcText.value = s.arc || '';
       seasonTitleText.value = s.title || '';
-      seasonChars.value = (s.characters || []).map(c => ({ id: c.id || '', name: c.name || '', description: c.description || '' }));
+      seasonChars.value = (s.characters || []).map(c => ({ id: c.id || '', name: c.name || '', description: c.description || '', image_url: c.image_url || '' }));
       planCount.value = s.count_max || 12;   // 固定值：读已存的 count_max（min=max）
       planMode.value = 'append';
     }
     function addSeasonChar() {
-      seasonChars.value.push({ id: '', name: '', description: '' });
+      seasonChars.value.push({ id: '', name: '', description: '', image_url: '' });
     }
     function delSeasonChar(i) {
       seasonChars.value.splice(i, 1);
     }
-    // 角色设定：多个角色（名字 / 形象性格 / 参考图）；新增角色未保存前 id 为空，存图前先落盘取 id
-    function addChar() {
-      chars.value.push({ id: '', name: '', description: '', image_url: '' });
-    }
-    function delChar(i) {
-      chars.value.splice(i, 1);
-    }
-    async function uploadCharImage(i, uploadFile) {
-      const file = uploadFile && uploadFile.raw;
-      if (!file) return;
-      if (!file.type || !file.type.startsWith('image/')) {
-        ElementPlus.ElMessage.warning(I18N.t('p.uploadWarn'));
-        return;
-      }
-      let c = chars.value[i];
+    // 季角色：AI 生成描述（未保存的新角色先落盘取 id）/ 上传或清除参考图（季级角色唯一支持参考图）
+    async function genSeasonCharDesc(i) {
+      let c = await ensureSeasonCharSaved(i);
       if (!c) return;
-      if (!c.id) {
-        try {
-          await API.post(`/api/comics/${props.id}/outline`, {
-            characters: chars.value.map(x => ({ id: x.id, name: x.name, description: x.description })),
-          });
-          await load();
-          c = chars.value[i];
-          if (!c) return;
-        } catch (e) {
-          ElementPlus.ElMessage.error(e.message);
-          return;
-        }
-      }
-      const fd = new FormData();
-      fd.append('file', file);
-      API.postForm(`/api/comics/${props.id}/characters/${c.id}/image`, fd)
-        .then(r => {
-          const t = chars.value[i];
-          if (t) t.image_url = r.url || '';
-          ElementPlus.ElMessage.success(I18N.t('p.msgCharImageUploaded'));
-        })
-        .catch(e => ElementPlus.ElMessage.error(e.message));
-    }
-    function removeCharImage(i) {
-      const c = chars.value[i];
-      if (!c || !c.id) return;
-      API.del(`/api/comics/${props.id}/characters/${c.id}/image`)
-        .then(() => {
-          c.image_url = '';
-          ElementPlus.ElMessage.success(I18N.t('p.msgCharImageRemoved'));
-        })
-        .catch(e => ElementPlus.ElMessage.error(e.message));
-    }
-    // AI 生成单个角色的形象/性格描述：有参考图且 LLM 支持视觉时以图为准；新角色未保存前先落盘取 id
-    async function genCharDesc(i) {
-      let c = chars.value[i];
-      if (!c) return;
-      if (!c.id) {
-        try {
-          await API.post(`/api/comics/${props.id}/outline`, {
-            characters: chars.value.map(x => ({ id: x.id, name: x.name, description: x.description })),
-          });
-          await load();
-          c = chars.value[i];
-          if (!c) return;
-        } catch (e) {
-          ElementPlus.ElMessage.error(e.message);
-          return;
-        }
-      }
       genDescBusy.value = c.id;
       try {
-        const r = await API.post(`/api/comics/${props.id}/characters/${c.id}/gen-desc`, {}, 0);
+        const r = await API.post(`/api/comics/${props.id}/seasons/${seasonId.value}/characters/${c.id}/gen-desc`, {}, 0);
         if (r && r.description) c.description = r.description;
         ElementPlus.ElMessage.success(I18N.t('p.msgCharDescGenerated'));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       } finally {
         genDescBusy.value = null;
+      }
+    }
+    async function uploadSeasonCharImage(i, uploadFile) {
+      const file = uploadFile && uploadFile.raw;
+      if (!file) return;
+      if (!file.type || !file.type.startsWith('image/')) {
+        ElementPlus.ElMessage.warning(I18N.t('p.uploadWarn'));
+        return;
+      }
+      const c = await ensureSeasonCharSaved(i);
+      if (!c) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await API.postForm(`/api/comics/${props.id}/seasons/${seasonId.value}/characters/${c.id}/image`, fd);
+        c.image_url = r.url || '';
+        ElementPlus.ElMessage.success(I18N.t('p.msgCharImageUploaded'));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
+    async function removeSeasonCharImage(i) {
+      const c = seasonChars.value[i];
+      if (!c || !c.id) return;
+      try {
+        await API.del(`/api/comics/${props.id}/seasons/${seasonId.value}/characters/${c.id}/image`);
+        c.image_url = '';
+        ElementPlus.ElMessage.success(I18N.t('p.msgCharImageRemoved'));
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
+    // 参考图 / AI 描述都挂在已落库的角色上：新增角色（id 为空）先保存本季角色再继续
+    async function ensureSeasonCharSaved(i) {
+      let c = seasonChars.value[i];
+      if (!c) return null;
+      if (c.id) return c;
+      try {
+        await saveSeasonChars();
+        c = seasonChars.value[i];
+        return c && c.id ? c : null;
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+        return null;
       }
     }
     async function genFirst(includeTitle = true) {
@@ -815,20 +747,6 @@ Views.projectComic = {
             global_prompt: oGlobal.value, res_width: oW.value, res_height: oH.value,
           });
           ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
-          await load();
-        } catch (e) { ElementPlus.ElMessage.error(e.message); }
-        finally { busySave.value = false; }
-      })();
-    }
-    // 总体（全局）：只保存核心角色设定
-    function saveChars() {
-      busySave.value = true;
-      (async () => {
-        try {
-          await API.post(`/api/comics/${props.id}/outline`, {
-            characters: chars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
-          });
-          ElementPlus.ElMessage.success(I18N.t('p.charsSaved'));
           await load();
         } catch (e) { ElementPlus.ElMessage.error(e.message); }
         finally { busySave.value = false; }
@@ -1069,13 +987,12 @@ Views.projectComic = {
     return {
       data, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, setScoreFilter, scoreFilterOptions, visibleChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,
-      selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar,
+      selectSeason, addSeason, delSeason, curSeason, addSeasonChar, delSeasonChar, genSeasonCharDesc, uploadSeasonCharImage, removeSeasonCharImage,
       actBusy, busySave, busyGenAll, busyScoreAll, exporting, busyFirst, busySeasonFirst, genDescBusy, coverPrompt, seasonCoverPrompt, progress,
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
-      chars, oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
+      oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, modelChoices, lb, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveChars, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
-      addChar, delChar, uploadCharImage, removeCharImage, genCharDesc,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded,
       openCfg, saveCfg, openLb, load, backTo, router,
     };

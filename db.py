@@ -113,7 +113,6 @@ def _migrate():
             "title": "VARCHAR(200) DEFAULT ''",
             "first_image": "VARCHAR(500) DEFAULT ''",
             "first_image_base": "VARCHAR(500) DEFAULT ''",
-            "characters": "TEXT DEFAULT ''",
             "global_prompt": "TEXT DEFAULT ''",
             "res_width": "INTEGER DEFAULT 0",
             "res_height": "INTEGER DEFAULT 0",
@@ -164,10 +163,35 @@ def _migrate():
                     "WHERE (preset_video IS NULL OR preset_video = '') AND preset IS NOT NULL AND preset != ''"))
             except Exception:
                 pass
+        # 一次性修正：项目层核心角色已移除（角色只挂在季上）——旧项目的核心角色并入**第 1 季**，
+        # 仅当该季还没有角色时才写入（不覆盖已有季角色），避免历史作品的人物设定直接丢失。
+        # 必须先于下面的删列步骤：projects.characters 一旦被 DROP 就再也读不到了。
+        try:
+            done = conn.execute(text("SELECT v FROM app_flags WHERE k='proj_chars_to_s1'")).scalar()
+            if not done:
+                cols = {row[1] for row in conn.execute(text("PRAGMA table_info(projects)"))}
+                rows = []
+                if "characters" in cols:
+                    rows = conn.execute(text(
+                        "SELECT id, characters FROM projects "
+                        "WHERE COALESCE(characters, '') != ''")).fetchall()
+                for pid, chars in rows:
+                    s1 = conn.execute(text(
+                        "SELECT id, COALESCE(characters, '') FROM seasons "
+                        "WHERE project_id = :pid AND number = 1 LIMIT 1"),
+                        {"pid": pid}).fetchone()
+                    if s1 is not None and not s1[1]:
+                        conn.execute(text("UPDATE seasons SET characters = :c WHERE id = :sid"),
+                                     {"c": chars, "sid": s1[0]})
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO app_flags (k, v) VALUES ('proj_chars_to_s1','1')"))
+        except Exception:
+            pass  # 旧库尚无相关表：忽略
         # 移除已废弃的列（SQLite >= 3.35 支持 DROP COLUMN）
         deprecated = {
             "llm_configs": ("mode",),
             "projects": ("cover_as_first_ref",  # 已移除：封面不再作为第 1 章参考
+                         "characters",  # 已移除：角色只挂在季上（各季 characters）
                          "arc",  # 已移除：整体故事大纲并入「生成本季大纲」（总纲不再单独存）
                          "scope",  # 已移除：风格并入 global_prompt（单一「全局要求」字段）
                          "count_mode", "count_min", "count_max"),  # 已移除：章节数量按季存于 Season

@@ -138,7 +138,7 @@ class ComicPipeline:
             pass
 
     def delete_project(self, db, project: Project):
-        """删除项目：先删媒体文件（章节媒体 + 封面 + 核心角色/季角色参考图），再删季、章节与项目记录。"""
+        """删除项目：先删媒体文件（章节媒体 + 封面 + 各季角色参考图），再删季、章节与项目记录。"""
         for ch in db.query(Chapter).filter(Chapter.project_id == project.id).all():
             self._rm_media(ch.media_path)
             db.delete(ch)
@@ -146,8 +146,6 @@ class ComicPipeline:
             for c in chars_from_raw(s.characters):
                 self._rm_media(c.get("image"))
             db.delete(s)
-        for c in chars_from_raw(project.characters):
-            self._rm_media(c.get("image"))
         self._rm_media(project.first_image)
         db.delete(project)
         db.commit()
@@ -200,12 +198,32 @@ class ComicPipeline:
                 .filter(Chapter.project_id == project.id, Chapter.season_id == season.id)
                 .order_by(Chapter.index).all())
 
-    def _combined_chars(self, project: Project, season: Season) -> list[dict]:
-        """合并项目核心角色 + 季新增角色（季角色覆盖同 id 项目角色）。"""
-        merged = {c["id"]: dict(c) for c in chars_from_raw(project.characters)}
-        for c in chars_from_raw(season.characters):
-            merged[c["id"]] = dict(c)
+    def _combined_chars(self, db, project: Project, season: Season) -> list[dict]:
+        """本季可用角色 = 第 1..本季 全部季的角色合并（同 id 者后季覆盖前季）。
+
+        已无项目层核心角色：角色全部挂在季上。后续季会参考前面各季的角色，
+        因此本季的剧情 / 剧本上下文必须能看到**截至本季**的所有角色（不含后续季，避免剧透）。"""
+        # 按**名字**去重（而非 id）：每季生成角色时 id 都是新 UUID，同一个人物会被重复登记；
+        # 后面的季覆盖前面的描述，保留最新的设定。
+        merged: dict[str, dict] = {}
+        rows = (db.query(Season)
+                .filter(Season.project_id == project.id, Season.number <= season.number)
+                .order_by(Season.number.asc()).all())
+        for s in rows:
+            for c in chars_from_raw(s.characters):
+                key = (c.get("name") or "").strip()
+                merged[key if key else c["id"]] = dict(c)
         return list(merged.values())
+
+    def _require_season_chars(self, season: Season, lang: str = "zh") -> list[dict]:
+        """本季角色不得为空：角色是各章提示词保持人物一致的唯一依据。
+
+        角色为空仍继续规划章节，会让后续每章都凭空生成人物 —— 故在此直接拦下。"""
+        chars = chars_from_raw(season.characters)
+        if not chars:
+            raise RuntimeError(L(lang, "本季还没有角色，请先生成或填写本季角色再继续",
+                                 "This season has no characters — generate or fill them in first"))
+        return chars
 
     def _require_season_arc(self, season: Season, lang: str = "zh") -> str:
         """取本季大纲；为空即抛错（分章 / 季角色等步骤必须先有本季大纲）。
@@ -358,7 +376,7 @@ class ComicPipeline:
         gprompt = (project.global_prompt or "").strip()
         season_no = season.number
         season_title = (season.title or "").strip()
-        chars = chars_to_text(self._combined_chars(project, season))
+        chars = chars_to_text(self._combined_chars(db, project, season))
         system = ("你是资深漫画/短剧策划兼编剧。根据项目名称（主题）、全局要求与本季季号/季名，"
                   "先在心里理清**整部作品的全篇主线**（开端/发展/高潮/结局，以及贯穿全篇的主线设定），"
                   "再据此写**本季**的剧情大纲：说明本季承接主线的哪一段、本季的开端、发展、高潮、结局。\n"
@@ -437,58 +455,30 @@ class ComicPipeline:
 
     async def step_season_chars(self, db, project: Project, season: Season, lang: str = "zh",
                                 extra_prompt: str = "") -> Project:
-        """「生成季角色」：基于本季大纲 + 全局要求 + 已有核心角色，生成本季新增角色。
-        不触碰全局要求 / 核心角色 / 章节。本季无新角色时可为空。"""
+        """「生成本季角色」：基于本季大纲 + 全局要求 + **前面各季已有角色**，列出本季角色。
+
+        角色只挂在季上（无项目层核心角色）：生成时会看到第 1..本季-1 季的角色并**沿用**
+        前面已建立的人物，只补本季新出场的人物，保证跨季人物形象连贯。
+        本季角色**不得为空** —— 角色是各章提示词保持人物一致的唯一依据。"""
         llm_cfg = self._llm_cfg(db, project, lang)
         gprompt = (project.global_prompt or "").strip()
         season_arc = self._require_season_arc(season, lang)
-        overall_chars = chars_from_raw(project.characters)
-        overall_names = "、".join((c.get("name") or "").strip() for c in overall_chars
-                                 if (c.get("name") or "").strip())
-        system = ("你是资深漫画/短剧策划。根据本季剧情大纲与已有核心角色，列出本篇章新增的角色"
-                  "（即不在核心角色之列、本篇章才会出现的角色）：每个角色给出 名字 + 形象/性格（每人 2-4 句），"
-                  "供本篇章各章保持角色一致。不要重复已有核心角色；若本篇章没有新角色，返回空列表即可。")
+        prior = self._combined_chars(db, project, season)   # 含本季旧角色（重生成时沿用）
+        prior_names = "、".join((c.get("name") or "").strip() for c in prior
+                                if (c.get("name") or "").strip())
+        prior_text = chars_to_text(prior)
+        system = ("你是资深漫画/短剧策划。根据本季剧情大纲与已有角色，列出**本季出场**的角色："
+                  "已有角色请沿用其设定（可微调，但不要改名或重写成另一个人物），只补本季新出场的人物；"
+                  "每个角色给出 名字 + 形象/性格/核心动机（每人 2-4 句），供本篇章各章保持角色一致。"
+                  "本季至少要有一个角色。")
         agent = make_agent(build_model(llm_cfg), system, output_type=CharsOut)
         user = f"本季大纲：\n{season_arc}"
         if gprompt:
             user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
-        if overall_names:
-            user += f"\n已有核心角色（不要重复）：{overall_names}"
-        if (extra_prompt or "").strip():
-            user += f"\n额外要求：{(extra_prompt or '').strip()}"
-        async with agent:
-            data = (await agent.run(user)).output
-        chars = [{
-            "id": uuid.uuid4().hex[:12],
-            "name": (c.name or "").strip(),
-            "description": (c.description or "").strip(),
-            "image": "",
-        } for c in (data.characters or [])
-            if ((c.name or "").strip() or (c.description or "").strip())]
-        # 重新生成整体替换季角色：清理旧季角色的参考图文件（若有）
-        for old in chars_from_raw(season.characters):
-            self._rm_media(old.get("image"))
-        season.characters = chars_to_raw(chars)
-        self._save(db, project)
-        return project
-
-    async def step_chars(self, db, project: Project, lang: str = "zh",
-                         extra_prompt: str = "") -> Project:
-        """「生成角色」：列出核心角色设定（基于项目名称/主题 + 全局要求 + 第一季大纲），
-        输出为多个角色（名字 + 形象/性格）。不触碰全局要求 / 章节。
-
-        剧情依据取**第一季大纲**（已无项目层总纲；第 1 季路线即作品开篇主线）。"""
-        llm_cfg = self._llm_cfg(db, project, lang)
-        gprompt = (project.global_prompt or "").strip()
-        arc = self._overall_arc(db, project)
-        system = ("你是资深漫画/短剧策划。根据项目名称（主题）、全局要求与故事大纲，列出贯穿全篇的核心角色设定："
-                  "每个角色给出 名字 + 形象/性格/核心动机（每人 2-4 句），供后续各章保持角色一致。")
-        agent = make_agent(build_model(llm_cfg), system, output_type=CharsOut)
-        user = f"项目名称（主题）：{project.origin or ''}"
-        if gprompt:
-            user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
-        if arc:
-            user += f"\n第一季大纲（故事主线）：\n{arc}"
+        if prior_text:
+            user += f"\n已有角色（请沿用，仅在需要时补充本季新增的人物）：\n{prior_text}"
+        if prior_names:
+            user += f"\n已有人物：{prior_names}"
         if (extra_prompt or "").strip():
             user += f"\n额外要求：{(extra_prompt or '').strip()}"
         async with agent:
@@ -501,26 +491,27 @@ class ComicPipeline:
         } for c in (data.characters or [])
             if ((c.name or "").strip() or (c.description or "").strip())]
         if not chars:
-            raise RuntimeError(L(lang, "模型未返回角色设定，请重试",
-                                 "The model returned no character settings — please retry"))
-        # 重新生成整体替换角色：清理旧角色的参考图文件
-        for old in chars_from_raw(project.characters):
+            raise RuntimeError(L(lang, "本季还没有角色：模型未返回角色设定，请重试",
+                                 "No characters for this season — the model returned none, please retry"))
+        # 重新生成本季角色 = 整体替换：清理旧季角色的参考图文件（若有）
+        for old in chars_from_raw(season.characters):
             self._rm_media(old.get("image"))
-        project.characters = chars_to_raw(chars)
+        season.characters = chars_to_raw(chars)
         self._save(db, project)
         return project
 
-    async def gen_char_description(self, db, project: Project, char_id: str, lang: str = "zh") -> str:
-        """AI 生成单个角色的形象/性格描述（2-4 句）。
+    async def gen_char_description(self, db, project: Project, season: Season, char_id: str,
+                                   lang: str = "zh") -> str:
+        """AI 生成单个季角色的形象/性格描述（2-4 句）。
         该角色有参考图且 LLM 支持视觉时，以图片为形象基准（文设贴合图）；
-        并结合作品主题 / 全局要求 / 第一季大纲保持一致。返回写回后的描述。"""
+        并结合全局要求 / 本季大纲保持一致。返回写回后的描述。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        chars = chars_from_raw(project.characters)
+        chars = chars_from_raw(season.characters)
         char = next((c for c in chars if c["id"] == char_id), None)
         if char is None:
             raise ValueError("角色不存在 (Character not found)")
         gprompt = (project.global_prompt or "").strip()
-        arc = self._overall_arc(db, project)
+        arc = (season.arc or "").strip()
         name = (char.get("name") or "").strip()
         system = ("你是资深漫画/短剧策划。为一个角色写 形象/性格/核心动机（2-4 句），供后续各章保持角色一致。"
                   "若附带了角色参考图，请以图片为依据描述外形（服饰 / 相貌 / 气质等），让文字设定与图片一致。")
@@ -531,7 +522,7 @@ class ComicPipeline:
         if name:
             user_text += f"\n角色名字：{name}"
         if arc:
-            user_text += f"\n第一季大纲（故事主线）：{arc}"
+            user_text += f"\n本季大纲：\n{arc}"
         user_text += "\n请写出这个角色的形象 / 性格 / 核心动机。"
         # 参考图：角色有图即附带（VLM 一律支持图片输入，多模态入图）
         img = (char.get("image") or "").strip()
@@ -545,9 +536,24 @@ class ComicPipeline:
             raise RuntimeError(L(lang, "模型未返回角色描述，请重试",
                                  "The model returned no character description — please retry"))
         char["description"] = desc
-        project.characters = chars_to_raw(chars)
+        season.characters = chars_to_raw(chars)
         self._save(db, project)
         return desc
+
+    def set_char_image(self, db, project: Project, season: Season, char_id: str, path: str) -> Project:
+        """设置/清除某季角色的参考图（文件已由调用方落盘到 data/media；path 为空 = 清除并删旧图）。"""
+        chars = chars_from_raw(season.characters)
+        for c in chars:
+            if c["id"] == char_id:
+                old = c.get("image") or ""
+                c["image"] = (path or "").strip()
+                if old and old != c["image"]:
+                    self._rm_media(old)
+                season.characters = chars_to_raw(chars)
+                season.updated_at = _now()
+                self._save(db, project)
+                return project
+        raise ValueError("角色不存在（Character not found）")
 
     def _rebuild_chapters(self, db, project: Project, season: Season,
                           plan: list[tuple[str, str]]) -> None:
@@ -564,7 +570,6 @@ class ComicPipeline:
         self._reindex_flat(db, project)
 
     def save_outline(self, db, project: Project, *,
-                      characters: list[dict] | None = None,
                       global_prompt: str | None = None,
                       res_width: int | None = 0, res_height: int | None = 0,
                       auto_score: int | None = None, score_min: int | None = None,
@@ -572,29 +577,6 @@ class ComicPipeline:
         """保存总体页手动编辑：全局要求（风格 + 要点）/ 角色设定（多个角色：名字+描述，按 id 保留参考图）/ 默认分辨率 / 评分设置。
         仅更新传入（非 None）的字段；不触碰章节与各季大纲（季按季编辑，见 save_season），
         也不触碰已生成的剧本/媒体（保存不触发生成）。"""
-        if characters is not None:
-            existing = {c["id"]: c for c in chars_from_raw(project.characters)}
-            new_chars = []
-            for item in characters:
-                if not isinstance(item, dict):
-                    continue
-                cid = str(item.get("id") or "").strip() or uuid.uuid4().hex[:12]
-                old = existing.get(cid) or {}
-                img = (old.get("image") or "").strip()
-                if img and not Path(img).is_file():
-                    img = ""  # 参考图文件已不在：丢弃引用
-                new_chars.append({
-                    "id": cid,
-                    "name": str(item.get("name") or "").strip(),
-                    "description": str(item.get("description") or "").strip(),
-                    "image": img,
-                })
-            # 删除的角色：清理其参考图文件
-            kept = {c["id"] for c in new_chars}
-            for cid, c in existing.items():
-                if cid not in kept and c.get("image"):
-                    self._rm_media(c["image"])
-            project.characters = chars_to_raw(new_chars)
         if global_prompt is not None:
             project.global_prompt = (global_prompt or "").strip()
         if res_width is not None:
@@ -672,11 +654,12 @@ class ComicPipeline:
         self._save(db, project)
         return season
 
-    # ---------------- 整部作品完结（finished）/ 解锁 ----------------
     async def step_chapters(self, db, project: Project, season: Season, lang: str = "zh",
                              count_min: int = 0, count_max: int = 0) -> Project:
         """「章节规划」：依据季大纲/风格/角色 + 章节数量范围（min~max）规划章节（标题 + 主题摘要）。
         会清空该季已有章节/媒体（按大纲重新拆章）。status → chaptered。"""
+        self._require_season_arc(season, lang)
+        self._require_season_chars(season, lang)
         season.count_mode = "range"              # 仅范围模式
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
@@ -716,7 +699,7 @@ class ComicPipeline:
         """规划第 i 章（共 n 章）：参考前面已规划的章节承接剧情，返回 (标题, 一句话主题摘要)。
         若本季大纲含「关键剧情节点」，则要求本章落位到对应节点，保证节点均匀覆盖整季。"""
         llm_cfg = self._llm_cfg(db, project, lang)
-        chars = chars_to_text(self._combined_chars(project, season))
+        chars = chars_to_text(self._combined_chars(db, project, season))
         gprompt = (project.global_prompt or "").strip()
         arc = self._require_season_arc(season, lang)
         system = ("你是分章策划。为故事规划第 i/n 章，只输出本章：标题（简短）+ 一句话主题摘要"
@@ -744,6 +727,8 @@ class ComicPipeline:
           indices 非空 = 多选重规划：只重写选中章节的「标题 + 主题摘要」，其余章节与已生成媒体保持不变；
         - mode='append'（新增）：保留已有章节与其媒体，在现有章节末尾之后续规划 N 章（承接前序剧情）。
         status → chaptered。progress_cb(current,total,title) 每章开始前；chapter_done_cb(chapter) 每章规划完成后。"""
+        self._require_season_arc(season, lang)
+        self._require_season_chars(season, lang)
         season.count_mode = "range"              # 仅范围模式（固定值即 min=max）
         season.count_min, season.count_max = count_range(count_min, count_max)
         model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
@@ -915,7 +900,7 @@ class ComicPipeline:
                         ref_img = await run_sync(extract_last_frame, nm, media_dir)
                     else:
                         ref_img = nm
-        chars = chars_to_text(self._combined_chars(project, season))
+        chars = chars_to_text(self._combined_chars(db, project, season))
         base = (ch.summary or ch.description or "").strip() or "（按大纲与上一章自然续写）"
         user = (
             (f"全局要求（风格 + 务必遵循的要点）：{gprompt}\n" if gprompt else "")
@@ -1277,20 +1262,6 @@ class ComicPipeline:
         self._save(db, project)
         return season
 
-    def set_char_image(self, db, project: Project, char_id: str, path: str) -> Project:
-        """设置/清除某角色的参考图（文件已由调用方落盘到 data/media；path 为空 = 清除并删除旧图）。"""
-        chars = chars_from_raw(project.characters)
-        for c in chars:
-            if c["id"] == char_id:
-                old = c.get("image") or ""
-                c["image"] = (path or "").strip()
-                if old and old != c["image"]:
-                    self._rm_media(old)
-                project.characters = chars_to_raw(chars)
-                self._save(db, project)
-                return project
-        raise ValueError("角色不存在（Character not found）")
-
     def _overlay_title(self, path: Path, title: str, x: float = 0.5, y: float = 1 / 3,
                        size_pct: float = 8.0, style: str = "bold_outline",
                        color: tuple = (255, 255, 255), band: bool = True) -> None:
@@ -1373,7 +1344,7 @@ class ComicPipeline:
         overall = self._overall_arc(db, project)
         if overall:
             user += f"\n故事大纲（第一季主线）：{overall}"
-        chars_text = chars_to_text(chars_from_raw(project.characters))
+        chars_text = chars_to_text(self._combined_chars(db, project, self.ensure_first_season(db, project)))
         if chars_text:
             user += f"\n角色设定：{chars_text}"
         async with agent:
@@ -1434,7 +1405,7 @@ class ComicPipeline:
         dt = self._clients(db, project, lang)
         extra = (prompt or "").strip()
         gprompt = (project.global_prompt or "").strip()
-        system = ("你是封面美术提示词作者。请结合项目名称（主题）、全局要求、角色设定与本季标题/大纲/新增角色，"
+        system = ("你是封面美术提示词作者。请结合项目名称（主题）、全局要求、角色设定与本季标题/大纲，"
                   "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
                   "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
                   "（季名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。")
@@ -1442,15 +1413,12 @@ class ComicPipeline:
         user = f"项目名称（主题）：{project.origin}"
         if gprompt:
             user += f"\n全局要求（风格 + 务必遵循的要点）：{gprompt}"
-        chars_text = chars_to_text(chars_from_raw(project.characters))
+        chars_text = chars_to_text(self._combined_chars(db, project, season))
         if chars_text:
-            user += f"\n核心角色：{chars_text}"
+            user += f"\n角色设定：{chars_text}"
         user += f"\n本季：{self._season_label(season, lang)}"
         if (season.arc or "").strip():
             user += f"\n季大纲：{season.arc.strip()}"
-        s_chars_text = chars_to_text(chars_from_raw(season.characters))
-        if s_chars_text:
-            user += f"\n本季新增角色：{s_chars_text}"
         async with agent:
             base = ((await agent.run(user)).output or "").strip()
         # 额外提示词原样追加在末尾（基础提示词在前，补充词只作追加）
@@ -1496,7 +1464,6 @@ class ComicPipeline:
             base = f"{base}_S{season.number}"
         fname = f"{base}.zip"
         zpath = export_dir / fname
-        chars = chars_from_raw(project.characters)
         # 季封面（总体导出 = 全部季；单季导出 = 仅该季）
         seasons_all = ([season] if season is not None
                         else db.query(Season).filter(Season.project_id == project.id)
@@ -1513,14 +1480,16 @@ class ComicPipeline:
             + scope_line +
             f"全局要求：{project.global_prompt or ''}\n"
             f"默认分辨率：{project.res_width}×{project.res_height}\n"
-            + (("\n".join(cover_lines) + "\n") if cover_lines else "") +
-            f"\n角色设定：\n{chars_to_text(chars)}\n"
+            + (("\n".join(cover_lines) + "\n") if cover_lines else "")
         )
-        # 各季大纲（已无项目层总纲；剧情依据即各季 arc）
+        # 各季大纲 + 各季角色（已无项目层总纲 / 核心角色；剧情与人物依据均在季上）
         for s in seasons_all:
+            label = f"第{s.number}季" + (f"（{s.title}）" if s.title else "")
             if (s.arc or "").strip():
-                label = f"第{s.number}季" + (f"（{s.title}）" if s.title else "")
                 readme += f"\n{label}大纲：\n{s.arc.strip()}\n"
+            s_chars = chars_from_raw(s.characters)
+            if s_chars:
+                readme += f"\n{label}角色：\n{chars_to_text(s_chars)}\n"
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("README.txt", readme.encode("utf-8"))
             # 封面排最前（README 之后）：项目封面 + 各季封面

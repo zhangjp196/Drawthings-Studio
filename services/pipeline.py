@@ -92,9 +92,6 @@ class Pipeline:
             return self.comic.step_season_chars(db, project, season, lang, extra_prompt)
         return self.drama.step_episode_chars(db, project, season, lang, extra_prompt)
 
-    def step_chars(self, db, project, lang: str = "zh", extra_prompt: str = ""):
-        return self._of(project).step_chars(db, project, lang, extra_prompt)
-
     def step_chapters(self, db, project, season, lang: str = "zh",
                       count_min: int = 0, count_max: int = 0):
         if self._is_comic(project):
@@ -177,11 +174,11 @@ class Pipeline:
             return self.comic.overlay_season_first_image_title(db, project, season, lang, opts)
         return self.drama.overlay_episode_first_image_title(db, project, season, lang, opts)
 
-    def set_char_image(self, db, project, char_id: str, path: str):
-        return self._of(project).set_char_image(db, project, char_id, path)
+    def set_char_image(self, db, project, season, char_id: str, path: str):
+        return self._of(project).set_char_image(db, project, season, char_id, path)
 
-    def gen_char_description(self, db, project, char_id: str, lang: str = "zh"):
-        return self._of(project).gen_char_description(db, project, char_id, lang)
+    def gen_char_description(self, db, project, season, char_id: str, lang: str = "zh"):
+        return self._of(project).gen_char_description(db, project, season, char_id, lang)
 
     def save_outline(self, db, project, **kwargs):
         return self._of(project).save_outline(db, project, **kwargs)

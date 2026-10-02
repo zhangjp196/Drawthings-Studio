@@ -37,6 +37,11 @@ def _comic_project(db: Session, project_id: str, lang: str) -> Project:
     return project
 
 
+def _get_season_any(db: Session, project: Project, season_id: str, lang: str) -> Season | None:
+    """按 id 取本项目的季（漫画/短剧共用：两者都用同一张 seasons 表与 Season 模型）。"""
+    return db.get(Season, season_id) if season_id else None
+
+
 @router.post("")
 async def comic_create(request: Request, db: Session = Depends(get_db)):
     """新建漫画创作（简化）：仅需 **模型（LLM 配置）** 与 **项目名称**。
@@ -122,7 +127,7 @@ def project_delete(request: Request, project_id: str, db: Session = Depends(get_
 
 @router.get("/{project_id}")
 def project_view(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """项目详情：状态/篇幅/首图 + 章节 + 可选配置。"""
+    """项目详情：状态/篇幅/首图 + 各季（大纲/角色）+ 章节 + 可选配置。"""
     lang = _lang(request)
     project = _comic_project(db, project_id, lang)
     if project is None:
@@ -139,9 +144,6 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
         "project": {
             "id": project.id, "kind": project.kind, "title": project.title or "",
             "origin": project.origin, "status": project.status,
-            "characters": [{"id": c["id"], "name": c["name"], "description": c["description"],
-                             "image_url": _media_url(c["image"])}
-                            for c in chars_from_raw(project.characters)],
             "global_prompt": project.global_prompt or "",
             "res_width": project.res_width or 0, "res_height": project.res_height or 0,
             "auto_score": project.auto_score or 0, "score_min": project.score_min or 60,
@@ -299,9 +301,6 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
         elif step == "season_chars":
             project = await pipeline.comic.step_season_chars(db, project, season, lang,
                                                        extra_prompt=str(body.get("extra_prompt") or ""))
-        elif step == "chars":
-            project = await pipeline.comic.step_chars(db, project, lang,
-                                                extra_prompt=str(body.get("extra_prompt") or ""))
         elif step == "chapters":
             project = await pipeline.comic.step_chapters(
                 db, project, season, lang,
@@ -907,14 +906,17 @@ async def season_first_image_overlay_title(request: Request, project_id: str, se
     return {"ok": True, "url": _media_url(season.first_image or "")}
 
 
-@router.post("/{project_id}/characters/{char_id}/image")
-def project_char_image_upload(request: Request, project_id: str, char_id: str,
+@router.post("/{project_id}/seasons/{season_id}/characters/{char_id}/image")
+def season_char_image_upload(request: Request, project_id: str, season_id: str, char_id: str,
                               file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """上传角色参考图（角色设定页：供各章保持角色形象一致）。"""
+    """上传季角色参考图（季角色页：供各章保持角色形象一致）。"""
     lang = _lang(request)
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = _get_season_any(db, project, season_id, lang)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
@@ -926,10 +928,10 @@ def project_char_image_upload(request: Request, project_id: str, char_id: str,
         raise HTTPException(status_code=400,
                             detail=L(lang, "请上传图片文件（png/jpg/webp/gif）",
                                      "Please upload an image file (png/jpg/webp/gif)"))
-    dest = MEDIA_DIR / f"char_{project.id}_{char_id}{ext}"
+    dest = MEDIA_DIR / f"char_{season.id}_{char_id}{ext}"
     dest.write_bytes(data)
     try:
-        pipeline.comic.set_char_image(db, project, char_id, str(dest))
+        pipeline.comic.set_char_image(db, project, season, char_id, str(dest))
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=400,
@@ -938,16 +940,19 @@ def project_char_image_upload(request: Request, project_id: str, char_id: str,
     return {"ok": True, "url": _media_url(str(dest))}
 
 
-@router.delete("/{project_id}/characters/{char_id}/image")
-def project_char_image_delete(request: Request, project_id: str, char_id: str,
+@router.delete("/{project_id}/seasons/{season_id}/characters/{char_id}/image")
+def season_char_image_delete(request: Request, project_id: str, season_id: str, char_id: str,
                               db: Session = Depends(get_db)):
-    """清除角色参考图（连同删除文件）。"""
+    """清除季角色参考图（连同删除文件）。"""
     lang = _lang(request)
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = _get_season_any(db, project, season_id, lang)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
     try:
-        pipeline.comic.set_char_image(db, project, char_id, "")
+        pipeline.comic.set_char_image(db, project, season, char_id, "")
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【清除角色参考图】失败：{e}",
@@ -955,16 +960,19 @@ def project_char_image_delete(request: Request, project_id: str, char_id: str,
     return {"ok": True}
 
 
-@router.post("/{project_id}/characters/{char_id}/gen-desc")
-async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
+@router.post("/{project_id}/seasons/{season_id}/characters/{char_id}/gen-desc")
+async def season_char_gen_desc(request: Request, project_id: str, season_id: str, char_id: str,
                                 db: Session = Depends(get_db)):
-    """AI 生成单个角色的形象/性格描述（该角色有参考图时以图为准，VLM 一律支持图片输入）。"""
+    """AI 生成单个季角色的形象/性格描述（有参考图时以图为准，VLM 一律支持图片输入）。"""
     lang = _lang(request)
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = _get_season_any(db, project, season_id, lang)
+    if season is None:
+        raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
     try:
-        desc = await pipeline.comic.gen_char_description(db, project, char_id, lang)
+        desc = await pipeline.comic.gen_char_description(db, project, season, char_id, lang)
     except Exception as e:
         raise HTTPException(status_code=400,
                             detail=L(lang, f"【生成角色描述】失败：{e}",
@@ -990,7 +998,6 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
     try:
         pipeline.comic.save_outline(
             db, project,
-            characters=body.get("characters"),
             global_prompt=body.get("global_prompt"),
             res_width=body.get("res_width"), res_height=body.get("res_height"),
             auto_score=body.get("auto_score"), score_min=body.get("score_min"),
