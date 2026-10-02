@@ -207,6 +207,7 @@ def _migrate():
                                   "steps", "guidance_scale", "num_frames", "fps",
                                   "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）
             "seasons": ("count_mode",),  # 已移除：只剩范围模式（count_min~count_max），无需模式字段
+            "chapters": ("ref_path",),  # 已移除：参考图路径从未落库（生成时用调用方入参，无需持久化）
             "micro_works": ("media_type",  # 产出类型改由 app 当前模型自动判断
                             "dt_max_steps"),  # 已拆分：图像/视频分开（dt_max_steps_image / _video）
         }

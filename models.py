@@ -151,7 +151,6 @@ class Chapter(Base):
     width = Column(Integer, default=0)                     # 智能体决定的具体分辨率宽（0=跟随 app）
     height = Column(Integer, default=0)                    # 智能体决定的具体分辨率高（0=跟随 app）
     seconds = Column(Integer, default=0)                   # 短剧：本章视频时长（秒；0=用配置上限/预设）
-    ref_path = Column(String(500), default="")             # 参考（上一张图/上一视频末帧）
     media_path = Column(String(500), default="")           # 生成的图/视频路径
     status = Column(String(10), default="pending")         # pending|done|error
     error = Column(Text, default="")

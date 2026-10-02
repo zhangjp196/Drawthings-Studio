@@ -175,34 +175,6 @@ def configs_list(db: Session = Depends(get_db)):
     }
 
 
-_DT_PRESETS_CACHE: list[dict] | None = None
-
-
-@app.get("/api/dt-presets")
-def dt_presets():
-    """gRPC 可选预设（drawthings-py）：名称 + 默认模型 + 是否视频模型。未安装返回空列表。"""
-    global _DT_PRESETS_CACHE
-    if _DT_PRESETS_CACHE is not None:
-        return {"presets": _DT_PRESETS_CACHE, "available": True}
-    try:
-        from drawthings_py import Configs
-        from drawthings_py.configs.presets import Presets
-        from services.drawthings import is_video_model
-    except Exception:
-        return {"presets": [], "available": False}
-    items: list[dict] = []
-    for p in Presets:
-        name = str(p.value)
-        model = ""
-        try:
-            model = str(Configs.from_preset(name)["model"] or "")
-        except Exception:
-            pass
-        items.append({"name": name, "model": model, "video": is_video_model(model or name)})
-    _DT_PRESETS_CACHE = items
-    return {"presets": items, "available": True}
-
-
 @app.get("/api/dt-models")
 def dt_models(request: Request, base_url: str = "", refresh: int = 1):
     """连接 Draw Things gRPC 返回已下载的基座模型清单（供配置页下拉选择）。"""
