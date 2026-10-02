@@ -4,7 +4,6 @@ window.Views = window.Views || {};
 
 Views.comicChapterToolbar = {
   props: {
-    locked: { type: Boolean, default: false },
     actBusy: { type: Boolean, default: false },
     busySave: { type: Boolean, default: false },
     busyGenAll: { type: Boolean, default: false },
@@ -26,11 +25,11 @@ Views.comicChapterToolbar = {
     <div class="ch-toolbar">
       <div class="ch-tb-row">
         <span class="ch-tb-cap">{{ I18N.t('p.chPlan') }}</span>
-        <el-button size="small" type="primary" :loading="actBusy" :disabled="locked" @click="$emit('plan')">
+        <el-button size="small" type="primary" :loading="actBusy"  @click="$emit('plan')">
           {{ selectedCount ? I18N.t('p.planSel', selectedCount) : I18N.t('p.planChapters') }}
         </el-button>
         <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="$emit('save-plan')">
-          <template #reference><el-button size="small" :loading="busySave" :disabled="locked">{{ I18N.t('p.planSave') }}</el-button></template>
+          <template #reference><el-button size="small" :loading="busySave" >{{ I18N.t('p.planSave') }}</el-button></template>
         </el-popconfirm>
         <span class="ch-tb-sep"></span>
         <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}</span>
@@ -45,14 +44,14 @@ Views.comicChapterToolbar = {
         <span class="ch-tb-sep"></span>
         <el-popconfirm :title="I18N.t('p.genAllConfirm')" @confirm="$emit('gen-all')">
           <template #reference>
-            <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!hasChapters || locked">
+            <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!hasChapters">
               {{ selectedCount ? I18N.t('p.genAllSel', selectedCount) : I18N.t('p.genAll') }}
             </el-button>
           </template>
         </el-popconfirm>
         <el-popconfirm :title="I18N.t('p.scoreAllConfirm')" @confirm="$emit('score-all')">
           <template #reference>
-            <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!hasChapters || locked">
+            <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!hasChapters">
               {{ selectedCount ? I18N.t('p.scoreAllSel', selectedCount) : I18N.t('p.scoreAll') }}
             </el-button>
           </template>
@@ -67,21 +66,21 @@ Views.comicChapterToolbar = {
         <span class="ch-tb-cap">{{ I18N.t('p.batchOps') }}</span>
         <el-popconfirm :title="selectedCount ? I18N.t('p.clearAllConfirmSel', selectedCount) : I18N.t('p.clearAllConfirm')" @confirm="$emit('clear-all')">
           <template #reference>
-            <el-button size="small" type="warning" plain :disabled="!hasChapters || locked">
+            <el-button size="small" type="warning" plain :disabled="!hasChapters">
               {{ selectedCount ? I18N.t('p.clearAllSel', selectedCount) : I18N.t('p.clearAll') }}
             </el-button>
           </template>
         </el-popconfirm>
         <el-popconfirm :title="I18N.t('p.replanSelConfirm', selectedCount)" @confirm="$emit('plan-selected')">
           <template #reference>
-            <el-button size="small" type="success" plain :disabled="!selectedCount || locked">
+            <el-button size="small" type="success" plain :disabled="!selectedCount">
               {{ I18N.t('p.replanSelBtn', selectedCount) }}
             </el-button>
           </template>
         </el-popconfirm>
         <el-popconfirm :title="I18N.t('p.delSelConfirm', selectedCount)" @confirm="$emit('delete-selected')">
           <template #reference>
-            <el-button size="small" type="danger" plain :disabled="!selectedCount || locked">
+            <el-button size="small" type="danger" plain :disabled="!selectedCount">
               {{ I18N.t('p.delSelBtn', selectedCount) }}
             </el-button>
           </template>

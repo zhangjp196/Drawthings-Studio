@@ -23,8 +23,7 @@ from services import jobs
 from services.jobs import JobCancelled
 from services.api_common import (
     MEDIA_DIR, MAX_IMAGE_UPLOAD, _overlay_opts, _lang, _json_body, _media_url,
-    _chapter_view, _dt_ref_field, _project_view, _config_lists, _clamp_page,
-    _ensure_not_finished, _sse,
+    _chapter_view, _dt_ref_field, _project_view, _config_lists, _clamp_page, _sse,
 )
 
 router = APIRouter(prefix="/api/comics", tags=["comic"])
@@ -100,7 +99,6 @@ async def project_rename(request: Request, project_id: str, db: Session = Depend
     project = _comic_project(db, project_id, lang)
     if not project:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     title = str(body.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail=L(lang, "标题不能为空", "Title cannot be empty"))
@@ -122,39 +120,9 @@ def project_delete(request: Request, project_id: str, db: Session = Depends(get_
     return {"ok": True}
 
 
-@router.post("/{project_id}/complete")
-def project_complete(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """完结整部作品：要求全部季的章节都已完成（done），完结后作品锁定（只读），需解锁才能继续操作。"""
-    lang = _lang(request)
-    project = _comic_project(db, project_id, lang)
-    if project is None:
-        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)  # 已完结 → 防重复
-    try:
-        pipeline.comic.complete_project(db, project, lang=lang)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
-    return {"ok": True, "status": project.status}
-
-
-@router.post("/{project_id}/unlock")
-def project_unlock(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """解锁已完结（锁定）的作品：回到「章节已定」状态，可继续编辑 / 生成。"""
-    lang = _lang(request)
-    project = _comic_project(db, project_id, lang)
-    if project is None:
-        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    if not pipeline.comic.is_finished(project):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "该作品未处于完结（锁定）状态，无需解锁",
-                                     "This project is not finished/locked — nothing to unlock"))
-    pipeline.comic.unlock_project(db, project, lang=lang)
-    return {"ok": True, "status": project.status}
-
-
 @router.get("/{project_id}")
 def project_view(request: Request, project_id: str, db: Session = Depends(get_db)):
-    """项目详情：状态/篇幅/总纲/首图 + 章节 + 可选配置。"""
+    """项目详情：状态/篇幅/首图 + 章节 + 可选配置。"""
     lang = _lang(request)
     project = _comic_project(db, project_id, lang)
     if project is None:
@@ -218,7 +186,6 @@ async def project_config_update(request: Request, project_id: str, db: Session =
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(str(body.get("llm_config_id") or ""))
     dt_cfg = cs.get_drawthing(str(body.get("drawthings_config_id") or ""))
@@ -253,7 +220,6 @@ async def project_season_create(request: Request, project_id: str, db: Session =
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     season = pipeline.comic.add_season(db, project, title=str(body.get("title") or ""))
     return {"id": season.id, "number": season.number, "title": season.title or ""}
 
@@ -267,7 +233,6 @@ async def project_season_update(request: Request, project_id: str, season_id: st
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     season = pipeline.comic._get_season(db, project, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
@@ -303,7 +268,6 @@ def project_season_delete(request: Request, project_id: str, season_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     try:
         pipeline.comic.delete_season(db, project, season_id)
     except ValueError as e:
@@ -321,7 +285,6 @@ async def project_action(request: Request, project_id: str, db: Session = Depend
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     season = None
     if step in ("chapters", "generate", "season_arc", "season_chars"):
         sid = str(body.get("season_id") or "")
@@ -374,7 +337,6 @@ async def project_action_stream(request: Request, project_id: str, db: Session =
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -594,7 +556,6 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -656,7 +617,6 @@ async def project_edit(request: Request, project_id: str, index: int,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -678,7 +638,6 @@ async def project_chapter_add(request: Request, project_id: str, db: Session = D
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -695,7 +654,6 @@ async def project_chapter_delete(request: Request, project_id: str, index: int, 
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(request.query_params.get("season_id") or "")
     if not sid:
         try:
@@ -724,7 +682,6 @@ async def project_chapters_delete_batch(request: Request, project_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -745,7 +702,6 @@ async def project_chapters_clear(request: Request, project_id: str, db: Session 
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -766,7 +722,6 @@ async def project_chapter_clear(request: Request, project_id: str, index: int,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -788,7 +743,6 @@ async def project_chapter_move(request: Request, project_id: str, index: int,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     sid = str(body.get("season_id") or "")
     season = pipeline.comic._get_season(db, project, sid) if sid else None
     if season is None:
@@ -810,7 +764,6 @@ async def project_first_image_upload(request: Request, project_id: str, file: Up
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
@@ -837,7 +790,6 @@ async def project_first_image_generate(request: Request, project_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     try:
         project = await pipeline.comic.generate_first_image(db, project, str(body.get("prompt") or ""),
                                                        lang=lang,
@@ -860,7 +812,6 @@ def season_first_image_upload(request: Request, project_id: str, season_id: str,
     season = pipeline.comic._get_season(db, project, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
-    _ensure_not_finished(project, lang)
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
@@ -890,7 +841,6 @@ async def season_first_image_generate(request: Request, project_id: str, season_
     season = pipeline.comic._get_season(db, project, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
-    _ensure_not_finished(project, lang)
     try:
         season = await pipeline.comic.generate_season_first_image(db, project, season,
                                                             str(body.get("prompt") or ""),
@@ -912,7 +862,6 @@ async def project_first_image_overlay_title(request: Request, project_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     try:
         project = pipeline.comic.overlay_first_image_title(db, project, lang, _overlay_opts(body))
     except Exception as e:
@@ -933,7 +882,6 @@ async def season_cover_ref(request: Request, project_id: str, season_id: str,
     season = pipeline.comic._get_season(db, project, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
-    _ensure_not_finished(project, lang)
     enabled = bool(body.get("enabled"))
     pipeline.comic.set_season_cover_ref(db, project, season, enabled)
     return {"ok": True, "enabled": enabled}
@@ -951,7 +899,6 @@ async def season_first_image_overlay_title(request: Request, project_id: str, se
     season = pipeline.comic._get_season(db, project, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail=L(lang, "季不存在", "Season not found"))
-    _ensure_not_finished(project, lang)
     try:
         season = pipeline.comic.overlay_season_first_image_title(db, project, season, lang, _overlay_opts(body))
     except Exception as e:
@@ -968,7 +915,6 @@ def project_char_image_upload(request: Request, project_id: str, char_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     data = file.file.read(MAX_IMAGE_UPLOAD + 1)
     if not data:
         raise HTTPException(status_code=400, detail=L(lang, "文件为空", "File is empty"))
@@ -1000,7 +946,6 @@ def project_char_image_delete(request: Request, project_id: str, char_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     try:
         pipeline.comic.set_char_image(db, project, char_id, "")
     except Exception as e:
@@ -1018,7 +963,6 @@ async def project_char_gen_desc(request: Request, project_id: str, char_id: str,
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     try:
         desc = await pipeline.comic.gen_char_description(db, project, char_id, lang)
     except Exception as e:
@@ -1036,7 +980,6 @@ async def project_outline_save(request: Request, project_id: str, db: Session = 
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    _ensure_not_finished(project, lang)
     raw_chars = body.get("characters")
     characters = None
     if isinstance(raw_chars, list):

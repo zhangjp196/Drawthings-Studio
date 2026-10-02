@@ -216,6 +216,15 @@ def _migrate():
                     'INSERT INTO micro_messages (id, session_id, "index", role, content, media_url, prompt) '
                     'SELECT id, session_id, "index", role, content, media_url, prompt FROM _micro_messages_backup'))
                 conn.execute(text("DROP TABLE _micro_messages_backup"))
+        # 一次性修正：已移除「完结/锁定」，旧项目停在 status=done 会被永久锁死无法编辑 —— 归一到 chaptered。
+        try:
+            done = conn.execute(text("SELECT v FROM app_flags WHERE k='done_status_unlock'")).scalar()
+            if not done:
+                conn.execute(text("UPDATE projects SET status='chaptered' WHERE status='done'"))
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO app_flags (k, v) VALUES ('done_status_unlock','1')"))
+        except Exception:
+            pass  # 旧库尚无相关表：忽略
         # 一次性修正：整体故事大纲已并入「生成本季大纲」，status 不再有 arced（总纲已定）态。
         # 旧项目停在该态会被并入 chaptered（章节已定）——语义上它至少已规划过，向后兼容即可。
         try:

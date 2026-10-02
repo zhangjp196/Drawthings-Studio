@@ -63,8 +63,7 @@ Views.projects = {
       </div>
       <el-empty v-else :description="I18N.t('proj.empty')" />
 
-      <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
-                     :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
+      <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next" :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
 
       <!-- 新建弹框：漫画 / 短剧完全分开，各自独立组件 -->
       <el-dialog v-model="newComicDlg" :title="I18N.t('proj.newDlgComic')" width="560px">
@@ -88,7 +87,7 @@ Views.projects = {
       const t = I18N.t;
       return {
         planning: t('proj.status.planning'),
-        chaptered: t('proj.status.chaptered'), done: t('proj.status.done'),
+        chaptered: t('proj.status.chaptered'),
       };
     });
     const f = reactive({ page: 1, size: 10, q: '', kind: (router.currentRoute.value.query.kind === 'drama' ? 'drama' : 'comic'), status: '', sort: 'desc' });
@@ -142,7 +141,7 @@ Views.projects = {
       syncKindQuery();
       load();
     }
-    const statusTag = (s) => (s === 'done' ? 'success' : s === 'planning' ? 'info' : 'primary');
+    const statusTag = (s) => (s === 'planning' ? 'info' : 'primary');
 
     function open(row) { router.push(row.kind === 'comic' ? '/comic/' + row.id : '/drama/' + row.id); }
     function askRename(row) {

@@ -88,7 +88,7 @@ class Project(Base):
     dt_model_video = Column(String(200), default="")             # 功能级模型：本项目出视频模型（空=跟随 DrawThings 配置）
     dt_ref_image = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_ref_video = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
-    status = Column(String(20), default="planning")       # planning|chaptered|done（完成已下沉到季，不再由 UI 设置）
+    status = Column(String(20), default="planning")       # planning|chaptered（无「完结/锁定」态：作品始终可继续编辑生成）
     global_prompt = Column(Text, default="")               # 全局要求（风格 + 要点/约束）：注入到每次 LLM 调用
     characters = Column(Text, default="")                  # 核心角色设定（贯穿各季的主要角色，名字/形象/性格）
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）

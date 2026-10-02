@@ -149,14 +149,6 @@ def _clamp_page(page: int, size: int) -> tuple[int, int]:
     return max(page, 1), min(max(size, 1), 100)
 
 
-def _ensure_not_finished(project: Project, lang: str) -> None:
-    """已完结（锁定）的作品禁止一切编辑/生成操作：需先解锁（服务端兜底，前端按钮同步禁用）。"""
-    if pipeline.is_finished(project):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "该作品已完结（锁定），请先点「解锁」再操作",
-                                     "This work is finished (locked) — click Unlock first"))
-
-
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -189,5 +181,5 @@ __all__ = [
     "MEDIA_DIR", "MAX_IMAGE_UPLOAD", "_overlay_opts",
     "_lang", "_json_body", "_media_url", "_chapter_view",
     "_llm_view", "_dt_view", "_dt_ref_field", "_dt_gen_fields", "_project_view",
-    "_config_lists", "_clamp_page", "_ensure_not_finished", "_sse",
+    "_config_lists", "_clamp_page", "_sse",
 ]

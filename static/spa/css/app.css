@@ -919,16 +919,6 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .season-sep { width: 1px; align-self: stretch; min-height: 24px; background: var(--line); margin: 2px 5px; flex: none; }
 .season-overall { color: var(--primary); border-color: var(--el-color-primary-light-5); font-weight: 600; }
 
-/* ---------- 完结（锁定）横幅 + 完结页各季进度行 ---------- */
-.finish-banner { margin-bottom: 10px; border-radius: 10px; }
-.finish-banner-body { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
-.finish-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 2px; border-bottom: 1px dashed var(--line);
-}
-.finish-row:last-of-type { border-bottom: none; }
-.finish-row-name { min-width: 96px; }
-
 /* ---------- 可访问性 / 动效偏好 ---------- */
 button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-visible, .season-item:focus-visible,
 .el-button:focus-visible, .mc-attach:focus-visible {

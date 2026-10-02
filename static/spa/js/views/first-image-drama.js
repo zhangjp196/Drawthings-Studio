@@ -7,7 +7,6 @@ Views.dramaFirstImage = {
     project: { type: Object, required: true },   // data.project
     projectId: { type: String, required: true },
     prompt: { type: String, required: true },    // 生成提示词（v-model:prompt，父组件持有）
-    locked: { type: Boolean, default: false },   // 作品已完结（锁定）：操作只读
   },
   emits: ['preview', 'reloaded', 'overlay', 'update:prompt'],
   template: `
@@ -25,13 +24,13 @@ Views.dramaFirstImage = {
         <div class="first-forms">
           <div class="frow">
             <span class="k">{{ I18N.t('p.upload') }}</span>
-            <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :disabled="locked" :on-change="onFile">
-              <el-button size="small" :disabled="locked">{{ I18N.t('p.uploadBtn') }}</el-button>
+            <el-upload :auto-upload="false" :show-file-list="false" accept="image/*" :on-change="onFile">
+              <el-button size="small" >{{ I18N.t('p.uploadBtn') }}</el-button>
             </el-upload>
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.overlayTitleK') }}</span>
-            <el-button size="small" :disabled="locked || !project.first_image_url" @click="$emit('overlay')">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
+            <el-button size="small" :disabled="!project.first_image_url" @click="$emit('overlay')">{{ I18N.t('p.overlayTitleBtn') }}</el-button>
           </div>
           <div class="frow">
             <span class="k">{{ I18N.t('p.genPrompt') }}</span>

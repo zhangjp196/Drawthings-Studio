@@ -53,17 +53,8 @@ class Pipeline:
         return self.comic.list_projects(db, kind, status, q, sort, limit, offset)
 
     # ---------------- 带项目的方法（按 project.kind 路由） ----------------
-    def is_finished(self, project):
-        return self._of(project).is_finished(project)
-
     def delete_project(self, db, project):
         return self._of(project).delete_project(db, project)
-
-    def complete_project(self, db, project, lang: str = "zh"):
-        return self._of(project).complete_project(db, project, lang=lang)
-
-    def unlock_project(self, db, project, lang: str = "zh"):
-        return self._of(project).unlock_project(db, project, lang=lang)
 
     def ensure_first_season(self, db, project):
         comic = self._is_comic(project)

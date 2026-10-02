@@ -10,7 +10,6 @@ Views.chapterCardComic = {
     seasonIndex: { type: Number, default: 0 },
     expanded: { type: Boolean, default: false },
     noToggle: { type: Boolean, default: false },    // 主从布局：常显详情、不可折叠
-    locked: { type: Boolean, default: false },      // 作品已完结（锁定）：操作只读
     isFirst: { type: Boolean, default: false },
     isLast: { type: Boolean, default: false },
     defW: { type: Number, default: 0 },             // 总体默认分辨率（仅显示，不可在此修改）
@@ -44,10 +43,9 @@ Views.chapterCardComic = {
           <el-empty v-else :description="I18N.t('p.chPending')" :image-size="48" />
         </div>
         <div class="ch-detail-body">
-          <el-alert v-if="chapter.status === 'error'" type="error" :closable="false" class="mb8"
-                    :title="I18N.t('p.chFail', chapter.error)" />
+          <el-alert v-if="chapter.status === 'error'" type="error" :closable="false" class="mb8" :title="I18N.t('p.chFail', chapter.error)" />
           <div class="muted small">{{ I18N.t('p.chPlanTitle') }}</div>
-          <el-input v-model="title" size="small" :readonly="locked" :placeholder="I18N.t('p.chPlanTitle')" />
+          <el-input v-model="title" size="small" :readonly="false" :placeholder="I18N.t('p.chPlanTitle')" />
           <div class="ch-tabs">
             <button type="button" class="ch-tab" :class="{ active: dTab === 'summary' }"
                     @click="dTab = 'summary'">{{ I18N.t('p.chPlanSummary') }}</button>
@@ -57,12 +55,11 @@ Views.chapterCardComic = {
                     @click="dTab = 'prompt'">{{ I18N.t('p.chPromptTab') }}</button>
           </div>
           <div class="ch-tab-body">
-            <el-input v-if="dTab === 'summary'" v-model="summary" type="textarea" :rows="5"
-                      :readonly="locked" :placeholder="I18N.t('p.chPlanSummary')" />
+            <el-input v-if="dTab === 'summary'" v-model="summary" type="textarea" :rows="5" :readonly="false" :placeholder="I18N.t('p.chPlanSummary')" />
             <p v-else-if="dTab === 'script'" class="desc">{{ chapter.description || '—' }}</p>
             <template v-else>
               <div class="muted small mb8">{{ I18N.t('p.chPrompt') }}</div>
-              <el-input v-model="prompt" type="textarea" :rows="5" :readonly="locked" />
+              <el-input v-model="prompt" type="textarea" :rows="5" :readonly="false" />
             </template>
           </div>
           <div class="res-row">
@@ -71,27 +68,27 @@ Views.chapterCardComic = {
           </div>
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chScore') }}</span>
-            <el-button size="small" :loading="busy === 'score'" :disabled="locked" @click="doScore">{{ I18N.t('p.vlmScore') }}</el-button>
+            <el-button size="small" :loading="busy === 'score'"  @click="doScore">{{ I18N.t('p.vlmScore') }}</el-button>
             <span v-if="chapter.score_note" class="muted small" style="margin-left:6px;">{{ chapter.score_note }}</span>
           </div>
           <div class="actions">
-            <el-button size="small" type="primary" :loading="busy === 'gen'" :disabled="locked" @click="openGen">
+            <el-button size="small" type="primary" :loading="busy === 'gen'"  @click="openGen">
               {{ done ? I18N.t('p.chRegen') : I18N.t('p.chGen') }}
             </el-button>
             <el-popconfirm :title="I18N.t('p.chSaveConfirm')" @confirm="doSave">
-              <template #reference><el-button size="small" :loading="busy === 'save'" :disabled="locked">{{ I18N.t('p.chSave') }}</el-button></template>
+              <template #reference><el-button size="small" :loading="busy === 'save'" >{{ I18N.t('p.chSave') }}</el-button></template>
             </el-popconfirm>
             <el-popconfirm :title="I18N.t('p.chMoveUpConfirm')" @confirm="doMove('up')">
-              <template #reference><el-button size="small" :disabled="isFirst || locked">{{ I18N.t('p.chMoveUp') }}</el-button></template>
+              <template #reference><el-button size="small" :disabled="isFirst">{{ I18N.t('p.chMoveUp') }}</el-button></template>
             </el-popconfirm>
             <el-popconfirm :title="I18N.t('p.chMoveDownConfirm')" @confirm="doMove('down')">
-              <template #reference><el-button size="small" :disabled="isLast || locked">{{ I18N.t('p.chMoveDown') }}</el-button></template>
+              <template #reference><el-button size="small" :disabled="isLast">{{ I18N.t('p.chMoveDown') }}</el-button></template>
             </el-popconfirm>
             <el-popconfirm :title="I18N.t('p.chClearConfirm')" @confirm="doClear">
-              <template #reference><el-button size="small" :loading="busy === 'clear'" :disabled="locked">{{ I18N.t('p.chClear') }}</el-button></template>
+              <template #reference><el-button size="small" :loading="busy === 'clear'" >{{ I18N.t('p.chClear') }}</el-button></template>
             </el-popconfirm>
             <el-popconfirm :title="I18N.t('p.chDeleteConfirm')" @confirm="doDelete">
-              <template #reference><el-button size="small" type="danger" plain :disabled="locked">{{ I18N.t('p.chDelete') }}</el-button></template>
+              <template #reference><el-button size="small" type="danger" plain >{{ I18N.t('p.chDelete') }}</el-button></template>
             </el-popconfirm>
           </div>
         </div>

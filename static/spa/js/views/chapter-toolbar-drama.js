@@ -4,7 +4,6 @@ window.Views = window.Views || {};
 
 Views.dramaChapterToolbar = {
   props: {
-    locked: { type: Boolean, default: false },
     actBusy: { type: Boolean, default: false },
     busySave: { type: Boolean, default: false },
     busyGenAll: { type: Boolean, default: false },
@@ -27,11 +26,11 @@ Views.dramaChapterToolbar = {
     <div class="ch-toolbar">
       <div class="ch-tb-row">
         <span class="ch-tb-cap">{{ I18N.t('d.planChaptersDrama') }}</span>
-        <el-button size="small" type="primary" :loading="actBusy" :disabled="locked" @click="$emit('plan')">
+        <el-button size="small" type="primary" :loading="actBusy"  @click="$emit('plan')">
           {{ selectedCount ? I18N.t('d.planSelDrama', selectedCount) : I18N.t('d.planChaptersDrama') }}
         </el-button>
         <el-popconfirm :title="I18N.t('d.planSaveConfirmDrama')" @confirm="$emit('save-plan')">
-          <template #reference><el-button size="small" :loading="busySave" :disabled="locked">{{ I18N.t('d.planSaveDrama') }}</el-button></template>
+          <template #reference><el-button size="small" :loading="busySave" >{{ I18N.t('d.planSaveDrama') }}</el-button></template>
         </el-popconfirm>
         <span class="ch-tb-sep"></span>
         <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}</span>
@@ -46,14 +45,14 @@ Views.dramaChapterToolbar = {
         <span class="ch-tb-sep"></span>
         <el-popconfirm :title="I18N.t('d.genAllConfirm')" @confirm="$emit('gen-all')">
           <template #reference>
-            <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!hasChapters || locked">
+            <el-button size="small" type="primary" :loading="busyGenAll" :disabled="!hasChapters">
               {{ selectedCount ? I18N.t('d.genAllSelDrama', selectedCount) : I18N.t('d.genAllDrama') }}
             </el-button>
           </template>
         </el-popconfirm>
         <el-popconfirm :title="I18N.t('p.scoreAllConfirm')" @confirm="$emit('score-all')">
           <template #reference>
-            <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!hasChapters || locked">
+            <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!hasChapters">
               {{ selectedCount ? I18N.t('d.scoreAllSelDrama', selectedCount) : I18N.t('d.scoreAllDrama') }}
             </el-button>
           </template>
@@ -68,30 +67,30 @@ Views.dramaChapterToolbar = {
         <span class="ch-tb-cap">{{ I18N.t('d.batchOps') }}</span>
         <el-popconfirm :title="selectedCount ? I18N.t('d.clearAllConfirmSel', selectedCount) : I18N.t('d.clearAllConfirm')" @confirm="$emit('clear-all')">
           <template #reference>
-            <el-button size="small" type="warning" plain :disabled="!hasChapters || locked">
+            <el-button size="small" type="warning" plain :disabled="!hasChapters">
               {{ selectedCount ? I18N.t('d.clearAllSel', selectedCount) : I18N.t('d.clearAll') }}
             </el-button>
           </template>
         </el-popconfirm>
         <el-popconfirm :title="I18N.t('d.replanSelConfirm', selectedCount)" @confirm="$emit('plan-selected')">
           <template #reference>
-            <el-button size="small" type="success" plain :disabled="!selectedCount || locked">
+            <el-button size="small" type="success" plain :disabled="!selectedCount">
               {{ I18N.t('d.replanSelBtn', selectedCount) }}
             </el-button>
           </template>
         </el-popconfirm>
         <el-popconfirm :title="I18N.t('d.delSelConfirm', selectedCount)" @confirm="$emit('delete-selected')">
           <template #reference>
-            <el-button size="small" type="danger" plain :disabled="!selectedCount || locked">
+            <el-button size="small" type="danger" plain :disabled="!selectedCount">
               {{ I18N.t('d.delSelBtn', selectedCount) }}
             </el-button>
           </template>
         </el-popconfirm>
         <span class="ch-tb-sep"></span>
-        <el-input-number v-model="batchSec" :min="1" :max="10" size="small" style="width: 110px" :disabled="locked || !hasChapters" />
+        <el-input-number v-model="batchSec" :min="1" :max="10" size="small" style="width: 110px" :disabled="!hasChapters" />
         <el-popconfirm :title="I18N.t('d.batchSecondsConfirm', batchSec)" @confirm="$emit('set-seconds', batchSec)">
           <template #reference>
-            <el-button size="small" :disabled="locked || !hasChapters">{{ I18N.t('d.batchSecondsApply', batchSec) }}</el-button>
+            <el-button size="small" :disabled="!hasChapters">{{ I18N.t('d.batchSecondsApply', batchSec) }}</el-button>
           </template>
         </el-popconfirm>
         <span class="muted small">{{ I18N.t('d.batchRefHint') }}</span>
