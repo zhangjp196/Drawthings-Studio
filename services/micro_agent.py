@@ -28,7 +28,7 @@ from services.agent import (build_model, image_data_uri, make_agent,
                             to_message_history, user_prompt, ScoreOut)
 from services.api_common import _media_url
 from services.capabilities import caps, dt_client
-from services.drawthings import MAX_VIDEO_SECONDS, extract_last_frame
+from services.drawthings import MAX_VIDEO_SECONDS, MODEL_NONE, extract_last_frame
 from services.media_files import media_path_from_url
 from services.micro_parts import dump_parts, load_parts
 from services.pipeline import _now, run_sync
@@ -45,7 +45,7 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
                        eff_ref_img: bool, eff_ref_vid: bool, lang: str = "zh") -> str:
     """按生效能力拼装系统提示词（生成类型 / 比例 / 时长 / 参考图模式 / 无生成服务）。"""
     if not (can_image or can_video):
-        return (MC_SYSTEM + "当前未配置生成服务，无法出图/出视频：用户要求生成时，请说明暂时无法生成，"
+        return (MC_SYSTEM + "当前不出图/出视频：用户要求生成时，请说明暂时无法生成，"
                             "但可以代为撰写详细的英文提示词供其后续使用。")
     kinds = []
     if can_image:
@@ -80,6 +80,17 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
             "（角色、服装、画风、光照、构图），再具体描述用户本次要求的改动；不要从头重新描述整个画面。"
             "若要参考本会话中更早的某张已生成媒体，给 generate_media 传 ref_index（1=最近一张，2=倒数第二张…）。")
     return instructions
+
+
+def _no_cap_msg(kind: str, subject, lang: str = "zh") -> str:
+    """说明「这一类生成不了」的原因：区分功能级显式「不启用」与 DrawThings 配置里真没配模型。"""
+    name = "视频" if kind == "video" else "图像"
+    attr = "dt_model_video" if kind == "video" else "dt_model_image"
+    if str(getattr(subject, attr, "") or "").strip() == MODEL_NONE:
+        return L(lang, f"已禁用{name}生成：该模型在配置设置里选了「不启用」。",
+                 f"{name} generation is disabled — that model is set to \"Disabled\".")
+    return L(lang, f"未配置{name}模型：请在 DrawThings 配置里填写{name}模型。",
+             f"No {kind} model configured — set one in the DrawThings config.")
 
 
 def latest_session_media_path(db, session_id: str) -> str | None:
@@ -426,7 +437,9 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                 parts.append({"type": "text", "text": delta})
 
         async with agent:
-            if dt:
+            # 图像与视频都被显式「不启用」时根本不注册 generate_media：
+            # 与其让模型去调一个必然失败的工具（每次都返回 TOOL_ERROR），不如让它按纯对话处理。
+            if dt and (can_image or can_video):
                 @agent.tool
                 async def generate_media(ctx: RunContext, prompt: str, media: str = "",
                                          width: int = 0, height: int = 0, seconds: int = 0,
@@ -449,9 +462,7 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                     if kind not in ("image", "video"):
                         kind = "video" if can_video else "image"
                     if (kind == "video" and not can_video) or (kind == "image" and not can_image):
-                        name = "视频" if kind == "video" else "图像"
-                        msg = L(lang, f"未配置{name}模型：请在 DrawThings 配置里填写{name}模型。",
-                                f"No {'video' if kind == 'video' else 'image'} model configured — set one in the DrawThings config.")
+                        msg = _no_cap_msg(kind, work, lang)
                         await out.put((E.TOOL_ERROR, {"id": f"t{next(tool_ids)}", "message": msg, "prompt": prompt}))
                         return f"生成失败：{msg}"
                     tid = f"t{next(tool_ids)}"
@@ -527,9 +538,7 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
         _caps = caps(dt, dt_cfg, work)
         can_image, can_video = _caps.can_image, _caps.can_video
         if dt is None or (kind == "video" and not can_video) or (kind == "image" and not can_image):
-            name = "视频" if kind == "video" else "图像"
-            msg = L(lang, f"未配置{name}模型：请在 DrawThings 配置里填写{name}模型。",
-                    f"No {'video' if kind == 'video' else 'image'} model configured — set one in the DrawThings config.")
+            msg = _no_cap_msg(kind, work, lang)
             parts.append({"type": "error", "message": msg})
             persister.save("interrupted")
             persister.final = True

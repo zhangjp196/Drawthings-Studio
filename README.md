@@ -458,6 +458,7 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
   audio`) and the file is re-muxed once — logged, never silent. (`tools/check_video_fps.py` covers this end to end.)
 - A gRPC request **must carry the full generation config**, so the config specifies:
   - **image model / video model** (`model_image` / `model_video`): each may be empty — the effective model comes from the feature (project / micro-creation), falling back to the config.
+    The per-feature value is **three-state**: `Follow config default` (empty string, falls back to the config) / a specific model / **`Disabled`** (sentinel `__none__` — no image or no video even when the config has a model of that type; image and video can be disabled independently). When both are disabled the `generate_media` tool is **not registered at all**, so the session runs as a plain conversation.
     Click "Fetch models" to read the **downloaded models** from the app
     (gRPC `get_models`, with names and a video flag).
   - The generation **preset** (steps / sampler / size) is **inferred from the model name** (normalized match against
