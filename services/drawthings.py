@@ -84,6 +84,10 @@ MAX_VIDEO_SECONDS = 10
 # max_side（最大分辨率 · 最长边）可配置上限：4096 = 4K。0 = 不限（跟随 app / 预设）。
 MAX_SIDE_LIMIT = 4096
 
+# 功能级「不启用」哨兵：与空串区分 —— 空串 = 跟随 DrawThings 配置里的模型，
+# 该值 = 明确禁用（即便配置里有图像/视频模型，本作品也不出图 / 不出视频，只出文本）。
+MODEL_NONE = "__none__"
+
 # 功能级 max_steps（最大 Step 数）可配上限：0 = 跟随预设自带步数。
 # 图像与视频**分开**配置：两者需求差别很大（图像如 qwen-image 需补到 50~100；
 # 视频如 LTX 蒸馏版预设仅 8 步，反而宜少步）。取 200 封顶，避免误设上千步跑数小时。
@@ -1092,17 +1096,20 @@ def build_drawthings_client(cfg, data_dir: Path,
                              max_steps_image: int = 0, max_steps_video: int = 0) -> DrawThingsClient:
     """构造 Draw Things 客户端（仅 gRPC）。
 
-    model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）；
-    留空 = 跟随 DrawThings 配置里的模型。
+    model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）：
+    留空 = 跟随 DrawThings 配置里的模型；`MODEL_NONE`（"不启用"）= 明确禁用该类型；
+    其余 = 指定模型。
     ref_image / ref_video：功能级「支持参考图片」覆盖；None = 跟随配置，0/1 = 显式关/开。
     max_steps_image / max_steps_video：功能级最大 Step 数（随所选模型一起配，两者分开）；
     0 = 跟随预设自带步数。
     """
     c = DrawThingsClient(cfg, data_dir)
-    if model_image:
-        c.model_image = str(model_image).strip()
-    if model_video:
-        c.model_video = str(model_video).strip()
+    # 「不启用」要能覆盖配置里的模型，故与「留空=跟随」分开判断
+    for attr, ov in (("model_image", model_image), ("model_video", model_video)):
+        if ov == MODEL_NONE:
+            setattr(c, attr, "")
+        elif ov:
+            setattr(c, attr, str(ov).strip())
     if ref_image is not None:
         c.ref_image = bool(ref_image)
     if ref_video is not None:

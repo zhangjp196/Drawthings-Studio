@@ -35,14 +35,19 @@ def ref_video_enabled(cfg, subject) -> bool:
     return bool(_r) if _r is not None else bool(getattr(cfg, "ref_video", 0))
 
 
+def _model_override(subject, attr: str) -> str:
+    """功能级模型覆盖值：'' = 跟随配置；MODEL_NONE = 明确不启用；其余 = 指定模型。"""
+    return str(getattr(subject, attr, "") or "").strip()
+
+
 def dt_client(cfg, data_dir, subject):
     """按 subject 的功能级覆盖构造 DrawThings 客户端；cfg 为空返回 None。"""
     if not cfg:
         return None
     return build_drawthings_client(
         cfg, Path(data_dir),
-        model_image=getattr(subject, "dt_model_image", "") or "",
-        model_video=getattr(subject, "dt_model_video", "") or "",
+        model_image=_model_override(subject, "dt_model_image"),
+        model_video=_model_override(subject, "dt_model_video"),
         ref_image=norm_ref_flag(getattr(subject, "dt_ref_image", "")),
         ref_video=norm_ref_flag(getattr(subject, "dt_ref_video", "")),
         max_steps_image=int(getattr(subject, "dt_max_steps_image", 0) or 0),

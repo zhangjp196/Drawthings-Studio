@@ -86,6 +86,7 @@ Views.micro = {
             <el-select v-model="f.mi" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option :value="MODEL_NONE" :label="I18N.t('cf.dtModelOff')" />
               <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="f.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
@@ -98,6 +99,7 @@ Views.micro = {
             <el-select v-model="f.mv" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option :value="MODEL_NONE" :label="I18N.t('cf.dtModelOff')" />
               <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="f.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
@@ -125,6 +127,8 @@ Views.micro = {
     const flt = reactive({ q: '', kind: '', sort: 'desc', size: 10 });
     const dlg = ref(false);
     const saving = ref(false);
+    // 「不启用」= 明确不出图 / 不出视频（区别于空串的「跟随配置默认」）
+    const MODEL_NONE = '__none__';
     const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0 });
     const tab = ref('works');  // 列表页 tab：作品集（默认）；预留后续扩展
 
@@ -234,7 +238,7 @@ Views.micro = {
 
     onMounted(load);
     return {
-      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab, imgChoices, vidChoices,
+      works, llms, dts, total, totalPages, page, flt, dlg, saving, f, tab, imgChoices, vidChoices, MODEL_NONE,
       load, apply, onSearch, reset, openNew, create, enter, isMediaVideo, del,
     };
   },

@@ -77,6 +77,7 @@ Views.microWork = {
             <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option :value="MODEL_NONE" :label="I18N.t('cf.dtModelOff')" />
               <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
@@ -85,6 +86,7 @@ Views.microWork = {
             <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
               <el-option :value="''" :label="I18N.t('cf.dtModelFollow')" />
+              <el-option :value="MODEL_NONE" :label="I18N.t('cf.dtModelOff')" />
               <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
@@ -153,6 +155,8 @@ Views.microWork = {
     // 作品选项（设置在「设置」tab 内，作用于全部会话）
     const cfgBusy = ref(false);
     const cfgDlg = ref(false);
+    // 「不启用」= 明确不出图 / 不出视频（区别于空串的「跟随配置默认」）
+    const MODEL_NONE = '__none__';
     const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0, score_mode: 'image', auto_score: false });
     function openCfg() { syncCfg(); cfgDlg.value = true; }  // 作品选项弹框：打开前同步当前值
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
@@ -336,7 +340,7 @@ Views.microWork = {
     return {
       data, msgs, hasSession, sideHidden, setSide, tab,
       sessDlg, sessTitle, createSess, renameDlg, renameTitle, askRename, doRename, delSess,
-      cfgBusy, cfgDlg, openCfg, cfg, imgChoices, vidChoices, saveCfg,
+      cfgBusy, cfgDlg, openCfg, cfg, imgChoices, vidChoices, saveCfg, MODEL_NONE,
       lb, openLb, tagLabel, tagType,
       router, pick, openSess, load,
     };
