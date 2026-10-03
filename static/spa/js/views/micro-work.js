@@ -47,9 +47,11 @@ Views.microWork = {
 
       </el-tabs>
 
-      <el-dialog v-model="cfgDlg" :title="I18N.t('mw.options')" width="560px">
+      <el-dialog v-model="cfgDlg" :title="I18N.t('mw.options')" width="780px">
         <p class="hint">{{ I18N.t('mw.cfgHint') }}</p>
-        <el-form label-position="top">
+        <!-- 两列：同类成对（图像/视频模型、图像/视频步数）；评分依据紧随 DrawThings 配置，
+             使其后的 4 个 v-if 字段连续成对 —— 缺任一项都不会把配对挤错行 -->
+        <el-form label-position="top" class="form-2col">
           <el-form-item :label="I18N.t('mc.fTitle')">
             <el-input v-model="cfg.title" maxlength="200" :placeholder="I18N.t('mc.fTitlePh')" />
           </el-form-item>
@@ -66,6 +68,13 @@ Views.microWork = {
             </el-select>
             <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
           </el-form-item>
+          <el-form-item :label="I18N.t('mc.scoreMode')">
+            <el-select v-model="cfg.score_mode" style="width: 100%">
+              <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
+              <el-option value="prompt" :label="I18N.t('mc.scoreModePrompt')" />
+            </el-select>
+            <div class="hint">{{ I18N.t('mc.scoreModeHint') }}</div>
+          </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelImage')">
             <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
                        :placeholder="I18N.t('cf.dtModelPh')">
@@ -73,10 +82,6 @@ Views.microWork = {
               <el-option v-for="m in imgChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="cfg.ref_i" style="margin-top:4px;">{{ I18N.t('cfg.refImage') }}</el-checkbox>
-          </el-form-item>
-          <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsImage')">
-            <el-input-number v-model="cfg.steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
-            <div class="hint">{{ I18N.t('cfg.maxStepsHint') }}</div>
           </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelVideo')">
             <el-select v-model="cfg.mv" filterable allow-create clearable style="width: 100%"
@@ -87,17 +92,13 @@ Views.microWork = {
             <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
             <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
+          <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsImage')">
+            <el-input-number v-model="cfg.steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
+            <div class="hint">{{ I18N.t('cfg.maxStepsHint') }}</div>
+          </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsVideo')">
             <el-input-number v-model="cfg.steps_v" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
             <div class="hint">{{ I18N.t('cfg.maxStepsHintVideo') }}</div>
-          </el-form-item>
-
-          <el-form-item :label="I18N.t('mc.scoreMode')">
-            <el-select v-model="cfg.score_mode" style="width: 100%">
-              <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
-              <el-option value="prompt" :label="I18N.t('mc.scoreModePrompt')" />
-            </el-select>
-            <div class="hint">{{ I18N.t('mc.scoreModeHint') }}</div>
           </el-form-item>
         </el-form>
         <template #footer>
