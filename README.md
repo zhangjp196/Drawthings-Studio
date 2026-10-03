@@ -462,8 +462,9 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
     (gRPC `get_models`, with names and a video flag).
   - The generation **preset** (steps / sampler / size) is **inferred from the model name** (normalized match against
     drawthings-py preset models, ignoring quantization/version suffixes, e.g. `ltx_2.3_22b_distilled_1.1_q6p` →
-    `ltx_2_3_distilled`, `flux_2_klein_9b_q6p` → `flux_2_klein_9b`), no input needed. A model with no matching preset
-    gets a clear error.
+    `ltx_2_3_distilled`, `flux_2_klein_9b_q6p` → `flux_2_klein_9b`), no input needed. Normalization **ignores separator
+    style**: hyphens / underscores / spaces are equivalent (`qwen-image-2.1`, `qwen_image_2.1`, `qwen image 2.1` all hit
+    the same preset), because exporters and hand-written filenames disagree. A model with no matching preset gets a clear error.
 - The model is validated (on the same connection) before generation, so a missing model errors out instead of quitting the app.
 - Resolution: images = caller (agent) > preset, capped by `max_side` (longest side); **video is also capped by `max_side`**
   (0 = preset size. The LTX preset defaults to 1280×768 which is very VRAM-heavy — 25 frames took >10 min; use `max_side=768`

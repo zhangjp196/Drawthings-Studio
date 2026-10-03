@@ -397,11 +397,17 @@ def parse_endpoint(base_url: str, default_port: int = DEFAULT_GRPC_PORT) -> tupl
 
 
 def _norm_model(model: str) -> str:
-    """模型名归一化：去扩展名 / 量化精度 / 末尾版本号，便于跨量化变体匹配预设。"""
+    """模型名归一化：统一分隔符 + 去扩展名 / 量化精度 / 末尾版本号，便于跨变体匹配预设。
+
+    **分隔符统一为 `_`**：同一模型名有人写连字符、有人写下划线、导出工具还会用空格
+    （`qwen-image-2.1` / `qwen_image_2.1` / `qwen image 2.1`），不统一会导致查表不中 ——
+    预设表里是 `qwen_image`，而用户填 `qwen-image-2.1` 就会推断失败、直接无法生成。"""
     s = (model or "").lower()
     s = re.sub(r"\.(ckpt|safetensors)$", "", s)
-    s = re.sub(r"[._-](q\d+p|i\d+x|f16|bf16|fp16|f8|q\d|i\d)(?=[._-]|$)", "", s)
-    s = re.sub(r"[._-]v?\d+(\.\d+)*$", "", s)   # 末尾版本号，如 _1.1 / _2.3
+    sep = r"[._\-\s]"                            # 模型名里可能出现的分隔符：点 / 下划线 / 连字符 / 空格
+    s = re.sub(sep + r"(q\d+p|i\d+x|f16|bf16|fp16|f8|q\d|i\d)(?=" + sep + r"|$)", "", s)
+    s = re.sub(sep + r"v?\d+(\.\d+)*$", "", s)  # 末尾版本号，如 _1.1 / _2.3（须在统一分隔符之前）
+    s = re.sub(r"[\s.\-]+", "_", s)              # 空格 / 点 / 连字符 → 下划线（最后统一，保证查表命中）
     return s.strip("._-")
 
 
