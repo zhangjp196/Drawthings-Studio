@@ -136,7 +136,6 @@ Views.configs = {
             </div>
           </div>
           <el-empty v-else :image-size="56" :description="I18N.t('cfg.empty', 'DrawThings')" />
-          <div class="hint" style="margin-top: 12px;">{{ I18N.t('cfg.dtStatusHint') }}</div>
         </div>
       </section>
 
@@ -161,7 +160,6 @@ Views.configs = {
                 </el-select>
                 <el-button :loading="loadingModels" @click="fetchModels">{{ I18N.t('cfg.fetchModels') }}</el-button>
               </div>
-              <div class="hint">{{ I18N.t('cfg.modelHint') }}</div>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.thinking')">
               <el-select v-model="f.thinking" style="width: 100%">

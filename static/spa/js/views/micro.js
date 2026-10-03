@@ -81,7 +81,6 @@ Views.micro = {
               <el-option value="" :label="I18N.t('mc.dtNone')" />
               <el-option v-for="c in dts" :key="c.id" :value="c.id" :label="c.name" />
             </el-select>
-            <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
           </el-form-item>
           <el-form-item v-if="f.dt" :label="I18N.t('mc.dtModelImage')">
             <el-select v-model="f.mi" filterable allow-create clearable style="width: 100%"
@@ -102,7 +101,6 @@ Views.micro = {
               <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="f.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
-            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
           <el-form-item v-if="f.dt" :label="I18N.t('cfg.maxStepsVideo')">
             <el-input-number v-model="f.steps_v" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />

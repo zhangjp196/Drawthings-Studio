@@ -66,14 +66,12 @@ Views.microWork = {
               <el-option value="" :label="I18N.t('mw.dtNone')" />
               <el-option v-for="c in data.drawthing_configs" :key="c.id" :value="c.id" :label="c.name" />
             </el-select>
-            <div class="hint">{{ I18N.t('mc.dtHint') }}</div>
           </el-form-item>
           <el-form-item :label="I18N.t('mc.scoreMode')">
             <el-select v-model="cfg.score_mode" style="width: 100%">
               <el-option value="image" :label="I18N.t('mc.scoreModeImage')" />
               <el-option value="prompt" :label="I18N.t('mc.scoreModePrompt')" />
             </el-select>
-            <div class="hint">{{ I18N.t('mc.scoreModeHint') }}</div>
           </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('mc.dtModelImage')">
             <el-select v-model="cfg.mi" filterable allow-create clearable style="width: 100%"
@@ -90,7 +88,6 @@ Views.microWork = {
               <el-option v-for="m in vidChoices" :key="m.file" :value="m.file" :label="m.label" />
             </el-select>
             <el-checkbox v-model="cfg.ref_v" style="margin-top:4px;">{{ I18N.t('cfg.refVideo') }}</el-checkbox>
-            <div class="hint">{{ I18N.t('cfg.refCrashHint') }}</div>
           </el-form-item>
           <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxStepsImage')">
             <el-input-number v-model="cfg.steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
