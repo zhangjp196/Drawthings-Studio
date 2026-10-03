@@ -401,18 +401,35 @@ def parse_endpoint(base_url: str, default_port: int = DEFAULT_GRPC_PORT) -> tupl
 
 
 def _norm_model(model: str) -> str:
-    """模型名归一化：统一分隔符 + 去扩展名 / 量化精度 / 末尾版本号，便于跨变体匹配预设。
+    """模型名归一化：统一分隔符 + 去扩展名 / 量化精度，便于跨变体匹配预设。
 
     **分隔符统一为 `_`**：同一模型名有人写连字符、有人写下划线、导出工具还会用空格
     （`qwen-image-2.1` / `qwen_image_2.1` / `qwen image 2.1`），不统一会导致查表不中 ——
-    预设表里是 `qwen_image`，而用户填 `qwen-image-2.1` 就会推断失败、直接无法生成。"""
+    预设表里是 `qwen_image`，而用户填 `qwen-image-2.1` 就会推断失败、直接无法生成。
+
+    末尾版本号**不在这里剥**：`_1.1` / `_2.3` 之类该剥，但 `2512` / `2511` 是 qwen-image
+    的**型号标识**，剥掉会让 `qwen_image_2512_lightning` 塌成 `qwen_image` 而错配到非
+    lightning 预设（30 步跑 4 步蒸馏模型）。改由 `_norm_variants` 以候选键的方式处理。"""
     s = (model or "").lower()
     s = re.sub(r"\.(ckpt|safetensors)$", "", s)
     sep = r"[._\-\s]"                            # 模型名里可能出现的分隔符：点 / 下划线 / 连字符 / 空格
     s = re.sub(sep + r"(q\d+p|i\d+x|f16|bf16|fp16|f8|q\d|i\d)(?=" + sep + r"|$)", "", s)
-    s = re.sub(sep + r"v?\d+(\.\d+)*$", "", s)  # 末尾版本号，如 _1.1 / _2.3（须在统一分隔符之前）
     s = re.sub(r"[\s.\-]+", "_", s)              # 空格 / 点 / 连字符 → 下划线（最后统一，保证查表命中）
     return s.strip("._-")
+
+
+def _norm_variants(model: str) -> list[str]:
+    """归一化候选键，按「精确优先」排序：原名 → 逐级剥掉末尾版本号。
+
+    两者都登记进查表，才能既认 `ltx_2_3_22b_distilled_1_1`（要剥 `_1_1`）
+    又认 `qwen_image_2512_lightning`（不能剥 `_2512`）。"""
+    base = _norm_model(model)
+    out = [base]
+    for tail in re.findall(r"_\d+(?:\.\d+)*$", base):     # 如 ["_1_1"] / ["_2512"]
+        short = base[: -len(tail)]
+        if short and short not in out:
+            out.append(short)
+    return out
 
 
 _PRESET_MODEL_MAP: dict[str, str] | None = None
@@ -434,11 +451,11 @@ def _preset_model_map() -> dict[str, str]:
             except Exception:
                 continue
             if model:
-                key = _norm_model(model)
-                cur = m.get(key)
-                # 同一模型有多个预设时优先非 lightning
-                if cur is None or ("lightning" in cur and "lightning" not in name):
-                    m[key] = name
+                for key in _norm_variants(model):
+                    cur = m.get(key)
+                    # 同一模型有多个预设时优先非 lightning
+                    if cur is None or ("lightning" in cur and "lightning" not in name):
+                        m[key] = name
     except Exception:
         pass
     _PRESET_MODEL_MAP = m
@@ -454,16 +471,30 @@ def infer_preset(model: str) -> str:
     n = (model or "").strip()
     if not n:
         return ""
-    hit = _preset_model_map().get(_norm_model(n))
-    if hit:
-        return hit
+    m = _preset_model_map()
+    for key in _norm_variants(n):
+        hit = m.get(key)
+        if hit:
+            return hit
+    # ---- 关键词兜底 ----
+    # drawthings-py 里 *lightning 预设和它非 lightning 的 counterparts 共用同一个 model
+    # 文件名（如 `qwen_image_2512_lightning` 的 model 字段也是 `qwen_image_2512_q6p.ckpt`），
+    # 所以查表在原理上区分不了蒸馏变体 —— 只能靠模型名里的标志位。
     low = n.lower()
+    # 蒸馏 / 少步变体步数极低（4~8），错配到多步预设（30 步）出图会严重不对，故逐族分支。
+    fast = any(k in low for k in ("lightning", "turbo", "schnell", "distill"))
     if "ltx" in low:
         return "ltx_2_3_dev" if "dev" in low else "ltx_2_3_distilled"
     if "wan" in low:
-        return "wan_2_2_14b_i2v" if "i2v" in low else "wan_2_2_14b_t2v"
+        base = "wan_2_2_14b_i2v" if "i2v" in low else "wan_2_2_14b_t2v"
+        return f"{base}_lightning" if fast else base
     if "hunyuan" in low and "video" in low:
         return "hunyuan_video"
+    if "qwen" in low:
+        base = "qwen_image_edit_2511" if "edit" in low else "qwen_image_2512"
+        return f"{base}_lightning" if fast else base
+    if "z_image" in low or "z-image" in low:
+        return "z_image_turbo" if fast else "z_image_base"
     return ""
 
 
@@ -552,6 +583,22 @@ def probe_endpoint(host: str, port: int, timeout: float = _PROBE_TIMEOUT) -> dic
            "elapsed_ms": int((time.monotonic() - t0) * 1000), "error": err}
     _PROBE_CACHE[key] = (time.monotonic(), out)
     return dict(out)
+
+
+# Qwen-Image 2.1 是 2512 **之后**的新版本，而 drawthings-py 0.4.x 的 qwen 预设只到
+# `qwen_image_2512` / `qwen_image_edit_2511`（PyPI 最新 0.4.0、GitHub v0.4.1 预设清单相同），
+# 上游没有 2.1 预设。直接套 2512 会用错参数：2512 是 guidanceScale=4，而 2.1 官方配方是
+# **steps=40、CFG=1.0（关闭 guidance）、negative 留空**（2.1 底模已做 guidance 蒸馏）。
+# CFG 拉太高正是「出图发灰 / 半透明 / 颜色不饱和」的典型成因，故在此按族修正。
+_QWEN_21_RE = re.compile(r"(?:^|[^0-9])2[._\- ]?1(?![0-9])")
+
+
+def _family_fixups(model: str) -> dict:
+    """按模型族修正预设参数：上游预设缺型号 / 参数不匹配时兜底。空 = 不修正。"""
+    low = (model or "").lower()
+    if "qwen" not in low or not _QWEN_21_RE.search(low):
+        return {}
+    return {"steps": 40, "guidance": 1.0}
 
 
 class DrawThingsClient:
@@ -699,6 +746,12 @@ class DrawThingsClient:
             raise RuntimeError(f"无法加载 Draw Things 预设 {preset}：{e} / Cannot load preset {preset}: {e}")
         if model:
             cfg["model"] = model
+        # 族修正（上游预设缺该型号 / 参数不匹配时兜底），先于用户步数覆盖生效
+        for key, val in _family_fixups(model).items():
+            try:
+                cfg[key] = val
+            except Exception:
+                pass
         # 步数：按图像 / 视频取对应的功能级 max_steps，> 0 时覆盖预设自带步数；0 = 跟随预设。
         steps = self.max_steps_video if video else self.max_steps_image
         if steps > 0:

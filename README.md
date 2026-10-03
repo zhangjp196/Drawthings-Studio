@@ -213,9 +213,12 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   Draw Things config.
   Other generation params that travel **with the model** live in the same place (project "Project settings" / micro-creation settings / create form):
   **`dt_max_steps_image` / `dt_max_steps_video` (max steps, **separate for image and video**, each settable 1-200, 0 = follow the step count baked into the preset)**.
-  > **Translucent / washed-out images -> raise the *image* step count**: too few steps leave denoising unfinished, so noise and
-  > a colour cast survive. The `qwen-image` preset ships just **30 steps**, which measures visibly pale/translucent; raising it to
-  > **50-100** fixes it. The cost is roughly linear (double the steps ~ double the time) and more VRAM at large sizes.
+  > **Translucent / washed-out images -> check guidance first, then step count**:
+  > - **Qwen-Image 2.1 (newer than 2512)**: the base model is already guidance-distilled, so the official recipe is **40 steps with
+  >   CFG = 1.0 (guidance disabled)**. Applying the 2512 preset (CFG = 4) over-guides it, which is what makes it look grey / translucent /
+  >   desaturated. This project corrects the family automatically to 40 steps / CFG 1.0 — **nothing to tune by hand**.
+  > - **Too few steps** leaves denoising unfinished, so noise and a colour cast survive; raise the *image* step count for that.
+  > - The cost is roughly linear (double the steps ~ double the time) and more VRAM at large sizes.
   > **Video is the opposite**: common video models are distilled (the LTX preset ships just 8 steps) and want *fewer* steps —
   > usually leave it at 0; only raise it for a non-distilled video model. Likewise **distilled image models (lightning / turbo)
   > want fewer steps** — leave those at 0.
