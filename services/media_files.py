@@ -40,6 +40,19 @@ def is_video_url(url: str) -> bool:
     return bool(re.search(r"\.(mp4|mov|webm|gif)(?:\?|$)", url or "", re.I))
 
 
+def image_size(path) -> tuple[int, int]:
+    """读图片**实际**尺寸；读不出返回 (0, 0)。
+
+    写回章节宽高必须用它而不是请求尺寸：请求尺寸可能被吸附到模型原生分辨率档
+    （如 qwen 系列按比例吸附到 1024/2K 档），两者不一定相同。"""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return 0, 0
+
+
 def media_path_from_url(url: str) -> Path | None:
     """媒体 URL（/media/xxx）-> 磁盘路径；越界或不存在返回 None。"""
     name = (url or "").rsplit("/", 1)[-1].split("?")[0]

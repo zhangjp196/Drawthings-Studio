@@ -23,6 +23,7 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
 """
 import asyncio
 import logging
+import math
 import os
 import re
 import shutil
@@ -585,6 +586,70 @@ def probe_endpoint(host: str, port: int, timeout: float = _PROBE_TIMEOUT) -> dic
     return dict(out)
 
 
+# Qwen-Image 系列的出图**对分辨率敏感**：只在原生档位上布局正常，任意尺寸会崩布局，
+# 且**文字最先崩**（字形被拉成又高又窄、挤成一团）。官方原生档位（Qwen 文档）：
+#   1024 档：1:1=1024×1024  4:3=1152×864  3:4=864×1152  3:2=1248×832  2:3=832×1248
+#            16:9=1536×864  9:16=864×1536
+#   2K 原生：2048×2048 / 2400×1792 / 1792×2400 / 2528×1696 / 1696×2528 / 2752×1536 / 1536×2752
+# 之前按 64 的倍数自由下发（如 768×512）虽然比例对、也是 32 的倍数，但绝对尺寸不在
+# 任何原生档上 —— 这正是 qwen 出图字形崩坏的原因。故按比例吸附到原生档。
+_QWEN_NATIVE_SIZES: tuple[tuple[int, int], ...] = (
+    (1024, 1024), (1152, 864), (864, 1152), (1248, 832), (832, 1248), (1536, 864), (864, 1536),
+)
+_QWEN_NATIVE_SIZES_2K: tuple[tuple[int, int], ...] = (
+    (2048, 2048), (2400, 1792), (1792, 2400), (2528, 1696), (1696, 2528), (2752, 1536), (1536, 2752),
+)
+
+
+def _check_preset_fit(model: str, preset: str, cfg) -> None:
+    """预设与模型是否真的配套 —— 不配套只告警不阻断，但必须让日志里看得见。
+
+    静默套错预算是最难查的一类问题：出图能出来、只是「看着不对」，没有任何报错。
+    这里覆盖两类实测踩到的坑：
+      ① **蒸馏变体拿到多步预设**（lightning / turbo / schnell / distilled 预设只有 4~8 步，
+         套成 30 步会出废图）；
+      ② **拿旧型号预设套新版本模型**（如 Qwen-Image 2.1 套 `qwen_image_2512`）——
+         参数不是为该模型调的，出图布局/色彩都可能不对。
+    """
+    low = (model or "").lower()
+    try:
+        steps = int(cfg["steps"])
+    except Exception:
+        steps = 0
+    fast = any(k in low for k in ("lightning", "turbo", "schnell", "distill"))
+    if fast and steps > 8:
+        logger.warning("模型 %s 是少步/蒸馏变体，却匹配到多步预设 %s（%d 步），出图可能严重不对。",
+                       model, preset, steps)
+    fx = _family_fixups(model)
+    if fx and not _same_version_family(low, preset):
+        logger.warning("模型 %s 疑似比预设 %s 更新，参数未必适配（已按族修正：%s）。"
+                       "若出图仍异常，说明该版本尚无配套预设，属预期内。",
+                       model, preset, ", ".join(f"{k}={v}" for k, v in fx.items()))
+    try:
+        guidance = cfg["guidance"]
+    except Exception:
+        guidance = "?"
+    logger.debug("预设原始参数：模型 %s → 预设 %s（steps=%s guidance=%s）", model, preset, steps, guidance)
+
+
+def _same_version_family(model_low: str, preset: str) -> bool:
+    """模型名里的版本标识（`2512` / `2_1` / `2511`）是否出现在预设名里 —— 用来判断是否拿旧预设套新模型。"""
+    nums = set(re.findall(r"\d+", model_low))
+    return bool(nums & set(re.findall(r"\d+", preset)))
+
+
+def _native_size(model: str, w: int, h: int, max_side: int) -> tuple[int, int] | None:
+    """把请求尺寸吸附到模型原生分辨率档位（按宽高比选最近的档）；无需吸附返回 None。
+
+    `max_side ≥ 2048` 时用 2K 原生档，否则用省显存的 1024 档。"""
+    if "qwen" not in (model or "").lower():
+        return None
+    table = _QWEN_NATIVE_SIZES_2K if max_side and max_side >= 2048 else _QWEN_NATIVE_SIZES
+    tw, th = (w, h) if (w and h) else (1, 1)            # 未指定尺寸 → 按 1:1
+    want = tw / th
+    return min(table, key=lambda s: abs(math.log((s[0] / s[1]) / want)))
+
+
 # Qwen-Image 2.1 是 2512 **之后**的新版本，而 drawthings-py 0.4.x 的 qwen 预设只到
 # `qwen_image_2512` / `qwen_image_edit_2511`（PyPI 最新 0.4.0、GitHub v0.4.1 预设清单相同），
 # 上游没有 2.1 预设。直接套 2512 会用错参数：2512 是 guidanceScale=4，而 2.1 官方配方是
@@ -744,6 +809,7 @@ class DrawThingsClient:
             cfg = Configs.from_preset(preset)
         except Exception as e:
             raise RuntimeError(f"无法加载 Draw Things 预设 {preset}：{e} / Cannot load preset {preset}: {e}")
+        _check_preset_fit(model, preset, cfg)
         if model:
             cfg["model"] = model
         # 族修正（上游预设缺该型号 / 参数不匹配时兜底），先于用户步数覆盖生效
@@ -759,6 +825,11 @@ class DrawThingsClient:
                 cfg["steps"] = int(steps)
             except Exception:
                 pass
+        try:
+            _log = "steps=%s guidance=%s" % (cfg["steps"], cfg["guidance"])
+        except Exception:
+            _log = ""
+        logger.info("生成参数：%s %s → 预设 %s（%s）", "视频" if video else "图像", model, preset, _log)
         return cfg
 
     async def _port_open(self, timeout: float = 2.0) -> bool:
@@ -917,7 +988,16 @@ class DrawThingsClient:
                     w, h = int(cfg["width"]), int(cfg["height"])
                 except Exception:
                     w = h = 0
-            if w and h and self.max_side:
+            native = _native_size(model, w, h, self.max_side)
+            if native:
+                # 原生档位优先于 max_side：非原生尺寸出的图本身就是坏的（qwen 文字崩坏），
+                # 宁可超出软上限也要落在原生档。
+                if self.max_side and max(native) > self.max_side:
+                    logger.warning("模型 %s 只在原生分辨率下正常，已用 %dx%d 超过最大分辨率 %d；"
+                                   "请把「最大分辨率」调到 %d 以上，否则出图布局会崩。",
+                                   model, native[0], native[1], self.max_side, max(native))
+                w, h = native
+            elif w and h and self.max_side:
                 w, h = cap_size(w, h, self.max_side)
             if w and h:
                 cfg["width"], cfg["height"] = w, h

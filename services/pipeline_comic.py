@@ -50,7 +50,7 @@ from .agent import (
 from .drawthings import extract_last_frame
 from .jobs import JobCancelled
 from .capabilities import dt_client, ref_image_enabled
-from .media_files import save_images_pdf
+from .media_files import image_size, save_images_pdf
 from .pipeline_common import (
     MAX_SCORE_REDO,
     _cjk_font_path,
@@ -1058,8 +1058,9 @@ class ComicPipeline:
                                     ref_path=ref, params=params))
                         ch.status = "done"
                         ch.error = ""
-                        ch.width = w
-                        ch.height = h
+                        # 记录实际尺寸：请求尺寸可能被吸附到模型原生分辨率档（如 qwen）
+                        iw, ih = image_size(ch.media_path)
+                        ch.width, ch.height = (iw, ih) if iw and ih else (w, h)
                     except Exception as e:
                         ch.status = "error"
                         ch.error = str(e)
