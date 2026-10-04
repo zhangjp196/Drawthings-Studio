@@ -108,6 +108,23 @@ Views.micro = {
             <el-input-number v-model="f.steps_v" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
             <div class="hint">{{ I18N.t('cfg.maxStepsHintVideo') }}</div>
           </el-form-item>
+        <el-form-item v-if="f.dt" :label="I18N.t('cfg.maxSide')">
+          <el-select v-model="f.side" style="width: 220px;">
+            <el-option :value="0" :label="I18N.t('cfg.maxSideNoneOpt')" />
+            <el-option :value="512" label="512" />
+            <el-option :value="768" label="768" />
+            <el-option :value="1024" label="1024" />
+            <el-option :value="1536" label="1536" />
+            <el-option :value="2048" label="2048" />
+            <el-option :value="3072" label="3072" />
+            <el-option :value="4096" label="4096 (4K)" />
+          </el-select>
+          <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
+        </el-form-item>
+        <el-form-item v-if="f.dt" :label="I18N.t('cfg.maxSeconds')">
+          <el-input-number v-model="f.seconds" :min="0" :max="10" :step="1" controls-position="right" style="width: 110px;" />
+          <div class="hint">{{ I18N.t('cfg.maxSecondsHint') }}</div>
+        </el-form-item>
 
         </el-form>
         <template #footer>
@@ -129,7 +146,7 @@ Views.micro = {
     const saving = ref(false);
     // 「不启用」= 明确不出图 / 不出视频（区别于空串的「跟随配置默认」）
     const MODEL_NONE = '__none__';
-    const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0 });
+    const f = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0, side: 0, seconds: 0 });
     const tab = ref('works');  // 列表页 tab：作品集（默认）；预留后续扩展
 
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
@@ -151,7 +168,7 @@ Views.micro = {
       }
     }
     watch(() => f.dt, (id) => {
-      f.mi = ''; f.mv = ''; f.ref_i = false; f.ref_v = false; f.steps_i = 0; f.steps_v = 0;
+      f.mi = ''; f.mv = ''; f.ref_i = false; f.ref_v = false; f.steps_i = 0; f.steps_v = 0; f.side = 0; f.seconds = 0;
       const c = dts.value.find(x => x.id === id);
       if (!c) return;
       // 预填配置里的模型 / 参考图开关（功能级可覆盖）；配置未设则保持空/不勾选
@@ -211,6 +228,8 @@ Views.micro = {
           dt_ref_image: f.ref_i ? 1 : 0, dt_ref_video: f.ref_v ? 1 : 0,
           dt_max_steps_image: f.steps_i,
           dt_max_steps_video: f.steps_v,
+          dt_max_side: f.side,
+          dt_max_seconds: f.seconds,
         });
         dlg.value = false;
         router.push('/micro/' + data.id);

@@ -17,13 +17,15 @@ from i18n import L
 from models import Chapter, Project, ProjectJob, Season
 from config_store import ConfigStore
 from services.pipeline import _now, chars_from_raw
+from services.drawthings import MAX_SIDE_LIMIT, MAX_VIDEO_SECONDS
 from services.runtime import pipeline
 from services import events as E
 from services import jobs
 from services.jobs import JobCancelled
 from services.api_common import (
     MEDIA_DIR, MAX_IMAGE_UPLOAD, _overlay_opts, _lang, _json_body, _media_url,
-    _chapter_view, _dt_ref_field, _dt_steps_field, _project_view, _config_lists, _clamp_page, _sse,
+    _chapter_view, _dt_ref_field, _dt_steps_field, _dt_limit_field, _project_view,
+    _config_lists, _clamp_page, _sse,
 )
 
 router = APIRouter(prefix="/api/dramas", tags=["drama"])
@@ -155,6 +157,8 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "dt_model_image": project.dt_model_image or "",
             "dt_max_steps_image": project.dt_max_steps_image or 0,
             "dt_max_steps_video": project.dt_max_steps_video or 0,
+            "dt_max_side": project.dt_max_side or 0,
+            "dt_max_seconds": project.dt_max_seconds or 0,
             "dt_model_video": project.dt_model_video or "",
             "dt_ref_image": project.dt_ref_image or "",
             "dt_ref_video": project.dt_ref_video or "",
@@ -208,6 +212,10 @@ async def project_config_update(request: Request, project_id: str, db: Session =
         project.dt_max_steps_image = _dt_steps_field(body, "dt_max_steps_image", lang)
     if "dt_max_steps_video" in body:
         project.dt_max_steps_video = _dt_steps_field(body, "dt_max_steps_video", lang)
+    if "dt_max_side" in body:
+        project.dt_max_side = _dt_limit_field(body, "dt_max_side", MAX_SIDE_LIMIT, lang)
+    if "dt_max_seconds" in body:
+        project.dt_max_seconds = _dt_limit_field(body, "dt_max_seconds", MAX_VIDEO_SECONDS, lang)
     # 自动评分（设置弹框内调整；未传 = 不改）
     for key in ("auto_score", "auto_redo", "stop_on_low"):
         if key in body:

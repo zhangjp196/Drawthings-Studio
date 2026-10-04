@@ -12,7 +12,8 @@ from config import MEDIA_DIR, media_url as _media_url
 from i18n import L, lang_of
 from models import Project
 from config_store import ConfigStore
-from services.drawthings import MAX_SIDE_LIMIT, MAX_STEPS_LIMIT, MAX_VIDEO_SECONDS, norm_ref_flag
+from services.drawthings import (MAX_SIDE_LIMIT, MAX_STEPS_LIMIT, MAX_VIDEO_SECONDS,
+                               norm_ref_flag)
 from services.pipeline import hex_to_rgb
 from services.runtime import pipeline
 
@@ -74,8 +75,6 @@ def _dt_view(c) -> dict:
         "id": c.id, "name": c.name, "base_url": c.base_url,
         "model_image": getattr(c, "model_image", "") or "",
         "model_video": getattr(c, "model_video", "") or "",
-        "max_side": c.max_side or 0,
-        "max_seconds": getattr(c, "max_seconds", 0) or 0,
         "ref_image": int(getattr(c, "ref_image", 0) or 0),   # 图像支持参考图片（图生图）
         "ref_video": int(getattr(c, "ref_video", 0) or 0),   # 视频支持参考图片（图生视频）
         "created_at": c.created_at,
@@ -106,25 +105,29 @@ def _dt_steps_field(body: dict, key: str = "dt_max_steps_image", lang: str = "zh
     return v
 
 
+def _dt_limit_field(body: dict, key: str, max_v: int, lang: str = "zh") -> int:
+    """功能级上限（最大分辨率 / 最大秒数）：缺省 / 空 = 0（不限 / 用内置上限）。非法值 400。"""
+    v = body.get(key)
+    if v in (None, ""):
+        return 0
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"{key} 需为整数", f"{key} must be an integer"))
+    if v < 0 or v > max_v:
+        raise HTTPException(status_code=400,
+                            detail=L(lang, f"{key} 超出范围（0~{max_v}，0=不限）",
+                                     f"{key} out of range (0~{max_v}, 0 = unlimited)"))
+    return v
+
+
 def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
-    """DrawThings 个性化参数：0/空 = 跟随 app 当前值。非法值直接 400。
+    """DrawThings 连接级参数：0/空 = 跟随 app 当前值。非法值直接 400。
 
     模型改为功能级选择（项目 / 微创作各自选），配置里的模型仅作兜底默认，可为空。
-    ref_image / ref_video：「支持参考图片」能力开关，随配置声明（图生图 / 图生视频）。"""
-    def num(key, cast, max_v: int) -> int | float:
-        v = body.get(key)
-        if v in (None, ""):
-            return 0
-        try:
-            v = cast(v)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400,
-                                detail=L(lang, f"{key} 需为数字", f"{key} must be a number"))
-        if v < 0 or v > max_v:
-            raise HTTPException(status_code=400,
-                                detail=L(lang, f"{key} 超出范围（0~{max_v}，0=跟随 app）",
-                                         f"{key} out of range (0~{max_v}, 0 = follow app)"))
-        return v
+    ref_image / ref_video：「支持参考图片」能力开关，随配置声明（图生图 / 图生视频）。
+    最大分辨率 / 最大秒数已移到功能级（Project / MicroWork 的 dt_max_side / dt_max_seconds）。"""
     model_image = str(body.get("model_image") or "").strip()
     model_video = str(body.get("model_video") or "").strip()
 
@@ -137,8 +140,6 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
     return {
         "model_image": model_image,
         "model_video": model_video,
-        "max_side": int(num("max_side", int, MAX_SIDE_LIMIT)),
-        "max_seconds": int(num("max_seconds", int, MAX_VIDEO_SECONDS)),
         # 能力开关：模型已在功能级选择，配置只声明「支持参考图片」
         "ref_image": flag("ref_image"),
         "ref_video": flag("ref_video"),
@@ -197,6 +198,6 @@ def _overlay_opts(body: dict) -> dict:
 __all__ = [
     "MEDIA_DIR", "MAX_IMAGE_UPLOAD", "_overlay_opts",
     "_lang", "_json_body", "_media_url", "_chapter_view",
-    "_llm_view", "_dt_view", "_dt_ref_field", "_dt_gen_fields", "_project_view",
+    "_llm_view", "_dt_view", "_dt_ref_field", "_dt_gen_fields", "_dt_limit_field", "_project_view",
     "_config_lists", "_clamp_page", "_sse",
 ]

@@ -99,6 +99,23 @@ Views.microWork = {
             <el-input-number v-model="cfg.steps_v" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
             <div class="hint">{{ I18N.t('cfg.maxStepsHintVideo') }}</div>
           </el-form-item>
+        <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxSide')">
+          <el-select v-model="cfg.side" style="width: 220px;">
+            <el-option :value="0" :label="I18N.t('cfg.maxSideNoneOpt')" />
+            <el-option :value="512" label="512" />
+            <el-option :value="768" label="768" />
+            <el-option :value="1024" label="1024" />
+            <el-option :value="1536" label="1536" />
+            <el-option :value="2048" label="2048" />
+            <el-option :value="3072" label="3072" />
+            <el-option :value="4096" label="4096 (4K)" />
+          </el-select>
+          <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
+        </el-form-item>
+        <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxSeconds')">
+          <el-input-number v-model="cfg.seconds" :min="0" :max="10" :step="1" controls-position="right" style="width: 110px;" />
+          <div class="hint">{{ I18N.t('cfg.maxSecondsHint') }}</div>
+        </el-form-item>
         </el-form>
         <template #footer>
           <el-button @click="cfgDlg = false">{{ I18N.t('common.cancel') }}</el-button>
@@ -157,7 +174,7 @@ Views.microWork = {
     const cfgDlg = ref(false);
     // 「不启用」= 明确不出图 / 不出视频（区别于空串的「跟随配置默认」）
     const MODEL_NONE = '__none__';
-    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0, score_mode: 'image', auto_score: false });
+    const cfg = reactive({ title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps_i: 0, steps_v: 0, side: 0, seconds: 0, score_mode: 'image', auto_score: false });
     function openCfg() { syncCfg(); cfgDlg.value = true; }  // 作品选项弹框：打开前同步当前值
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
@@ -192,6 +209,8 @@ Views.microWork = {
       cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
       cfg.steps_i = w.dt_max_steps_image || 0;
       cfg.steps_v = w.dt_max_steps_video || 0;
+      cfg.side = w.dt_max_side || 0;
+      cfg.seconds = w.dt_max_seconds || 0;
       fetchModels();
     }
     watch(() => cfg.dt, (id) => {
@@ -203,6 +222,8 @@ Views.microWork = {
       cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
       cfg.steps_i = w.dt_max_steps_image || 0;
       cfg.steps_v = w.dt_max_steps_video || 0;
+      cfg.side = w.dt_max_side || 0;
+      cfg.seconds = w.dt_max_seconds || 0;
       fetchModels();
     });
 
@@ -317,6 +338,8 @@ Views.microWork = {
           dt_ref_image: cfg.ref_i ? 1 : 0, dt_ref_video: cfg.ref_v ? 1 : 0,
           dt_max_steps_image: cfg.steps_i,
           dt_max_steps_video: cfg.steps_v,
+          dt_max_side: cfg.side,
+          dt_max_seconds: cfg.seconds,
           score_mode: cfg.score_mode,
           auto_score: cfg.auto_score ? 1 : 0,
         });

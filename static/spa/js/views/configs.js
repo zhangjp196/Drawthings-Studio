@@ -178,25 +178,6 @@ Views.configs = {
               <div class="hint">{{ I18N.t('cfg.thinkingParamHint') }}</div>
             </el-form-item>
           </template>
-          <template v-else>
-            <el-form-item :label="I18N.t('cfg.maxSideOpt')">
-              <el-select v-model="f.max_side" style="width: 220px;">
-                <el-option :value="0" :label="I18N.t('cfg.maxSideNoneOpt')" />
-                <el-option :value="512" label="512" />
-                <el-option :value="768" label="768" />
-                <el-option :value="1024" label="1024" />
-                <el-option :value="1536" label="1536" />
-                <el-option :value="2048" label="2048" />
-                <el-option :value="3072" label="3072" />
-                <el-option :value="4096" label="4096 (4K)" />
-              </el-select>
-              <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
-            </el-form-item>
-            <el-form-item :label="I18N.t('cfg.maxSeconds')">
-              <el-input-number v-model="f.max_seconds" :min="0" :max="10" :step="1" controls-position="right" style="width: 110px;" />
-              <div class="hint">{{ I18N.t('cfg.maxSecondsHint') }}</div>
-            </el-form-item>
-          </template>
         </el-form>
         <template #footer>
           <el-button @click="dlg = false">{{ I18N.t('common.cancel') }}</el-button>
@@ -222,7 +203,7 @@ Views.configs = {
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
       thinking: 'default', thinking_param: 'auto',
-      model_image: '', model_video: '', max_side: 0, max_seconds: 10,
+      model_image: '', model_video: '',
       ref_image: false, ref_video: false,   // 勾选后才图生图 / 图生视频（默认不勾选 = 文生图 / 文生视频）
     });
 
@@ -341,7 +322,7 @@ Views.configs = {
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '',
         thinking: 'default', thinking_param: 'auto',
-        model_image: '', model_video: '', max_side: 0, max_seconds: 10,
+        model_image: '', model_video: '',
         ref_image: false, ref_video: false,
       });
       modelOpts.value = [];
@@ -354,8 +335,6 @@ Views.configs = {
         Object.assign(f, {
           config_type: 'drawthings', name: row.name, base_url: row.base_url,
           model_image: row.model_image || '', model_video: row.model_video || '',
-          max_side: row.max_side || 0,
-          max_seconds: row.max_seconds == null ? 10 : row.max_seconds,
           ref_image: !!row.ref_image, ref_video: !!row.ref_video,
         });
       } else {
@@ -421,8 +400,6 @@ Views.configs = {
     const fmt = (s) => (s || '').slice(0, 19).replace('T', ' ');
     function dtMeta(r) {
       const p = [];
-      p.push(I18N.t(r.max_side ? 'cfg.maxSide' : 'cfg.maxSideNone', r.max_side ? r.max_side : ''));
-      p.push(r.max_seconds ? I18N.t('cfg.seconds', r.max_seconds) : I18N.t('cfg.secondsNone'));
       return p.join(' · ');
     }
     let statusTimer = null;

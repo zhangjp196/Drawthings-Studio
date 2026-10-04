@@ -935,10 +935,10 @@ class DramaPipeline:
         # 注意：剧本生成**不写时长**（ch.seconds 保持用户设定；0 = 跟随配置/预设上限）。
         return ch
 
-    def _max_seconds(self, dt_cfg) -> int:
-        """单片段时长上限（秒）：配置的 max_seconds（0=不限→内置 10 秒硬上限）。"""
+    def _max_seconds(self, project) -> int:
+        """单片段时长上限（秒）：项目的 dt_max_seconds（功能级，0=不限→内置 10 秒硬上限）。"""
         try:
-            cap = int(getattr(dt_cfg, "max_seconds", 0) or 0)
+            cap = int(getattr(project, "dt_max_seconds", 0) or 0)
         except (TypeError, ValueError):
             cap = 0
         if cap > 0:
@@ -1139,7 +1139,7 @@ class DramaPipeline:
         ch.prompt = (prompt or "").strip()
         if seconds is not None:
             try:
-                cap = self._max_seconds(self._configs(db, project, "zh")[1])
+                cap = self._max_seconds(project)
             except Exception:
                 cap = MAX_VIDEO_SECONDS
             ch.seconds = max(0, min(int(seconds), cap))

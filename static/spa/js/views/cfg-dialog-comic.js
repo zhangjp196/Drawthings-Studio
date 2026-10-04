@@ -41,6 +41,19 @@ Views.comicCfgDialog = {
           <el-input-number v-model="cfg.dt_steps_i" :min="0" :max="200" :step="1" controls-position="right" style="width: 110px;" />
           <div class="hint">{{ I18N.t('cfg.maxStepsHint') }}</div>
         </el-form-item>
+        <el-form-item v-if="cfg.dt" :label="I18N.t('cfg.maxSide')">
+          <el-select v-model="cfg.dt_side" style="width: 220px;">
+            <el-option :value="0" :label="I18N.t('cfg.maxSideNoneOpt')" />
+            <el-option :value="512" label="512" />
+            <el-option :value="768" label="768" />
+            <el-option :value="1024" label="1024" />
+            <el-option :value="1536" label="1536" />
+            <el-option :value="2048" label="2048" />
+            <el-option :value="3072" label="3072" />
+            <el-option :value="4096" label="4096 (4K)" />
+          </el-select>
+          <div class="hint">{{ I18N.t('cfg.maxSideHint') }}</div>
+        </el-form-item>
         <el-form-item :label="I18N.t('p.scoreAuto')">
           <div class="score-opts">
             <el-checkbox v-model="cfg.score">{{ I18N.t('p.scoreAutoLabel') }}</el-checkbox>

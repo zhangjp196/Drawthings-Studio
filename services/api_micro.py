@@ -20,11 +20,11 @@ from db import get_db
 from i18n import L
 from models import Asset, GenerationJob, MicroMessage, MicroSession, MicroWork
 from services.api_common import (
-    MEDIA_DIR, _clamp_page, _dt_ref_field, _dt_steps_field, _dt_view, _json_body, _lang,
-    _llm_view, _sse,
+    MEDIA_DIR, _clamp_page, _dt_limit_field, _dt_ref_field, _dt_steps_field, _dt_view,
+    _json_body, _lang, _llm_view, _sse,
 )
 from services import events as E
-from services.drawthings import extract_last_frame
+from services.drawthings import MAX_SIDE_LIMIT, MAX_VIDEO_SECONDS, extract_last_frame
 from services.media_files import (
     cleanup_message_media, export_pdf, export_zip, is_video_url,
     media_path_from_url, save_data_uri_images,
@@ -106,6 +106,8 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "dt_ref_video": work.dt_ref_video or "",
             "dt_max_steps_image": work.dt_max_steps_image or 0,
             "dt_max_steps_video": work.dt_max_steps_video or 0,
+            "dt_max_side": work.dt_max_side or 0,
+            "dt_max_seconds": work.dt_max_seconds or 0,
             "score_mode": work.score_mode or "image",
             "auto_score": int(work.auto_score or 0),
             "created_at": work.created_at,
@@ -186,6 +188,8 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
         dt_ref_video=_dt_ref_field(body, "dt_ref_video"),
         dt_max_steps_image=_dt_steps_field(body, "dt_max_steps_image", lang),
         dt_max_steps_video=_dt_steps_field(body, "dt_max_steps_video", lang),
+        dt_max_side=_dt_limit_field(body, "dt_max_side", MAX_SIDE_LIMIT, lang),
+        dt_max_seconds=_dt_limit_field(body, "dt_max_seconds", MAX_VIDEO_SECONDS, lang),
         score_mode=norm_score_mode(body.get("score_mode")),
         auto_score=(1 if body.get("auto_score") else 0),
         created_at=_now(), updated_at=_now(),
@@ -430,6 +434,8 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     work.dt_ref_video = _dt_ref_field(body, "dt_ref_video")
     work.dt_max_steps_image = _dt_steps_field(body, "dt_max_steps_image", lang)
     work.dt_max_steps_video = _dt_steps_field(body, "dt_max_steps_video", lang)
+    work.dt_max_side = _dt_limit_field(body, "dt_max_side", MAX_SIDE_LIMIT, lang)
+    work.dt_max_seconds = _dt_limit_field(body, "dt_max_seconds", MAX_VIDEO_SECONDS, lang)
     work.score_mode = norm_score_mode(body.get("score_mode"))
     work.auto_score = 1 if body.get("auto_score") else 0
     work.updated_at = _now()

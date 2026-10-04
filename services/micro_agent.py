@@ -42,8 +42,13 @@ MC_SYSTEM = ("你是漫画/短剧创作的创意助手，擅长创意构思、�
 
 
 def build_instructions(can_image: bool, can_video: bool, dt_cfg,
-                       eff_ref_img: bool, eff_ref_vid: bool, lang: str = "zh") -> str:
-    """按生效能力拼装系统提示词（生成类型 / 比例 / 时长 / 参考图模式 / 无生成服务）。"""
+                       eff_ref_img: bool, eff_ref_vid: bool, lang: str = "zh",
+                       max_side: int = 0, max_seconds: int = 0) -> str:
+    """按生效能力拼装系统提示词（生成类型 / 比例 / 时长 / 参考图模式 / 无生成服务）。
+
+    `max_side` / `max_seconds` = 功能级上限（作品的dt_max_side / dt_max_seconds），
+    已从 DrawThings 连接配置移到功能级，故由调用方传入而非读 dt_cfg。
+    """
     if not (can_image or can_video):
         return (MC_SYSTEM + "当前不出图/出视频：用户要求生成时，请说明暂时无法生成，"
                             "但可以代为撰写详细的英文提示词供其后续使用。")
@@ -55,7 +60,7 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
     avail = "、".join(kinds)
     ratio = ""
     if can_image:
-        limit = int(getattr(dt_cfg, "max_side", 0) or 0) or 1024
+        limit = int(max_side or 0) or 1024
         ratio = (f"生成图片时：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
                  f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
                  f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
@@ -63,7 +68,7 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
     default_media = "video" if can_video else "image"
     sec_hint = ""
     if can_video:
-        cap = int(getattr(dt_cfg, "max_seconds", 0) or 0) or MAX_VIDEO_SECONDS
+        cap = int(max_seconds or 0) or MAX_VIDEO_SECONDS
         cap = min(cap, MAX_VIDEO_SECONDS)
         sec_hint = (f"生成视频时用 seconds 参数指定时长（秒，1~{cap}；用户未指定时传 0 = 用 {cap} 秒），"
                     f"单段视频最长 {cap} 秒。")
@@ -424,8 +429,10 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
         can_image, can_video = _caps.can_image, _caps.can_video
         eff_ref_img, eff_ref_vid = _caps.ref_image, _caps.ref_video
 
-        instructions = build_instructions(can_image, can_video, dt_cfg,
-                                          eff_ref_img, eff_ref_vid, lang)
+        instructions = build_instructions(
+            can_image, can_video, dt_cfg, eff_ref_img, eff_ref_vid, lang,
+            max_side=int(getattr(work, "dt_max_side", 0) or 0),
+            max_seconds=int(getattr(work, "dt_max_seconds", 0) or 0))
         model = build_model(llm_cfg)
         agent = Agent(model, instructions=instructions)
 

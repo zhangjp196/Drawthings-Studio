@@ -55,8 +55,6 @@ class DrawThingConfig(Base):
     base_url = Column(String(500), nullable=False)       # gRPC 端点 host:port（如 127.0.0.1:7859）
     model_image = Column(String(200), default="")        # 图像模型文件名（可空）
     model_video = Column(String(200), default="")        # 视频模型文件名（可空）
-    max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边，0=不限/跟随预设）
-    max_seconds = Column(Integer, default=10)            # 视频最大时长（秒，1–10；0=用内置上限 10s。实际时长由请求决定，不超过上限）
     ref_image = Column(Integer, default=0)               # 图像模型支持参考图片（图生图）；0=纯文生图
     ref_video = Column(Integer, default=0)               # 视频模型支持参考图片（图生视频）；0=纯文生视频
     created_at = Column(String(40), default=_now)
@@ -89,6 +87,8 @@ class Project(Base):
     dt_ref_video = Column(String(1), default="")                 # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_max_steps_image = Column(Integer, default=0)         # 图像最大 Step 数（0=跟随预设；步数不足会出图半透明/偏色）
     dt_max_steps_video = Column(Integer, default=0)         # 视频最大 Step 数（0=跟随预设；与图像分开，蒸馏视频模型宜少步）
+    dt_max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边；0=不限/跟随预设。图像与视频都限幅）
+    dt_max_seconds = Column(Integer, default=0)             # 视频最大秒数上限（1–10；0=用内置上限 10s。仅视频）
     status = Column(String(20), default="planning")       # planning|chaptered（无「完结/锁定」态：作品始终可继续编辑生成）
     global_prompt = Column(Text, default="")               # 全局要求（风格 + 要点/约束）：注入到每次 LLM 调用
     res_width = Column(Integer, default=0)                 # 默认分辨率宽（0=跟随智能体/出图端）
@@ -180,6 +180,8 @@ class MicroWork(Base):
     dt_ref_video = Column(String(1), default="")             # 功能级参考图开关（''=跟随配置，0=关，1=开）
     dt_max_steps_image = Column(Integer, default=0)         # 图像最大 Step 数（0=跟随预设；步数不足会出图半透明/偏色）
     dt_max_steps_video = Column(Integer, default=0)         # 视频最大 Step 数（0=跟随预设；与图像分开，蒸馏视频模型宜少步）
+    dt_max_side = Column(Integer, default=0)                # 最大分辨率（仅最长边；0=不限/跟随预设。图像与视频都限幅）
+    dt_max_seconds = Column(Integer, default=0)             # 视频最大秒数上限（1–10；0=用内置上限 10s。仅视频）
     score_mode = Column(String(10), default="image")         # 自动评分依据：image=仅画面（忽略提示词）| prompt=结合提示词相符度
     auto_score = Column(Integer, default=0)                  # 生成后自动评分：0=关闭（默认，手动点「评分」），1=开启
     created_at = Column(String(40), default=_now)

@@ -52,6 +52,8 @@ def dt_client(cfg, data_dir, subject):
         ref_video=norm_ref_flag(getattr(subject, "dt_ref_video", "")),
         max_steps_image=int(getattr(subject, "dt_max_steps_image", 0) or 0),
         max_steps_video=int(getattr(subject, "dt_max_steps_video", 0) or 0),
+        max_side=int(getattr(subject, "dt_max_side", 0) or 0),
+        max_seconds=int(getattr(subject, "dt_max_seconds", 0) or 0),
     )
 
 

@@ -85,9 +85,12 @@ class ConfigStore:
         self.db.commit()
         return True
 
-    # ---------------- DrawThings 配置（HTTP 协议；个性化参数 0/空 = 跟随 app）----------------
+    # ---------------- DrawThings 配置（仅 gRPC；上限类参数已移到功能级）----------------
     def create_drawthing(self, name, base_url, **gen) -> DrawThingConfig:
-        """gen：max_side / max_seconds 等个性化参数。"""
+        """gen：model_image / model_video / ref_image / ref_video 等连接级参数。
+
+        上限类参数（最大分辨率 / 最大秒数 / 最大步数）已移到功能级（Project / MicroWork）。
+        """
         cfg = DrawThingConfig(
             id=uuid.uuid4().hex[:12],
             name=name,

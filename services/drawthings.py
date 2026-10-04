@@ -673,8 +673,8 @@ class DrawThingsClient:
         self.host, self.port = parse_endpoint(getattr(cfg, "base_url", ""))
         self.model_image = str(getattr(cfg, "model_image", "") or "").strip()
         self.model_video = str(getattr(cfg, "model_video", "") or "").strip()
-        self.max_side = int(getattr(cfg, "max_side", 0) or 0)
-        self.max_seconds = int(getattr(cfg, "max_seconds", 0) or 0)
+        self.max_side = 0             # 功能级（随项目 / 作品走，见 build_drawthings_client）
+        self.max_seconds = 0# 功能级视频秒数上限（同上）
         self.max_steps_image = 0   # 功能级（随模型走，见 build_drawthings_client）
         self.max_steps_video = 0   # 图像 / 视频分开，两者步数需求差别很大
         self.ref_image = bool(getattr(cfg, "ref_image", 0))   # 图像模型支持参考图片（图生图）
@@ -1226,7 +1226,8 @@ def norm_ref_flag(v) -> int | None:
 def build_drawthings_client(cfg, data_dir: Path,
                              model_image: str = "", model_video: str = "",
                              ref_image: int | None = None, ref_video: int | None = None,
-                             max_steps_image: int = 0, max_steps_video: int = 0) -> DrawThingsClient:
+                             max_steps_image: int = 0, max_steps_video: int = 0,
+                             max_side: int = 0, max_seconds: int = 0) -> DrawThingsClient:
     """构造 Draw Things 客户端（仅 gRPC）。
 
     model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）：
@@ -1235,6 +1236,8 @@ def build_drawthings_client(cfg, data_dir: Path,
     ref_image / ref_video：功能级「支持参考图片」覆盖；None = 跟随配置，0/1 = 显式关/开。
     max_steps_image / max_steps_video：功能级最大 Step 数（随所选模型一起配，两者分开）；
     0 = 跟随预设自带步数。
+    max_side / max_seconds：功能级最大分辨率（最长边，图像与视频都限幅）/ 视频秒数上限；
+    0 = 不限 / 用内置上限。**已从 DrawThings 连接配置移到功能级**（不同项目 / 作品需求差别很大）。
     """
     c = DrawThingsClient(cfg, data_dir)
     # 「不启用」要能覆盖配置里的模型，故与「留空=跟随」分开判断
@@ -1251,4 +1254,8 @@ def build_drawthings_client(cfg, data_dir: Path,
         c.max_steps_image = int(max_steps_image)
     if max_steps_video > 0:
         c.max_steps_video = int(max_steps_video)
+    if max_side > 0:
+        c.max_side = int(max_side)
+    if max_seconds > 0:
+        c.max_seconds = int(max_seconds)
     return c

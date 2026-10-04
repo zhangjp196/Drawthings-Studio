@@ -88,8 +88,6 @@ def _migrate():
             "thinking_param": "VARCHAR(20) DEFAULT 'auto'",
         },
         "drawthing_configs": {
-            "max_side": "INTEGER DEFAULT 0",
-            "max_seconds": "INTEGER DEFAULT 10",
             "model_image": "VARCHAR(200) DEFAULT ''",
             "model_video": "VARCHAR(200) DEFAULT ''",
             "ref_image": "INTEGER DEFAULT 0",
@@ -126,6 +124,8 @@ def _migrate():
             "dt_ref_video": "VARCHAR(1) DEFAULT ''",
             "dt_max_steps_image": "INTEGER DEFAULT 0",
             "dt_max_steps_video": "INTEGER DEFAULT 0",
+            "dt_max_side": "INTEGER DEFAULT 0",
+            "dt_max_seconds": "INTEGER DEFAULT 0",
         },
         "micro_works": {
             "dt_model_image": "VARCHAR(200) DEFAULT ''",
@@ -134,6 +134,8 @@ def _migrate():
             "dt_ref_video": "VARCHAR(1) DEFAULT ''",
             "dt_max_steps_image": "INTEGER DEFAULT 0",
             "dt_max_steps_video": "INTEGER DEFAULT 0",
+            "dt_max_side": "INTEGER DEFAULT 0",
+            "dt_max_seconds": "INTEGER DEFAULT 0",
             "score_mode": "VARCHAR(10) DEFAULT 'image'",
             "auto_score": "INTEGER DEFAULT 0",
         },
@@ -191,6 +193,28 @@ def _migrate():
                     "INSERT OR REPLACE INTO app_flags (k, v) VALUES ('proj_chars_to_s1','1')"))
         except Exception:
             pass  # 旧库尚无相关表：忽略
+        # 最大分辨率 / 最大秒数从 drawthing_configs 迁到功能级（projects / micro_works）：
+        # 先按各行**实际关联**的 DrawThings 配置播种，再由下面的 deprecated 删掉旧列 —— 顺序有依赖。
+        try:
+            row = conn.execute(text("SELECT v FROM app_flags WHERE k = 'dt_limits_to_subject'")).fetchone()
+            if not row:
+                dt_cols = {c[1] for c in conn.execute(text("PRAGMA table_info(drawthing_configs)"))}
+                if "max_side" in dt_cols and "max_seconds" in dt_cols:
+                    for tbl in ("projects", "micro_works"):
+                        sub_cols = {c[1] for c in conn.execute(text(f"PRAGMA table_info({tbl})"))}
+                        if not {"dt_max_side", "dt_max_seconds"} <= sub_cols:
+                            continue
+                        conn.execute(text(
+                            f"UPDATE {tbl} SET dt_max_side = COALESCE((SELECT d.max_side FROM"
+                            f" drawthing_configs d WHERE d.id = {tbl}.drawthings_config_id), 0),"
+                            f" dt_max_seconds = COALESCE((SELECT d.max_seconds FROM"
+                            f" drawthing_configs d WHERE d.id = {tbl}.drawthings_config_id), 0)"
+                            f" WHERE drawthings_config_id IS NOT NULL"))
+                conn.execute(text(
+                    "INSERT OR REPLACE INTO app_flags (k, v) VALUES ('dt_limits_to_subject','1')"))
+                conn.commit()
+        except Exception:
+            pass  # 旧库尚无相关表：忽略
         # 移除已废弃的列（SQLite >= 3.35 支持 DROP COLUMN）
         deprecated = {
             "llm_configs": ("mode",),
@@ -205,7 +229,8 @@ def _migrate():
                                   "model", "preset", "preset_image", "preset_video",  # 预设改为按模型名自动推断
                                   "max_frames",  # 已改为 max_seconds（秒）
                                   "steps", "guidance_scale", "num_frames", "fps",
-                                  "width", "height"),  # 历史字段已移除（分辨率改 max_side 最长边）
+                                  "width", "height",  # 历史字段已移除（分辨率改功能级 max_side 最长边）
+                                  "max_side", "max_seconds"),  # 已迁到功能级（Project.dt_max_side / dt_max_seconds）
             "seasons": ("count_mode",),  # 已移除：只剩范围模式（count_min~count_max），无需模式字段
             "chapters": ("ref_path",),  # 已移除：参考图路径从未落库（生成时用调用方入参，无需持久化）
             "micro_works": ("media_type",  # 产出类型改由 app 当前模型自动判断

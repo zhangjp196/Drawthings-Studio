@@ -411,7 +411,7 @@ Views.projectDrama = {
 
     const cfgDlg = ref(false);
     const cfgBusy = ref(false);
-    const cfg = reactive({ llm: '', dt: '', dt_model_i: '', dt_model_v: '', dt_ref_i: false, dt_ref_v: false, dt_steps_i: 0, dt_steps_v: 0,
+    const cfg = reactive({ llm: '', dt: '', dt_model_i: '', dt_model_v: '', dt_ref_i: false, dt_ref_v: false, dt_steps_i: 0, dt_steps_v: 0, dt_side: 0, dt_seconds: 0,
                         score: true, score_min: 60, redo: true, stop_low: false });
     // 功能级模型：按所选 DrawThings 配置的端点拉取 app 已下载模型（图像 / 视频分开列）
     const dtModels = ref([]);
@@ -1007,6 +1007,8 @@ Views.projectDrama = {
       cfg.dt_ref_i = (p.dt_ref_image === '1') || (p.dt_ref_image === '' && !!c && !!c.ref_image);
       cfg.dt_ref_v = (p.dt_ref_video === '1') || (p.dt_ref_video === '' && !!c && !!c.ref_video);
       cfg.dt_steps_i = p.dt_max_steps_image || 0;
+      cfg.dt_side = p.dt_max_side || 0;
+      cfg.dt_seconds = p.dt_max_seconds || 0;
       cfg.dt_steps_v = p.dt_max_steps_video || 0;
       // 自动评分设置（原「总体 → 自动评分」子页签，已并入本弹框）
       cfg.score = !!p.auto_score;
@@ -1026,6 +1028,8 @@ Views.projectDrama = {
           dt_ref_image: cfg.dt_ref_i ? 1 : 0,
           dt_ref_video: cfg.dt_ref_v ? 1 : 0,
           dt_max_steps_image: cfg.dt_steps_i,
+          dt_max_side: cfg.dt_side,
+          dt_max_seconds: cfg.dt_seconds,
           dt_max_steps_video: cfg.dt_steps_v,
           auto_score: cfg.score, score_min: cfg.score_min,
           auto_redo: cfg.redo, stop_on_low: cfg.stop_low,
