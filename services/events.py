@@ -9,25 +9,36 @@
 """
 
 # ---- 微创作会话流事件 ----
-TOKEN = "token"            # 文本增量 {text}
-TOOL = "tool"              # 开始一次生成 {id,label,prompt,media}
+TOKEN = "token"  # 文本增量 {text}
+TOOL = "tool"  # 开始一次生成 {id,label,prompt,media}
 TOOL_STATUS = "tool_status"  # 生成中状态文案 {id,message}
-MEDIA = "media"            # 生成结果 {id,media,url,prompt}
+MEDIA = "media"  # 生成结果 {id,media,url,prompt}
 MEDIA_SCORE = "media_score"  # 生成后自动评分结果 {id,score,note}
-FIELDS = "fields"          # 新建创作：AI 写入表单字段 {title,origin}
+FIELDS = "fields"  # 新建创作：AI 写入表单字段 {title,origin}
 TOOL_ERROR = "tool_error"  # 生成失败 {id,message,prompt}
-ERROR = "error"           # 会话错误 {message}
-DONE = "done"             # 结束 {}
+ERROR = "error"  # 会话错误 {message}
+DONE = "done"  # 结束 {}
 
 # ---- 流水线进度事件（项目侧逐章推进）----
-PROGRESS = "progress"     # {current,total,title}
-CHAPTER = "chapter"       # 单章进度
-SCORE = "score"           # 评分进度
+PROGRESS = "progress"  # {current,total,title}
+CHAPTER = "chapter"  # 单章进度
+SCORE = "score"  # 评分进度
 
 # ---- 传输层内部标记（不出现在线路上）----
 EOF = "__eof__"
 
 __all__ = [
-    "TOKEN", "TOOL", "TOOL_STATUS", "MEDIA", "MEDIA_SCORE", "FIELDS", "TOOL_ERROR", "ERROR", "DONE",
-    "PROGRESS", "CHAPTER", "SCORE", "EOF",
+    "TOKEN",
+    "TOOL",
+    "TOOL_STATUS",
+    "MEDIA",
+    "MEDIA_SCORE",
+    "FIELDS",
+    "TOOL_ERROR",
+    "ERROR",
+    "DONE",
+    "PROGRESS",
+    "CHAPTER",
+    "SCORE",
+    "EOF",
 ]

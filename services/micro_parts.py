@@ -9,8 +9,9 @@
 - 未知块类型**原样保留**（向前兼容，不丢新前端写入的数据）；
 - 任何解析失败都退化为「丢弃该块」，绝不因历史脏数据导致接口 500。
 """
+
 import json
-from typing import Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -19,6 +20,7 @@ PARTS_VERSION = 1
 
 class TextBlock(BaseModel):
     """文本块：与相邻文本块合并，保证与生成块的相对顺序。"""
+
     type: Literal["text"] = "text"
     text: str = ""
 
@@ -28,27 +30,29 @@ class ToolBlock(BaseModel):
 
     附「生成参数快照」（model/width/height/seconds/ref_url），用于结果复现与一键重跑。
     """
+
     type: Literal["tool"] = "tool"
     id: str = ""
     label: str = ""
     prompt: str = ""
-    status: str = "running"      # running | ok | error
-    media: str = "image"         # image | video
+    status: str = "running"  # running | ok | error
+    media: str = "image"  # image | video
     url: str = ""
     message: str = ""
     # ---- 生成参数快照（B5：可复现 / 一键重跑）----
-    model: str = ""              # 实际使用的模型名
-    width: int = 0               # 图片宽（0=跟随预设）
+    model: str = ""  # 实际使用的模型名
+    width: int = 0  # 图片宽（0=跟随预设）
     height: int = 0
-    seconds: int = 0             # 视频时长（秒；0=用上限）
-    ref_url: str = ""            # 实际参考图（/media/xxx；空=无参考）
+    seconds: int = 0  # 视频时长（秒；0=用上限）
+    ref_url: str = ""  # 实际参考图（/media/xxx；空=无参考）
     # ---- VLM 评分（右键「VLM 评分」）----
-    score: int = 0               # 0=未评分；1–100 评分
-    score_note: str = ""         # 一句话评语
+    score: int = 0  # 0=未评分；1–100 评分
+    score_note: str = ""  # 一句话评语
 
 
 class MediaBlock(BaseModel):
     """独立媒体块（兼容旧/异常流：无 tool 包裹的媒体结果）。"""
+
     type: Literal["media"] = "media"
     media: str = ""
     url: str = ""
@@ -57,11 +61,12 @@ class MediaBlock(BaseModel):
 
 class ErrorBlock(BaseModel):
     """错误块：本会话/本次生成失败。"""
+
     type: Literal["error"] = "error"
     message: str = ""
 
 
-Block = Union[TextBlock, ToolBlock, MediaBlock, ErrorBlock]
+Block = TextBlock | ToolBlock | MediaBlock | ErrorBlock
 _adapter: TypeAdapter = TypeAdapter(Block)
 _KNOWN = {"text", "tool", "media", "error"}
 
@@ -111,5 +116,4 @@ def load_parts(raw: str | None) -> list[dict]:
     return out
 
 
-__all__ = ["PARTS_VERSION", "TextBlock", "ToolBlock", "MediaBlock", "ErrorBlock",
-           "dump_parts", "load_parts"]
+__all__ = ["PARTS_VERSION", "TextBlock", "ToolBlock", "MediaBlock", "ErrorBlock", "dump_parts", "load_parts"]

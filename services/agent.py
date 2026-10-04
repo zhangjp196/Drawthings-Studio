@@ -6,6 +6,7 @@
 所有 LLM 走 OpenAI 兼容协议（Ollama / vLLM / 云端），
 base_url / api_key / model 来自用户所选的 LLMConfig。
 """
+
 import base64
 import threading
 from pathlib import Path
@@ -15,7 +16,6 @@ import httpx
 import httpx2
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelSettings
-from pydantic_ai.models import Model
 from pydantic_ai.messages import (
     ImageUrl,
     ModelMessage,
@@ -25,6 +25,7 @@ from pydantic_ai.messages import (
     TextPart,
     UserPromptPart,
 )
+from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -38,17 +39,37 @@ _model_cache_lock = threading.Lock()
 _MODEL_CACHE_MAX = 16
 
 
+def _close_model_async(model) -> None:
+    """后台线程里 aclose 被替换/淘汰的模型（httpx2.AsyncClient 必须在事件循环里关）。
+
+    同步上下文没有可用 loop，起守护线程 asyncio.run 关闭连接池。每次编辑配置
+    （签名变化替换旧实例）或缓存满滚动淘汰都会触发；不做的话每一条都泄漏
+    一份 keep-alive 连接池。
+    """
+
+    def _run():
+        try:
+            import asyncio
+
+            asyncio.run(model.provider.http_client.aclose())
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _model_signature(cfg: LLMConfig) -> str:
     """模型配置签名：任一字段变化即视为需要重建。"""
-    return "|".join(str(getattr(cfg, k, None) or "") for k in
-                    ("base_url", "api_key", "model", "thinking", "thinking_param"))
+    return "|".join(
+        str(getattr(cfg, k, None) or "")
+        for k in ("base_url", "api_key", "model", "thinking", "thinking_param")
+    )
 
 
 def _is_openai_host(host: str) -> bool:
     """是否为 OpenAI 官方 / Azure 端点（决定 auto 模式下用哪种思考参数）。"""
     host = (host or "").lower()
-    return host == "api.openai.com" or host.endswith(".openai.com") \
-        or host.endswith(".openai.azure.com")
+    return host == "api.openai.com" or host.endswith(".openai.com") or host.endswith(".openai.azure.com")
 
 
 def _thinking_settings(cfg: LLMConfig) -> ModelSettings | None:
@@ -70,9 +91,7 @@ def _thinking_settings(cfg: LLMConfig) -> ModelSettings | None:
         method = "reasoning_effort" if _is_openai_host(host) else "enable_thinking"
     if method == "reasoning_effort":
         return ModelSettings(thinking=on)
-    return ModelSettings(extra_body={"enable_thinking": on,
-                                     "chat_template_kwargs": {"enable_thinking": on}})
-
+    return ModelSettings(extra_body={"enable_thinking": on, "chat_template_kwargs": {"enable_thinking": on}})
 
 
 def make_httpx_client(base_url: str, timeout: float = 120.0) -> httpx.Client:
@@ -116,15 +135,41 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
     if cid:
         with _model_cache_lock:
             if len(_model_cache) >= _MODEL_CACHE_MAX:
+                for old_model in _model_cache.values():
+                    _close_model_async(old_model[1])  # 淘汰即关闭，别把连接池留在内存
                 _model_cache.clear()  # 配置数量很少；兜底防无限增长
+            old = _model_cache.get(cid)
+            if old and old[0] != sig:
+                _close_model_async(old[1])  # 配置已改：旧实例的连接池同样要关
             _model_cache[cid] = (sig, model)
     return model
 
 
 def image_data_uri(path: str) -> str:
-    """本地图片 -> data URI（供多模态入图）。"""
+    """本地图片 -> data URI（供多模态入图）。
+
+    生成分辨率最高 4096，原样 base64 可到 ~13MB：喂给 LLM 慢、贵，且常被
+    OpenAI 协议服务端 413 拒掉（这些都是提示词/评分用的**提示图**，不是最终产物）。
+    这里把超过最长边 1024 的静图压成 JPEG(q85，约 100–200KB)；GIF 动图与
+    极小图保持原样（避免动图被拍平 / 无谓转码）。
+    """
     p = Path(path)
     suffix = p.suffix.lstrip(".").lower() or "png"
+    try:
+        import io as _io
+
+        from PIL import Image
+
+        with Image.open(p) as im:
+            if im.format != "GIF" and max(im.size) > 1024:
+                im = im.convert("RGB")
+                im.thumbnail((1024, 1024))
+                buf = _io.BytesIO()
+                im.save(buf, format="JPEG", quality=85)
+                data = base64.b64encode(buf.getvalue()).decode()
+                return f"data:image/jpeg;base64,{data}"
+    except Exception:
+        pass  # 读不了（损坏/非图片）→ 原样读取，由调用方/模型端兜底
     data = base64.b64encode(p.read_bytes()).decode()
     return f"data:image/{suffix};base64,{data}"
 
@@ -163,6 +208,7 @@ class SeasonArcOut(BaseModel):
     title：作品标题（仅当项目尚未命名时采用）+ 季名；
     arc：四段式（开端/发展/高潮/结局）的故事路线；
     beats：3-6 条本季关键剧情节点（起承转合/爽点节拍），供分章时逐章落位。"""
+
     title: str = ""
     arc: str = ""
     beats: list[str] = []
@@ -170,34 +216,39 @@ class SeasonArcOut(BaseModel):
 
 class CharacterOut(BaseModel):
     """单个角色设定（名字 + 形象/性格描述）。"""
+
     name: str = ""
     description: str = ""
 
 
 class CharsOut(BaseModel):
     """企划步骤 2：角色设定（多个角色，供后续各章保持一致）。"""
+
     characters: list[CharacterOut] = []
 
 
 class CharDescOut(BaseModel):
     """单个角色的形象/性格描述（可结合参考图生成）。"""
+
     description: str = ""
 
 
 class ChapterOut(BaseModel):
     title: str
     scene: str
-    seconds: int = 0   # 预留字段（当前不使用）：短剧时长默认 0 = 跟随配置/预设上限，由用户手动设置。漫画忽略。
+    seconds: int = 0  # 预留字段（当前不使用）：短剧时长默认 0 = 跟随配置/预设上限，由用户手动设置。漫画忽略。
 
 
 class ChapterCount(BaseModel):
     """先定总章数（供逐章规划：先定 N 再逐章规划 1..N）。"""
+
     count: int = 0
 
 
 class ScriptOut(BaseModel):
     """阶段 4：单章剧本 + 提示词（分辨率统一按总体设定，不由智能体决定）。
     seconds：预留字段（当前不使用；时长由用户在界面手动设置，0=跟随配置/预设上限）。漫画忽略。"""
+
     description: str
     prompt: str
     seconds: int = 0
@@ -205,6 +256,7 @@ class ScriptOut(BaseModel):
 
 class ScoreOut(BaseModel):
     """自动评分：单章生成画面按 0–100 打分（分数 + 一句话评语）。"""
+
     score: int = 0
     note: str = ""
 

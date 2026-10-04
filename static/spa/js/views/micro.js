@@ -60,7 +60,7 @@ Views.micro = {
       <el-empty v-else :description="I18N.t('mc.empty')" />
 
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
-                     :total="total" :page-size="flt.size" :current-page="page" @current-change="load" />
+                     :total="total" :page-size="flt.size" :current-page="page" @current-change="p => { page = p; load(); }" />
       </el-tab-pane>
       </el-tabs>
 
@@ -202,7 +202,10 @@ Views.micro = {
     }
 
     async function openNew() {
-      Object.assign(f, { title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false, steps: 0 });
+      // 全部字段重置（含数值项）：steps_i / steps_v / side / seconds 必须在列，
+      // 否则上一个作品的数值会残留、且静默带进下一个作品
+      Object.assign(f, { title: '', llm: '', dt: '', mi: '', mv: '', ref_i: false, ref_v: false,
+                         steps_i: 0, steps_v: 0, side: 0, seconds: 0 });
       dlg.value = true;
       // 基础配置里的默认配置 → 预填（仅当对应配置仍存在时）
       try {

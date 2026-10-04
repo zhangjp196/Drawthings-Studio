@@ -11,6 +11,7 @@
 可恢复流：助手消息先建「草稿」（status=streaming），生成过程中增量写入文本与内容块，
 完成置 done、中断置 interrupted；下次进入会话即可看到（可能不完整的）结果。
 """
+
 import asyncio
 import itertools
 import time
@@ -24,34 +25,44 @@ from pydantic_ai.messages import ImageUrl
 from config import data_dir
 from i18n import L
 from models import Asset, MicroMessage
-from services.agent import (build_model, image_data_uri, make_agent,
-                            to_message_history, user_prompt, ScoreOut)
+from services import events as E
+from services.agent import ScoreOut, build_model, image_data_uri, make_agent, to_message_history, user_prompt
 from services.api_common import _media_url
 from services.capabilities import caps, dt_client
 from services.drawthings import MAX_VIDEO_SECONDS, MODEL_NONE, extract_last_frame
 from services.media_files import media_path_from_url
 from services.micro_parts import dump_parts, load_parts
 from services.pipeline import _now, run_sync
-from services import events as E
 
-MC_SYSTEM = ("你是漫画/短剧创作的创意助手，擅长创意构思、角色与剧情设计、分镜和提示词，回答简洁、具体。"
-             "用户只是提问时直接文本回答；用户要求生成图片/视频时，先调用 generate_media 工具"
-             "（提供详细英文提示词：主体、场景、构图、光线、风格；视频补充运镜与动态），"
-             "生成成功后用一两句话说明结果。"
-             "始终用用户所用的语言回答（用户用中文提问则答中文，用英文提问则答英文）。")
+MC_SYSTEM = (
+    "你是漫画/短剧创作的创意助手，擅长创意构思、角色与剧情设计、分镜和提示词，回答简洁、具体。"
+    "用户只是提问时直接文本回答；用户要求生成图片/视频时，先调用 generate_media 工具"
+    "（提供详细英文提示词：主体、场景、构图、光线、风格；视频补充运镜与动态），"
+    "生成成功后用一两句话说明结果。"
+    "始终用用户所用的语言回答（用户用中文提问则答中文，用英文提问则答英文）。"
+)
 
 
-def build_instructions(can_image: bool, can_video: bool, dt_cfg,
-                       eff_ref_img: bool, eff_ref_vid: bool, lang: str = "zh",
-                       max_side: int = 0, max_seconds: int = 0) -> str:
+def build_instructions(
+    can_image: bool,
+    can_video: bool,
+    dt_cfg,
+    eff_ref_img: bool,
+    eff_ref_vid: bool,
+    lang: str = "zh",
+    max_side: int = 0,
+    max_seconds: int = 0,
+) -> str:
     """按生效能力拼装系统提示词（生成类型 / 比例 / 时长 / 参考图模式 / 无生成服务）。
 
     `max_side` / `max_seconds` = 功能级上限（作品的dt_max_side / dt_max_seconds），
     已从 DrawThings 连接配置移到功能级，故由调用方传入而非读 dt_cfg。
     """
     if not (can_image or can_video):
-        return (MC_SYSTEM + "当前不出图/出视频：用户要求生成时，请说明暂时无法生成，"
-                            "但可以代为撰写详细的英文提示词供其后续使用。")
+        return (
+            MC_SYSTEM + "当前不出图/出视频：用户要求生成时，请说明暂时无法生成，"
+            "但可以代为撰写详细的英文提示词供其后续使用。"
+        )
     kinds = []
     if can_image:
         kinds.append("图片")
@@ -61,21 +72,27 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
     ratio = ""
     if can_image:
         limit = int(max_side or 0) or 1024
-        ratio = (f"生成图片时：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
-                 f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
-                 f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
-                 f"用户未指定时 width/height 传 0。")
+        ratio = (
+            f"生成图片时：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
+            f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
+            f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
+            f"用户未指定时 width/height 传 0。"
+        )
     default_media = "video" if can_video else "image"
     sec_hint = ""
     if can_video:
         cap = int(max_seconds or 0) or MAX_VIDEO_SECONDS
         cap = min(cap, MAX_VIDEO_SECONDS)
-        sec_hint = (f"生成视频时用 seconds 参数指定时长（秒，1~{cap}；用户未指定时传 0 = 用 {cap} 秒），"
-                    f"单段视频最长 {cap} 秒。")
+        sec_hint = (
+            f"生成视频时用 seconds 参数指定时长（秒，1~{cap}；用户未指定时传 0 = 用 {cap} 秒），"
+            f"单段视频最长 {cap} 秒。"
+        )
     instructions = MC_SYSTEM + (
         f"当前只能生成：{avail}。调用 generate_media 时必须用 media 参数指明类型"
-        f"（图片传 media=\"image\"，视频传 media=\"video\"）；用户未明确时默认用 {default_media}。"
-        + sec_hint + ratio)
+        f'（图片传 media="image"，视频传 media="video"）；用户未明确时默认用 {default_media}。'
+        + sec_hint
+        + ratio
+    )
     # 参考图模式：勾选「支持参考图片」后，附图 / 最近生成的媒体会作为参考图 →
     # 提示词写成基于参考图的修改指令，而不是从头完整描述
     if eff_ref_img or eff_ref_vid:
@@ -83,7 +100,8 @@ def build_instructions(can_image: bool, can_video: bool, dt_cfg,
             "参考图模式：附图（无附图时为本会话最近一次生成的媒体）将作为图生图 / 图生视频的参考图。"
             "此时 prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
             "（角色、服装、画风、光照、构图），再具体描述用户本次要求的改动；不要从头重新描述整个画面。"
-            "若要参考本会话中更早的某张已生成媒体，给 generate_media 传 ref_index（1=最近一张，2=倒数第二张…）。")
+            "若要参考本会话中更早的某张已生成媒体，给 generate_media 传 ref_index（1=最近一张，2=倒数第二张…）。"
+        )
     return instructions
 
 
@@ -92,10 +110,16 @@ def _no_cap_msg(kind: str, subject, lang: str = "zh") -> str:
     name = "视频" if kind == "video" else "图像"
     attr = "dt_model_video" if kind == "video" else "dt_model_image"
     if str(getattr(subject, attr, "") or "").strip() == MODEL_NONE:
-        return L(lang, f"已禁用{name}生成：该模型在配置设置里选了「不启用」。",
-                 f"{name} generation is disabled — that model is set to \"Disabled\".")
-    return L(lang, f"未配置{name}模型：请在 DrawThings 配置里填写{name}模型。",
-             f"No {kind} model configured — set one in the DrawThings config.")
+        return L(
+            lang,
+            f"已禁用{name}生成：该模型在配置设置里选了「不启用」。",
+            f'{name} generation is disabled — that model is set to "Disabled".',
+        )
+    return L(
+        lang,
+        f"未配置{name}模型：请在 DrawThings 配置里填写{name}模型。",
+        f"No {kind} model configured — set one in the DrawThings config.",
+    )
 
 
 def latest_session_media_path(db, session_id: str) -> str | None:
@@ -104,19 +128,27 @@ def latest_session_media_path(db, session_id: str) -> str | None:
     优先查资产表（Asset Graph，含参数与类型）；旧数据无资产时回退按消息扫描。
     """
     try:
-        a = (db.query(Asset)
-             .filter(Asset.session_id == session_id, Asset.url.isnot(None), Asset.url != "")
-             .order_by(Asset.id.desc()).first())
+        a = (
+            db.query(Asset)
+            .filter(Asset.session_id == session_id, Asset.url.isnot(None), Asset.url != "")
+            .order_by(Asset.id.desc())
+            .first()
+        )
         if a is not None:
             p = media_path_from_url(a.url or "")
             if p:
                 return str(p)
-        m = (db.query(MicroMessage)
-             .filter(MicroMessage.session_id == session_id,
-                     MicroMessage.role == "assistant",
-                     MicroMessage.media_url.isnot(None),
-                     MicroMessage.media_url != "")
-             .order_by(MicroMessage.index.desc()).first())
+        m = (
+            db.query(MicroMessage)
+            .filter(
+                MicroMessage.session_id == session_id,
+                MicroMessage.role == "assistant",
+                MicroMessage.media_url.isnot(None),
+                MicroMessage.media_url != "",
+            )
+            .order_by(MicroMessage.index.desc())
+            .first()
+        )
     except Exception:
         return None
     if not m:
@@ -130,9 +162,13 @@ def asset_path_by_recency(db, session_id: str, n: int) -> str | None:
     if not n or n < 1:
         return None
     try:
-        a = (db.query(Asset)
-             .filter(Asset.session_id == session_id, Asset.url.isnot(None), Asset.url != "")
-             .order_by(Asset.id.desc()).offset(n - 1).first())
+        a = (
+            db.query(Asset)
+            .filter(Asset.session_id == session_id, Asset.url.isnot(None), Asset.url != "")
+            .order_by(Asset.id.desc())
+            .offset(n - 1)
+            .first()
+        )
     except Exception:
         return None
     if not a:
@@ -148,21 +184,28 @@ def is_video_path(path: str | None) -> bool:
     return bool(path) and Path(path).suffix.lower() in _VIDEO_SUFFIXES
 
 
-def image_ref_path(ref: str | None) -> str | None:
-    """图片生成用的参考路径：视频 → 取末帧图；图片 → 原样（供「引用」任意媒体后做图生图）。"""
+async def image_ref_path_async(ref: str | None) -> str | None:
+    """图片生成用的参考路径：视频 → 取末帧图；图片 → 原样（供「引用」任意媒体后做图生图）。
+
+    抽帧（OpenCV 解码 / ffmpeg，自身最长 60s 超时）必须放线程池，否则会阻塞事件循环。
+    """
     if not ref:
         return None
     if is_video_path(ref):
-        return extract_last_frame(ref, Path(data_dir) / "media") or ref
+        return await run_sync(partial(extract_last_frame, ref)) or ref
     return ref
 
 
-_SCORE_SYSTEM_IMAGE = ("你是美术/视频审片。**仅根据画面本身评估，不要参考任何文字提示词或描述**。"
-                       "按 100 分制打分，只输出一个 JSON 对象，字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
-                       "评估维度：构图、光影、清晰度、结构与人体合理性、画面/风格一致性、有无明显畸变或伪影、整体观感。")
-_SCORE_SYSTEM_PROMPT = ("你是美术/视频审片。请**对照生成提示词**评估画面：先判断是否呈现了提示词的关键元素与意图，"
-                        "再看构图、光影、清晰度、一致性、有无畸变。按 100 分制打分，只输出一个 JSON 对象，"
-                        "字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。")
+_SCORE_SYSTEM_IMAGE = (
+    "你是美术/视频审片。**仅根据画面本身评估，不要参考任何文字提示词或描述**。"
+    "按 100 分制打分，只输出一个 JSON 对象，字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
+    "评估维度：构图、光影、清晰度、结构与人体合理性、画面/风格一致性、有无明显畸变或伪影、整体观感。"
+)
+_SCORE_SYSTEM_PROMPT = (
+    "你是美术/视频审片。请**对照生成提示词**评估画面：先判断是否呈现了提示词的关键元素与意图，"
+    "再看构图、光影、清晰度、一致性、有无畸变。按 100 分制打分，只输出一个 JSON 对象，"
+    "字段：score（0–100 整数）与 note（一句话中文评语，不超过 30 字）。"
+)
 
 
 def norm_score_mode(v) -> str:
@@ -170,8 +213,9 @@ def norm_score_mode(v) -> str:
     return "prompt" if str(v or "").strip().lower() == "prompt" else "image"
 
 
-async def vlm_score_media(llm_cfg, image_path: str, lang: str = "zh",
-                          mode: str = "image", prompt: str = "") -> tuple[int, str]:
+async def vlm_score_media(
+    llm_cfg, image_path: str, lang: str = "zh", mode: str = "image", prompt: str = ""
+) -> tuple[int, str]:
     """用作品所选 VLM 评分：返回 (score, note)。
 
     mode='image'（默认）：仅评画面本身（忽略生成提示词）；mode='prompt'：结合提示词评相符度。
@@ -179,17 +223,24 @@ async def vlm_score_media(llm_cfg, image_path: str, lang: str = "zh",
     """
     use_prompt = norm_score_mode(mode) == "prompt"
     model = build_model(llm_cfg)
-    agent = make_agent(model, _SCORE_SYSTEM_PROMPT if use_prompt else _SCORE_SYSTEM_IMAGE,
-                       output_type=ScoreOut)
+    agent = make_agent(
+        model, _SCORE_SYSTEM_PROMPT if use_prompt else _SCORE_SYSTEM_IMAGE, output_type=ScoreOut
+    )
     if use_prompt:
-        text = (f"Prompt: {prompt or '(none)'}\nEvaluate how well the image matches the prompt and its quality; "
-                f"give a score and a one-line comment." if lang == "en"
-                else f"生成提示词：{prompt or '（无）'}\n请对照提示词评估画面并给出评分与一句话评语。")
+        text = (
+            f"Prompt: {prompt or '(none)'}\nEvaluate how well the image matches the prompt and its quality; "
+            f"give a score and a one-line comment."
+            if lang == "en"
+            else f"生成提示词：{prompt or '（无）'}\n请对照提示词评估画面并给出评分与一句话评语。"
+        )
     else:
-        text = ("Evaluate the image quality by the image alone (do not consider any prompt/text), then give a score "
-                "and a one-line comment." if lang == "en"
-                else "请仅根据画面本身评价质量并给出评分与一句话评语。")
-    content = [ImageUrl(url=image_data_uri(image_path)), text]
+        text = (
+            "Evaluate the image quality by the image alone (do not consider any prompt/text), then give a score "
+            "and a one-line comment."
+            if lang == "en"
+            else "请仅根据画面本身评价质量并给出评分与一句话评语。"
+        )
+    content = [ImageUrl(url=await run_sync(image_data_uri, image_path)), text]
     data = (await agent.run(content)).output
     s = int(getattr(data, "score", 0) or 0)
     s = max(0, min(100, s))  # 收敛到 0–100
@@ -200,9 +251,11 @@ class _PromptOut(BaseModel):
     prompt: str = ""
 
 
-_REFINE_SYSTEM = ("你是出图/出视频的提示词优化师。根据「原始英文提示词」与「评分评语」，"
-                  "在保持主体、角色与风格一致的前提下，针对评语指出的问题给出改进后的英文提示词。"
-                  "只输出一个 JSON 对象，字段：prompt（改进后的英文提示词）。")
+_REFINE_SYSTEM = (
+    "你是出图/出视频的提示词优化师。根据「原始英文提示词」与「评分评语」，"
+    "在保持主体、角色与风格一致的前提下，针对评语指出的问题给出改进后的英文提示词。"
+    "只输出一个 JSON 对象，字段：prompt（改进后的英文提示词）。"
+)
 
 
 async def refine_prompt(llm_cfg, prompt: str, score: int, note: str, lang: str = "zh") -> str:
@@ -212,8 +265,10 @@ async def refine_prompt(llm_cfg, prompt: str, score: int, note: str, lang: str =
     try:
         model = build_model(llm_cfg)
         agent = make_agent(model, _REFINE_SYSTEM, output_type=_PromptOut)
-        user = (f"原始提示词：{prompt}\n评分：{int(score or 0)}\n评语：{note or '（无）'}\n"
-                f"请给出改进后的英文提示词。")
+        user = (
+            f"原始提示词：{prompt}\n评分：{int(score or 0)}\n评语：{note or '（无）'}\n"
+            f"请给出改进后的英文提示词。"
+        )
         out = (await agent.run(user)).output
         p = str(getattr(out, "prompt", "") or "").strip()
         return p or prompt
@@ -247,8 +302,11 @@ class _MsgPersister:
             if not (m is not None and getattr(m, "parts", None)):
                 return
             prev = load_parts(m.parts)
-            by_url = {b.get("url"): (int(b.get("score") or 0), b.get("score_note") or "")
-                      for b in prev if b.get("type") == "tool" and b.get("url")}
+            by_url = {
+                b.get("url"): (int(b.get("score") or 0), b.get("score_note") or "")
+                for b in prev
+                if b.get("type") == "tool" and b.get("url")
+            }
             if not by_url:
                 return
             for b in self.parts:
@@ -263,8 +321,7 @@ class _MsgPersister:
         if m is None:
             if not (text or self.last_media.get("url") or status == "interrupted"):
                 return
-            m = MicroMessage(session_id=self.session.id, index=self.idx,
-                             role="assistant", created_at=_now())
+            m = MicroMessage(session_id=self.session.id, index=self.idx, role="assistant", created_at=_now())
             self.db.add(m)
             self.db.flush()  # 取 id，供后续增量更新
             self.id = m.id
@@ -287,11 +344,15 @@ class _MsgPersister:
                 if b.get("type") != "tool" or b.get("status") != "ok" or not b.get("url"):
                     continue
                 bid = str(b.get("id") or "")
-                a = (self.db.query(Asset)
-                     .filter(Asset.message_id == message_id, Asset.block_id == bid).first())
+                a = self.db.query(Asset).filter(Asset.message_id == message_id, Asset.block_id == bid).first()
                 if a is None:
-                    a = Asset(micro_id=self.session.micro_id, session_id=self.session.id,
-                              message_id=message_id, block_id=bid, created_at=_now())
+                    a = Asset(
+                        micro_id=self.session.micro_id,
+                        session_id=self.session.id,
+                        message_id=message_id,
+                        block_id=bid,
+                        created_at=_now(),
+                    )
                     self.db.add(a)
                 a.kind = str(b.get("media") or "image")
                 a.url = str(b.get("url") or "")
@@ -323,7 +384,8 @@ class _MsgPersister:
         """空回复（无文本、无媒体、无工具块）：删除草稿，避免留下空消息。"""
         try:
             has = bool(self.last_media.get("url")) or any(
-                p.get("type") in ("text", "tool") for p in self.parts)
+                p.get("type") in ("text", "tool") for p in self.parts
+            )
             if self.id and not has:
                 m = self.db.get(MicroMessage, self.id)
                 if m is not None:
@@ -336,10 +398,24 @@ class _MsgPersister:
                 pass
 
 
-async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, height: int = 0,
-                         seconds: int = 0, ref: str | None, tid: str, lang: str,
-                         parts: list, last_media: dict, llm_cfg=None,
-                         score_mode: str = "image", auto_score: bool = False) -> str:
+async def _do_generation(
+    out,
+    *,
+    dt,
+    kind: str,
+    prompt: str,
+    width: int = 0,
+    height: int = 0,
+    seconds: int = 0,
+    ref: str | None,
+    tid: str,
+    lang: str,
+    parts: list,
+    last_media: dict,
+    llm_cfg=None,
+    score_mode: str = "image",
+    auto_score: bool = False,
+) -> str:
     """执行一次生成（图/视频），把 tool/tool_status/media/tool_error 事件写入 out。
 
     - 生成参数快照写入内容块；
@@ -354,12 +430,22 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
         label = L(lang, f"正在生成视频（约 {int(seconds)} 秒）…", f"Generating video (~{int(seconds)}s)…")
     else:
         label = L(lang, "正在生成视频…", "Generating video…")
-    block = {"type": "tool", "id": tid, "label": label, "prompt": prompt,
-             "status": "running", "media": kind, "url": "", "message": "",
-             # 参数快照（可复现 / 一键重跑）
-             "model": (dt.model_video if kind == "video" else dt.model_image) or "",
-             "width": int(width or 0), "height": int(height or 0), "seconds": int(seconds or 0),
-             "ref_url": _media_url(ref) if ref else ""}
+    block = {
+        "type": "tool",
+        "id": tid,
+        "label": label,
+        "prompt": prompt,
+        "status": "running",
+        "media": kind,
+        "url": "",
+        "message": "",
+        # 参数快照（可复现 / 一键重跑）
+        "model": (dt.model_video if kind == "video" else dt.model_image) or "",
+        "width": int(width or 0),
+        "height": int(height or 0),
+        "seconds": int(seconds or 0),
+        "ref_url": _media_url(ref) if ref else "",
+    }
     parts.append(block)
     await out.put((E.TOOL, {"id": tid, "label": label, "prompt": prompt, "media": kind}))
     params = {}
@@ -370,7 +456,8 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
     # 生成状态实时透传（如「正在等待 Draw Things 恢复…」）→ 前端工具气泡
     _loop = asyncio.get_running_loop()
     dt.on_status = lambda msg: _loop.call_soon_threadsafe(
-        out.put_nowait, (E.TOOL_STATUS, {"id": tid, "message": msg}))
+        out.put_nowait, (E.TOOL_STATUS, {"id": tid, "message": msg})
+    )
     try:
         if kind == "image":
             path = await run_sync(partial(dt.generate_image, prompt, ref_path=ref, params=params))
@@ -394,10 +481,23 @@ async def _do_generation(out, *, dt, kind: str, prompt: str, width: int = 0, hei
     return f"生成成功，媒体地址：{url}"
 
 
-async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_cfg,
-                         img_paths: list[str], user_message: str, history: list[dict],
-                         assistant_idx: int, lang: str = "zh", cancel_event=None,
-                         assistant_id: int | None = None, quoted_ref: str | None = None) -> None:
+async def run_micro_chat(
+    out: asyncio.Queue,
+    *,
+    db,
+    session,
+    work,
+    llm_cfg,
+    dt_cfg,
+    img_paths: list[str],
+    user_message: str,
+    history: list[dict],
+    assistant_idx: int,
+    lang: str = "zh",
+    cancel_event=None,
+    assistant_id: int | None = None,
+    quoted_ref: str | None = None,
+) -> None:
     """执行一次微创作对话：事件写入 `out`，增量落库，结束发 `(E.EOF, None)`。
 
     `assistant_id` = 已建好的助手草稿消息 id（可恢复流）；None 时首次写入自动创建。
@@ -430,9 +530,15 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
         eff_ref_img, eff_ref_vid = _caps.ref_image, _caps.ref_video
 
         instructions = build_instructions(
-            can_image, can_video, dt_cfg, eff_ref_img, eff_ref_vid, lang,
+            can_image,
+            can_video,
+            dt_cfg,
+            eff_ref_img,
+            eff_ref_vid,
+            lang,
             max_side=int(getattr(work, "dt_max_side", 0) or 0),
-            max_seconds=int(getattr(work, "dt_max_seconds", 0) or 0))
+            max_seconds=int(getattr(work, "dt_max_seconds", 0) or 0),
+        )
         model = build_model(llm_cfg)
         agent = Agent(model, instructions=instructions)
 
@@ -447,10 +553,17 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
             # 图像与视频都被显式「不启用」时根本不注册 generate_media：
             # 与其让模型去调一个必然失败的工具（每次都返回 TOOL_ERROR），不如让它按纯对话处理。
             if dt and (can_image or can_video):
+
                 @agent.tool
-                async def generate_media(ctx: RunContext, prompt: str, media: str = "",
-                                         width: int = 0, height: int = 0, seconds: int = 0,
-                                         ref_index: int = 0) -> str:
+                async def generate_media(
+                    ctx: RunContext,
+                    prompt: str,
+                    media: str = "",
+                    width: int = 0,
+                    height: int = 0,
+                    seconds: int = 0,
+                    ref_index: int = 0,
+                ) -> str:
                     """生成图片或视频：根据详细英文提示词产出单张图或单个视频。
 
                     若用户当前消息附带了图片，会自动作为参考图做图生图 / 图生视频（受配置「支持参考图片」开关
@@ -470,7 +583,9 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                         kind = "video" if can_video else "image"
                     if (kind == "video" and not can_video) or (kind == "image" and not can_image):
                         msg = _no_cap_msg(kind, work, lang)
-                        await out.put((E.TOOL_ERROR, {"id": f"t{next(tool_ids)}", "message": msg, "prompt": prompt}))
+                        await out.put(
+                            (E.TOOL_ERROR, {"id": f"t{next(tool_ids)}", "message": msg, "prompt": prompt})
+                        )
                         return f"生成失败：{msg}"
                     tid = f"t{next(tool_ids)}"
                     # 参考优先级：右键「引用」的媒体 > 本条消息附图 > 历史资产(ref_index) > 本会话最近生成的媒体
@@ -480,18 +595,31 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
                     if ref is None:
                         ref = last_media.get("path") or latest_session_media_path(db, session.id)
                     if kind == "image":
-                        ref = image_ref_path(ref)  # 引用视频做图生图 → 取末帧
+                        # 引用视频做图生图 → 取末帧（async 版：抽帧进线程池）
+                        ref = await image_ref_path_async(ref)
                     result = await _do_generation(
-                        out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
-                        seconds=seconds, ref=ref, tid=tid, lang=lang,
-                        parts=parts, last_media=last_media, llm_cfg=llm_cfg,
+                        out,
+                        dt=dt,
+                        kind=kind,
+                        prompt=prompt,
+                        width=width,
+                        height=height,
+                        seconds=seconds,
+                        ref=ref,
+                        tid=tid,
+                        lang=lang,
+                        parts=parts,
+                        last_media=last_media,
+                        llm_cfg=llm_cfg,
                         score_mode=norm_score_mode(getattr(work, "score_mode", "image")),
-                        auto_score=bool(getattr(work, "auto_score", 0)))
+                        auto_score=bool(getattr(work, "auto_score", 0)),
+                    )
                     persister.save("streaming")  # 生成的里程碑立即落库（断连可恢复）
                     return result
 
-            async with agent.run_stream(user_prompt(user_message, img_paths),
-                                        message_history=to_message_history(history)) as result:
+            async with agent.run_stream(
+                user_prompt(user_message, img_paths), message_history=to_message_history(history)
+            ) as result:
                 async for text in result.stream_text(delta=True, debounce_by=None):
                     _add_text(text)
                     await out.put((E.TOKEN, {"text": text}))
@@ -521,12 +649,27 @@ async def run_micro_chat(out: asyncio.Queue, *, db, session, work, llm_cfg, dt_c
             pass
 
 
-async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
-                         assistant_id: int, kind: str, prompt: str, width: int = 0,
-                         height: int = 0, seconds: int = 0, ref_url: str = "",
-                         lang: str = "zh", cancel_event=None,
-                         llm_cfg=None, improve: bool = False,
-                         score: int = 0, note: str = "") -> None:
+async def run_regenerate(
+    out: asyncio.Queue,
+    *,
+    db,
+    session,
+    work,
+    dt_cfg,
+    assistant_id: int,
+    kind: str,
+    prompt: str,
+    width: int = 0,
+    height: int = 0,
+    seconds: int = 0,
+    ref_url: str = "",
+    lang: str = "zh",
+    cancel_event=None,
+    llm_cfg=None,
+    improve: bool = False,
+    score: int = 0,
+    note: str = "",
+) -> None:
     """一键重跑：跳过 LLM，按内容块保存的参数直接重生成（结果可复现）。
 
     `ref_url` = 原生成所用的参考图（/media/xxx）；空则回退本会话最近生成的媒体。
@@ -559,11 +702,23 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
         # 重做：结合评分评语用 LLM 改进提示词（失败回退原提示词）
         if improve:
             prompt = await refine_prompt(llm_cfg, prompt, score, note, lang)
-        await _do_generation(out, dt=dt, kind=kind, prompt=prompt, width=width, height=height,
-                             seconds=seconds, ref=str(ref) if ref else None, tid="t1",
-                             lang=lang, parts=parts, last_media=last_media, llm_cfg=llm_cfg,
-                             score_mode=norm_score_mode(getattr(work, "score_mode", "image")),
-                             auto_score=bool(getattr(work, "auto_score", 0)))
+        await _do_generation(
+            out,
+            dt=dt,
+            kind=kind,
+            prompt=prompt,
+            width=width,
+            height=height,
+            seconds=seconds,
+            ref=str(ref) if ref else None,
+            tid="t1",
+            lang=lang,
+            parts=parts,
+            last_media=last_media,
+            llm_cfg=llm_cfg,
+            score_mode=norm_score_mode(getattr(work, "score_mode", "image")),
+            auto_score=bool(getattr(work, "auto_score", 0)),
+        )
         persister.save("done" if last_media.get("url") else "interrupted")
         persister.final = True
         await out.put((E.DONE, {}))
@@ -587,5 +742,11 @@ async def run_regenerate(out: asyncio.Queue, *, db, session, work, dt_cfg,
             pass
 
 
-__all__ = ["MC_SYSTEM", "build_instructions", "latest_session_media_path",
-           "run_micro_chat", "run_regenerate", "vlm_score_media"]
+__all__ = [
+    "MC_SYSTEM",
+    "build_instructions",
+    "latest_session_media_path",
+    "run_micro_chat",
+    "run_regenerate",
+    "vlm_score_media",
+]

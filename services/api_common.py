@@ -3,19 +3,19 @@
 漫画 / 短剧各自的 API 路由模块（api_comic / api_drama）与 main.py 都从这里导入。
 本模块不含任何类型特有逻辑。
 """
+
 import json
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
-from config import MEDIA_DIR, media_url as _media_url
+from config import MEDIA_DIR
+from config import media_url as _media_url
+from config_store import ConfigStore
 from i18n import L, lang_of
 from models import Project
-from config_store import ConfigStore
-from services.drawthings import (MAX_SIDE_LIMIT, MAX_STEPS_LIMIT, MAX_VIDEO_SECONDS,
-                               norm_ref_flag)
+from services.drawthings import MAX_STEPS_LIMIT, norm_ref_flag
 from services.pipeline import hex_to_rgb
-from services.runtime import pipeline
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -33,8 +33,9 @@ async def _json_body(request: Request) -> dict:
             raise ValueError
         return body
     except Exception:
-        raise HTTPException(status_code=400,
-                            detail=L(_lang(request), "请求体需为 JSON 对象", "Body must be a JSON object"))
+        raise HTTPException(
+            status_code=400, detail=L(_lang(request), "请求体需为 JSON 对象", "Body must be a JSON object")
+        )
 
 
 # ---------------- 媒体 URL / 序列化 ----------------
@@ -62,7 +63,10 @@ def _chapter_view(ch) -> dict:
 
 def _llm_view(c) -> dict:
     return {
-        "id": c.id, "name": c.name, "base_url": c.base_url, "model": c.model,
+        "id": c.id,
+        "name": c.name,
+        "base_url": c.base_url,
+        "model": c.model,
         "supports_vision": "yes",
         "thinking": getattr(c, "thinking", None) or "default",
         "thinking_param": getattr(c, "thinking_param", None) or "auto",
@@ -72,11 +76,13 @@ def _llm_view(c) -> dict:
 
 def _dt_view(c) -> dict:
     return {
-        "id": c.id, "name": c.name, "base_url": c.base_url,
+        "id": c.id,
+        "name": c.name,
+        "base_url": c.base_url,
         "model_image": getattr(c, "model_image", "") or "",
         "model_video": getattr(c, "model_video", "") or "",
-        "ref_image": int(getattr(c, "ref_image", 0) or 0),   # 图像支持参考图片（图生图）
-        "ref_video": int(getattr(c, "ref_video", 0) or 0),   # 视频支持参考图片（图生视频）
+        "ref_image": int(getattr(c, "ref_image", 0) or 0),  # 图像支持参考图片（图生图）
+        "ref_video": int(getattr(c, "ref_video", 0) or 0),  # 视频支持参考图片（图生视频）
         "created_at": c.created_at,
     }
 
@@ -96,12 +102,16 @@ def _dt_steps_field(body: dict, key: str = "dt_max_steps_image", lang: str = "zh
     try:
         v = int(v)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"{key} 需为整数", f"{key} must be an integer"))
+        raise HTTPException(status_code=400, detail=L(lang, f"{key} 需为整数", f"{key} must be an integer"))
     if v < 0 or v > MAX_STEPS_LIMIT:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"{key} 超出范围（0~{MAX_STEPS_LIMIT}，0=跟随预设）",
-                                     f"{key} out of range (0~{MAX_STEPS_LIMIT}, 0 = follow the preset)"))
+        raise HTTPException(
+            status_code=400,
+            detail=L(
+                lang,
+                f"{key} 超出范围（0~{MAX_STEPS_LIMIT}，0=跟随预设）",
+                f"{key} out of range (0~{MAX_STEPS_LIMIT}, 0 = follow the preset)",
+            ),
+        )
     return v
 
 
@@ -113,12 +123,14 @@ def _dt_limit_field(body: dict, key: str, max_v: int, lang: str = "zh") -> int:
     try:
         v = int(v)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"{key} 需为整数", f"{key} must be an integer"))
+        raise HTTPException(status_code=400, detail=L(lang, f"{key} 需为整数", f"{key} must be an integer"))
     if v < 0 or v > max_v:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"{key} 超出范围（0~{max_v}，0=不限）",
-                                     f"{key} out of range (0~{max_v}, 0 = unlimited)"))
+        raise HTTPException(
+            status_code=400,
+            detail=L(
+                lang, f"{key} 超出范围（0~{max_v}，0=不限）", f"{key} out of range (0~{max_v}, 0 = unlimited)"
+            ),
+        )
     return v
 
 
@@ -137,6 +149,7 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         if isinstance(v, bool):
             return 1 if v else 0
         return 1 if str(v or "").strip().lower() in ("1", "true", "yes", "on") else 0
+
     return {
         "model_image": model_image,
         "model_video": model_video,
@@ -148,8 +161,13 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
 
 def _project_view(p: Project, chapter_count: int = 0) -> dict:
     return {
-        "id": p.id, "kind": p.kind, "title": p.title or "", "origin": p.origin,
-        "status": p.status, "created_at": p.created_at, "updated_at": p.updated_at,
+        "id": p.id,
+        "kind": p.kind,
+        "title": p.title or "",
+        "origin": p.origin,
+        "status": p.status,
+        "created_at": p.created_at,
+        "updated_at": p.updated_at,
         "first_image_url": _media_url(p.first_image or ""),
         "chapter_count": chapter_count,
     }
@@ -158,8 +176,10 @@ def _project_view(p: Project, chapter_count: int = 0) -> dict:
 def _config_lists(db: Session, project: Project) -> dict:
     """项目可选配置：LLM 全部 + DrawThings 全部。"""
     cs = ConfigStore(db)
-    return {"llm_configs": [_llm_view(c) for c in cs.list_llm()],
-            "drawthing_configs": [_dt_view(c) for c in cs.list_drawthing()]}
+    return {
+        "llm_configs": [_llm_view(c) for c in cs.list_llm()],
+        "drawthing_configs": [_dt_view(c) for c in cs.list_drawthing()],
+    }
 
 
 def _clamp_page(page: int, size: int) -> tuple[int, int]:
@@ -176,6 +196,7 @@ MAX_IMAGE_UPLOAD = 20 * 1024 * 1024  # 单张上传图片上限 20MB（防超大
 
 def _overlay_opts(body: dict) -> dict:
     """封面标题叠加参数（位置/字号/样式/颜色/底条）；非法值回退默认。"""
+
     def _f(v, default, lo, hi):
         try:
             return min(hi, max(lo, float(v)))
@@ -196,8 +217,20 @@ def _overlay_opts(body: dict) -> dict:
 
 
 __all__ = [
-    "MEDIA_DIR", "MAX_IMAGE_UPLOAD", "_overlay_opts",
-    "_lang", "_json_body", "_media_url", "_chapter_view",
-    "_llm_view", "_dt_view", "_dt_ref_field", "_dt_gen_fields", "_dt_limit_field", "_project_view",
-    "_config_lists", "_clamp_page", "_sse",
+    "MEDIA_DIR",
+    "MAX_IMAGE_UPLOAD",
+    "_overlay_opts",
+    "_lang",
+    "_json_body",
+    "_media_url",
+    "_chapter_view",
+    "_llm_view",
+    "_dt_view",
+    "_dt_ref_field",
+    "_dt_gen_fields",
+    "_dt_limit_field",
+    "_project_view",
+    "_config_lists",
+    "_clamp_page",
+    "_sse",
 ]

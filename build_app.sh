@@ -7,6 +7,21 @@ cd "$(dirname "$0")"
 PY=".venv/bin/python"
 APP_NAME="Drawthings Studio"
 
+# ---- 0/4 发布前质量关卡：任一失败即中止（防止把坏构建打给用户）----
+if [ ! -x "$PY" ]; then
+  echo "❌ 未找到 $PY —— .venv 是坏的（旧路径）。请删除后重建：python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+  exit 1
+fi
+if ! "$PY" -m ruff --version >/dev/null 2>&1; then
+  echo "❌ 缺少 dev 依赖，请先安装：$PY -m pip install -r requirements-dev.txt" >&2
+  exit 1
+fi
+"$PY" -m ruff check . >/dev/null || { echo "❌ ruff lint 未通过，中止打包（python -m ruff check . 看详情）" >&2; exit 1; }
+"$PY" -m ruff format --check . >/dev/null || { echo "❌ ruff format 未通过（改过代码后请先 python -m ruff format .）" >&2; exit 1; }
+"$PY" -m pytest -q >/dev/null || { echo "❌ 测试未通过，中止打包（python -m pytest 看详情）" >&2; exit 1; }
+"$PY" tools/check_contracts.py >/dev/null || { echo "❌ 契约校验未通过，中止打包" >&2; exit 1; }
+echo "    · ruff lint / format / pytest / 契约校验：全部通过 ✓"
+
 echo "==> 1/3 生成图标（icon_1024.png → .icns）"
 "$PY" tools/make_icon.py
 ICONSET="build/icon.iconset"

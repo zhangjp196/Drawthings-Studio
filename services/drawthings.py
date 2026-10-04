@@ -21,6 +21,7 @@ app 的 API server 设为 **gRPC**（默认端口 7859）；本应用只用这�
 音画同步自检：合成后用 ffprobe 校验音轨与视频是否等长，明显不等长（= 帧率取错）则按音轨反推帧率重封装。
 `drawthings-py` 为懒加载：未安装时只有实际生成会报错。
 """
+
 import asyncio
 import logging
 import math
@@ -29,6 +30,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -37,44 +39,76 @@ from urllib.parse import urlparse
 
 from PIL import Image
 
+from config import TMP_DIR
+
 logger = logging.getLogger("drawthings")
 
 DEFAULT_GRPC_PORT = 7859
+
+# ffmpeg 合成视频的超时（秒）。export_video 是同步路由（跑在线程池），不加超时的话
+# 一个卡死的 ffmpeg（损坏的 mp4 让解复用器空转）会永久占住那个线程，且前端毫无反馈。
+CONCAT_TIMEOUT = 600
 
 
 class GenerationCancelled(RuntimeError):
     """生成被调用方主动取消（协作式取消：cancel_event 置位）。"""
 
+
 # Draw Things 已知缺陷：图生图（带 init_image）时 app 可能闪退（官方社区 issue #121，未修复）。
 # 连接中断后自动等待用户重启 app（端口恢复，每轮上限 RECOVERY_TIMEOUT 秒），再自动重试生成
 # （最多 MAX_RECOVERY_RETRIES 轮）；始终未恢复 / 重试仍失败才报错。
-RECOVERY_POLL = 3.0           # 秒：等待恢复期间的端口探测间隔
-RECOVERY_TIMEOUT = 120.0      # 秒：单轮等待 app 恢复的最长时间
-MAX_RECOVERY_RETRIES = 2      # 断连后自动重试的轮数（含首次共最多 3 次生成尝试）
-RECOVERY_SETTLE = 3.0         # 秒：端口恢复后先等 app 稳定，再发起重试
+RECOVERY_POLL = 3.0  # 秒：等待恢复期间的端口探测间隔
+RECOVERY_TIMEOUT = 120.0  # 秒：单轮等待 app 恢复的最长时间
+MAX_RECOVERY_RETRIES = 2  # 断连后自动重试的轮数（含首次共最多 3 次生成尝试）
+RECOVERY_SETTLE = 3.0  # 秒：端口恢复后先等 app 稳定，再发起重试
 
 
 def _looks_disconnected(e: Exception) -> bool:
     """按异常文本判断是否为连接类错误（app 可能闪退 / 被关闭）。"""
     s = str(e)
-    return any(k in s for k in ("UNAVAILABLE", "closed", "Connection", "Reset",
-                                 "Cancelled", "Broken pipe", "EOF", "incomplete"))
+    return any(
+        k in s
+        for k in (
+            "UNAVAILABLE",
+            "closed",
+            "Connection",
+            "Reset",
+            "Cancelled",
+            "Broken pipe",
+            "EOF",
+            "incomplete",
+        )
+    )
 
 
 def _is_no_frames(e: Exception) -> bool:
     """是否为「服务端未返回任何帧/图」错误（Draw Things app 侧：未加载模型 / 显存不足 / 当前无法生成）。"""
     s = str(e)
-    return ("No images received from server" in s
-            or "未返回任何图像" in s
-            or "returned no image" in s)
+    return "No images received from server" in s or "未返回任何图像" in s or "returned no image" in s
+
 
 # 视频模型名关键词：子串匹配（无歧义）+ 词元匹配（易混短词，按 _/-/数字 切分后整词比较）。
 # 覆盖 Draw Things 常见视频模型：LTX-Video(ltx)、SVD、Wan、HunyuanVideo、CogVideoX、Mochi、
 # FramePack、AnimateDiff、DynamiCrafter、EasyAnimate 等；新增模型时在此补充关键词即可。
 _VIDEO_SUBSTR = (
-    "video", "svd", "i2v", "t2v", "v2v", "img2vid", "vid2vid",
-    "cogvideo", "sora", "kling", "vidu", "ltx", "mochi",
-    "framepack", "dynamicrafter", "easyanimate", "hunyuanvideo", "seaweed",
+    "video",
+    "svd",
+    "i2v",
+    "t2v",
+    "v2v",
+    "img2vid",
+    "vid2vid",
+    "cogvideo",
+    "sora",
+    "kling",
+    "vidu",
+    "ltx",
+    "mochi",
+    "framepack",
+    "dynamicrafter",
+    "easyanimate",
+    "hunyuanvideo",
+    "seaweed",
 )
 _VIDEO_TOKENS = {"wan", "ltx", "animate", "animation", "motion", "animatediff", "framepack"}
 
@@ -110,8 +144,11 @@ def cap_size(w: int, h: int, max_side: int) -> tuple[int, int]:
     if not max_side or max(w, h) <= max_side:
         return w, h
     s = max_side / max(w, h)
-    cap = lambda v: max(64, int(v * s / 64 + 0.5) * 64)
-    w, h = cap(w), cap(h)
+
+    def _cap(v: int) -> int:
+        return max(64, int(v * s / 64 + 0.5) * 64)
+
+    w, h = _cap(w), _cap(h)
     if max(w, h) > max_side:  # 取整后仍超 → 最长边强制等于上限
         w = max_side if w >= h else w
         h = max_side if h > w else h
@@ -123,8 +160,21 @@ def frame_step_for(model: str) -> int:
     n = (model or "").lower()
     if "ltx" in n:
         return 8
-    if any(k in n for k in ("wan", "hunyuan", "svd", "i2v", "t2v", "cogvideo",
-                            "mochi", "framepack", "animatediff", "dynamicrafter")):
+    if any(
+        k in n
+        for k in (
+            "wan",
+            "hunyuan",
+            "svd",
+            "i2v",
+            "t2v",
+            "cogvideo",
+            "mochi",
+            "framepack",
+            "animatediff",
+            "dynamicrafter",
+        )
+    ):
         return 4
     return 1
 
@@ -155,9 +205,20 @@ def probe_video_audio_durations(path: str | Path) -> tuple[float, float]:
         return 0.0, 0.0
     try:
         out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration",
-             "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=30).stdout
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type,duration",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
     except Exception:
         return 0.0, 0.0
     v = a = 0.0
@@ -190,12 +251,14 @@ def _cv2():
     """惰性导入 OpenCV（可选依赖）；未安装返回 None。"""
     try:
         import cv2  # noqa: F401  可选依赖：用于抽帧 / 无 ffmpeg 时合成视频
+
         return cv2
     except Exception:
         return None
 
 
 _FFMPEG_PREPARED = False
+_FFMPEG_LOCK = threading.Lock()
 
 
 def ensure_ffmpeg_on_path() -> str | None:
@@ -204,6 +267,11 @@ def ensure_ffmpeg_on_path() -> str | None:
     优先级：系统 PATH 中的 ffmpeg → `imageio-ffmpeg` 自带的静态 ffmpeg（pip 安装，无需系统安装）。
     自带二进制文件名不是 `ffmpeg`，这里将其链接/复制为一个名为 `ffmpeg` 的文件并加入 PATH，
     使 drawthings-py 等内部 subprocess 调用也能找到它。返回可用路径或 None。
+
+    线程安全：首次准备会同时改 PATH 和建 symlink，两个并发生成线程一起进来时，
+    输家 symlink_to 抛 FileExistsError → 落到 copy2，而此时 link 已是指向 src 的
+    symlink → SameFileError → 整个 except 吞掉返回 None → 该线程误判「没有 ffmpeg」，
+    悄悄退到 OpenCV 无音轨合成。故整段加锁。
     """
     global _FFMPEG_PREPARED
     exe = shutil.which("ffmpeg")
@@ -212,27 +280,38 @@ def ensure_ffmpeg_on_path() -> str | None:
         return exe
     if _FFMPEG_PREPARED:
         return shutil.which("ffmpeg")
-    try:
-        import imageio_ffmpeg
-        src = imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        return None
-    try:
-        if not (src and Path(src).is_file()):
+    with _FFMPEG_LOCK:
+        # 双检：等锁期间可能已被别的线程准备好
+        exe = shutil.which("ffmpeg")
+        if exe:
+            _FFMPEG_PREPARED = True
+            return exe
+        try:
+            import imageio_ffmpeg
+
+            src = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
             return None
-        d = Path(tempfile.gettempdir()) / "dts_ffbin"
-        d.mkdir(parents=True, exist_ok=True)
-        link = d / "ffmpeg"
-        if not link.is_file():
-            try:
-                link.symlink_to(src)
-            except Exception:
-                shutil.copy2(src, link)
-        os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
-        _FFMPEG_PREPARED = True
-        return shutil.which("ffmpeg")
-    except Exception:
-        return None
+        try:
+            if not (src and Path(src).is_file()):
+                return None
+            d = Path(tempfile.gettempdir()) / "dts_ffbin"
+            d.mkdir(parents=True, exist_ok=True)
+            link = d / "ffmpeg"
+            if not (link.is_file() or link.is_symlink()):
+                try:
+                    link.symlink_to(src)
+                except FileExistsError:
+                    pass  # 别的线程刚建好
+                except OSError:
+                    shutil.copy2(src, link)
+            elif link.is_symlink():
+                pass  # 已就绪，不要 copy2 到自身（SameFileError）
+            os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+            _FFMPEG_PREPARED = True
+            return shutil.which("ffmpeg")
+        except Exception:
+            return None
 
 
 def _frames_to_video_cv2(result, out_path: Path, fps: int) -> bool:
@@ -241,30 +320,33 @@ def _frames_to_video_cv2(result, out_path: Path, fps: int) -> bool:
     if cv2 is None:
         return False
     try:
-        frames = []
+        vw = None
+        h = w = 0
         for i in range(len(result)):
             tmp = Path(out_path).parent / f"_f_{uuid.uuid4().hex[:8]}.png"
-            result[i].to_file(str(tmp))
-            img = cv2.imread(str(tmp))
             try:
-                tmp.unlink()
-            except Exception:
-                pass
-            if img is not None:
-                frames.append(img)
-        if not frames:
-            return False
-        h, w = frames[0].shape[:2]
-        vw = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"),
-                             float(fps or 25), (w, h))
-        if not vw.isOpened():
-            return False
-        try:
-            for f in frames:
-                vw.write(f)
-        finally:
+                result[i].to_file(str(tmp))
+                img = cv2.imread(str(tmp))
+                if img is None:
+                    continue
+                if vw is None:
+                    h, w = img.shape[:2]
+                    vw = cv2.VideoWriter(
+                        str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), float(fps or 25), (w, h)
+                    )
+                    if not vw.isOpened():
+                        vw.release()
+                        vw = None
+                        return False
+                vw.write(img)  # 边解码边写，不把全部帧留在内存
+            finally:
+                try:
+                    tmp.unlink()  # 失败路径也清（否则残留 _f_*.png）
+                except OSError:
+                    pass
+        if vw is not None:
             vw.release()
-        return Path(out_path).is_file()
+        return Path(out_path).is_file() and Path(out_path).stat().st_size > 0
     except Exception as e:
         logger.warning("OpenCV 合成视频失败：%s", e)
         return False
@@ -293,17 +375,47 @@ def concat_videos(video_paths: list[str], out_path: Path) -> bool:
                 ap = Path(p).resolve().as_posix().replace("'", "'\\''")
                 fh.write(f"file '{ap}'\n")
         # 1) 流拷贝（编码一致时最快且保留音轨）
-        cmd = [exe, "-y", "-hide_banner", "-loglevel", "error",
-               "-f", "concat", "-safe", "0", "-i", str(listfile),
-               "-c", "copy", str(out_path)]
-        proc = subprocess.run(cmd, capture_output=True)
+        cmd = [
+            exe,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listfile),
+            "-c",
+            "copy",
+            str(out_path),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, timeout=CONCAT_TIMEOUT)
         if proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0:
             return True
         # 2) 流拷贝失败（各段编码不一致等）：统一重编码为 h264/aac
-        cmd = [exe, "-y", "-hide_banner", "-loglevel", "error",
-               "-f", "concat", "-safe", "0", "-i", str(listfile),
-               "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out_path)]
-        proc = subprocess.run(cmd, capture_output=True)
+        cmd = [
+            exe,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listfile),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(out_path),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, timeout=CONCAT_TIMEOUT)
         if proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0:
             return True
         logger.warning("ffmpeg 合成视频失败：%s", (proc.stderr or b"")[:300])
@@ -318,27 +430,30 @@ def concat_videos(video_paths: list[str], out_path: Path) -> bool:
             pass
 
 
-
-def extract_last_frame(video_path: str, media_dir: Path) -> str | None:
+def extract_last_frame(video_path: str, out_dir: Path | None = None) -> str | None:
     """上一段视频 → 末帧图（供下一段参考 / 喂多模态 LLM）。
 
     图片直接返回；GIF 用 PIL 取最后一帧；视频优先用 **OpenCV** 取末帧（不依赖 ffmpeg），
     OpenCV 不可用时回退 ffmpeg；都失败返回 None（调用方降级为不附带参考帧）。
+
+    产物是**中间文件**（只作为本地路径喂给 DrawThings gRPC，从不落库、不经 HTTP 提供），
+    故默认写到 `data/tmp/`，启动时整体清空——不要写进 MEDIA_DIR，否则会被
+    「孤儿媒体」清理误判，且每次生成都永久堆积一份。
     """
     p = Path(video_path)
     if not p.is_file():
         return None
-    media_dir = Path(media_dir)
+    media_dir = Path(out_dir) if out_dir is not None else TMP_DIR
     media_dir.mkdir(parents=True, exist_ok=True)
     ext = p.suffix.lower()
     if ext in (".png", ".jpg", ".jpeg", ".webp"):
         return str(p)
     if ext == ".gif":
         try:
-            gif = Image.open(p)
-            gif.seek(gif.n_frames - 1)
-            out = media_dir / f"lastframe_{uuid.uuid4().hex[:8]}.png"
-            gif.convert("RGB").save(out)
+            with Image.open(p) as gif:
+                gif.seek(gif.n_frames - 1)
+                out = media_dir / f"lastframe_{uuid.uuid4().hex[:8]}.png"
+                gif.convert("RGB").save(out)
             return str(out)
         except Exception:
             return None
@@ -379,9 +494,22 @@ def extract_last_frame(video_path: str, media_dir: Path) -> str | None:
     out = media_dir / f"lastframe_{uuid.uuid4().hex[:8]}.png"
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.5",
-             "-i", str(p), "-frames:v", "1", str(out)],
-            check=True, timeout=60)
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-sseof",
+                "-0.5",
+                "-i",
+                str(p),
+                "-frames:v",
+                "1",
+                str(out),
+            ],
+            check=True,
+            timeout=60,
+        )
         return str(out) if out.is_file() else None
     except Exception:
         return None
@@ -413,9 +541,9 @@ def _norm_model(model: str) -> str:
     lightning 预设（30 步跑 4 步蒸馏模型）。改由 `_norm_variants` 以候选键的方式处理。"""
     s = (model or "").lower()
     s = re.sub(r"\.(ckpt|safetensors)$", "", s)
-    sep = r"[._\-\s]"                            # 模型名里可能出现的分隔符：点 / 下划线 / 连字符 / 空格
+    sep = r"[._\-\s]"  # 模型名里可能出现的分隔符：点 / 下划线 / 连字符 / 空格
     s = re.sub(sep + r"(q\d+p|i\d+x|f16|bf16|fp16|f8|q\d|i\d)(?=" + sep + r"|$)", "", s)
-    s = re.sub(r"[\s.\-]+", "_", s)              # 空格 / 点 / 连字符 → 下划线（最后统一，保证查表命中）
+    s = re.sub(r"[\s.\-]+", "_", s)  # 空格 / 点 / 连字符 → 下划线（最后统一，保证查表命中）
     return s.strip("._-")
 
 
@@ -426,7 +554,7 @@ def _norm_variants(model: str) -> list[str]:
     又认 `qwen_image_2512_lightning`（不能剥 `_2512`）。"""
     base = _norm_model(model)
     out = [base]
-    for tail in re.findall(r"_\d+(?:\.\d+)*$", base):     # 如 ["_1_1"] / ["_2512"]
+    for tail in re.findall(r"_\d+(?:\.\d+)*$", base):  # 如 ["_1_1"] / ["_2512"]
         short = base[: -len(tail)]
         if short and short not in out:
             out.append(short)
@@ -434,33 +562,44 @@ def _norm_variants(model: str) -> list[str]:
 
 
 _PRESET_MODEL_MAP: dict[str, str] | None = None
+_PRESET_MAP_LOCK = threading.Lock()
 
 
 def _preset_model_map() -> dict[str, str]:
-    """{归一化模型名: drawthings-py 预设名}（懒加载缓存；未安装返回空）。"""
+    """{归一化模型名: drawthings-py 预设名}（懒加载缓存；未安装返回空）。
+
+    失败时**不缓存**：否则一次偶发导入失败（半装的 wheel、启动期循环导入）会把空 dict
+    钉死到进程结束，之后每次 infer_preset 都返回 "" → 全部报「无法根据模型名推断预设」，
+    且日志里一个字都没有。
+    """
     global _PRESET_MODEL_MAP
     if _PRESET_MODEL_MAP is not None:
         return _PRESET_MODEL_MAP
-    m: dict[str, str] = {}
-    try:
-        from drawthings_py import Configs
-        from drawthings_py.configs.presets import Presets
-        for p in Presets:
-            name = str(p.value)
-            try:
-                model = str(Configs.from_preset(name)["model"] or "")
-            except Exception:
-                continue
-            if model:
-                for key in _norm_variants(model):
-                    cur = m.get(key)
-                    # 同一模型有多个预设时优先非 lightning
-                    if cur is None or ("lightning" in cur and "lightning" not in name):
-                        m[key] = name
-    except Exception:
-        pass
-    _PRESET_MODEL_MAP = m
-    return m
+    with _PRESET_MAP_LOCK:
+        if _PRESET_MODEL_MAP is not None:  # 双重检查：并发生成线程只会算一次
+            return _PRESET_MODEL_MAP
+        m: dict[str, str] = {}
+        try:
+            from drawthings_py import Configs
+            from drawthings_py.configs.presets import Presets
+
+            for p in Presets:
+                name = str(p.value)
+                try:
+                    model = str(Configs.from_preset(name)["model"] or "")
+                except Exception:
+                    continue
+                if model:
+                    for key in _norm_variants(model):
+                        cur = m.get(key)
+                        # 同一模型有多个预设时优先非 lightning
+                        if cur is None or ("lightning" in cur and "lightning" not in name):
+                            m[key] = name
+        except Exception as e:
+            logger.warning("加载 drawthings-py 预设表失败（本次不缓存，下次调用会重试）：%s", e)
+            return {}
+        _PRESET_MODEL_MAP = m
+        return m
 
 
 def infer_preset(model: str) -> str:
@@ -513,14 +652,20 @@ def _model_files(mi) -> set[str]:
     return out
 
 
+_FETCH_TIMEOUT = 20.0  # 取模型清单的超时（秒）：refresh 会拉全量文件，天然比探测慢
+
+
 async def _fetch_models_async(host: str, port: int, refresh: bool = True) -> list[dict]:
     """连接 gRPC 取模型清单（`get_models` 首次可能是空缓存，必须 refresh）。
 
     返回 [{file, name, version, video}]；仅含基座模型（不含 VAE / 文本编码器等 files）。"""
     from drawthings_py import DrawThings
+
     svc = DrawThings.grpc(host=host, port=port, progressbar=False, disable_messages=True)
-    await svc.connect()
+    # connect() 必须在 try 内：drawthings_py 只在 Exception 上自清理，asyncio.CancelledError
+    # （wait_for 超时正是取消在这里）会跳过它 → 每次超时探测泄漏一个 grpclib Channel + socket
     try:
+        await svc.connect()
         mi = await svc.get_models(refresh_cache=refresh)
     finally:
         try:
@@ -530,9 +675,13 @@ async def _fetch_models_async(host: str, port: int, refresh: bool = True) -> lis
     out: list[dict] = []
     for m in getattr(mi, "models", []) or []:
         if isinstance(m, dict):
-            f = str(m.get("file") or ""); nm = str(m.get("name") or ""); ver = str(m.get("version") or "")
+            f = str(m.get("file") or "")
+            nm = str(m.get("name") or "")
+            ver = str(m.get("version") or "")
         else:
-            f = str(getattr(m, "file", "") or ""); nm = str(getattr(m, "name", "") or ""); ver = str(getattr(m, "version", "") or "")
+            f = str(getattr(m, "file", "") or "")
+            nm = str(getattr(m, "name", "") or "")
+            ver = str(getattr(m, "version", "") or "")
         if not f:
             continue
         out.append({"file": f, "name": nm, "version": ver, "video": is_video_model(f)})
@@ -540,12 +689,12 @@ async def _fetch_models_async(host: str, port: int, refresh: bool = True) -> lis
 
 
 def fetch_models(host: str, port: int, refresh: bool = True) -> list[dict]:
-    """同步包装：gRPC 模型清单。"""
-    return asyncio.run(_fetch_models_async(host, port, refresh))
+    """同步包装：gRPC 模型清单（带超时——否则半死的端点会永久占住一个 anyio 线程）。"""
+    return asyncio.run(asyncio.wait_for(_fetch_models_async(host, port, refresh), _FETCH_TIMEOUT))
 
 
-_PROBE_TTL = 3.0   # 在线检测结果缓存秒数：配置页多张卡片同时检测时避免反复建连
-_PROBE_TIMEOUT = 4.0   # 单次检测超时（秒）：离线端点尽快判负，不拖住页面
+_PROBE_TTL = 3.0  # 在线检测结果缓存秒数：配置页多张卡片同时检测时避免反复建连
+_PROBE_TIMEOUT = 4.0  # 单次检测超时（秒）：离线端点尽快判负，不拖住页面
 _PROBE_CACHE: dict[str, tuple[float, dict]] = {}
 
 
@@ -562,10 +711,12 @@ def probe_endpoint(host: str, port: int, timeout: float = _PROBE_TIMEOUT) -> dic
 
     async def _probe() -> int:
         from drawthings_py import DrawThings
+
         svc = DrawThings.grpc(host=host, port=port, progressbar=False, disable_messages=True)
-        await svc.connect()
+        # connect() 放进 try：CancelledError（wait_for 超时）也要走 close，否则泄漏 Channel
         try:
-            mi = await svc.get_models(refresh_cache=False)   # 不刷新缓存：只读 app 当前可见的模型
+            await svc.connect()
+            mi = await svc.get_models(refresh_cache=False)  # 不刷新缓存：只读 app 当前可见的模型
         finally:
             try:
                 await svc.close()
@@ -580,9 +731,15 @@ def probe_endpoint(host: str, port: int, timeout: float = _PROBE_TIMEOUT) -> dic
         online = True
     except Exception as e:
         err = str(e).strip() or e.__class__.__name__
-    out = {"online": online, "models": models,
-           "elapsed_ms": int((time.monotonic() - t0) * 1000), "error": err}
+    out = {
+        "online": online,
+        "models": models,
+        "elapsed_ms": int((time.monotonic() - t0) * 1000),
+        "error": err,
+    }
     _PROBE_CACHE[key] = (time.monotonic(), out)
+    if len(_PROBE_CACHE) > 256:
+        _PROBE_CACHE.clear()  # key 来自 URL 查询参数，天然无限增；超量直接清空（TTL 只挡读）
     return dict(out)
 
 
@@ -594,10 +751,22 @@ def probe_endpoint(host: str, port: int, timeout: float = _PROBE_TIMEOUT) -> dic
 # 之前按 64 的倍数自由下发（如 768×512）虽然比例对、也是 32 的倍数，但绝对尺寸不在
 # 任何原生档上 —— 这正是 qwen 出图字形崩坏的原因。故按比例吸附到原生档。
 _QWEN_NATIVE_SIZES: tuple[tuple[int, int], ...] = (
-    (1024, 1024), (1152, 864), (864, 1152), (1248, 832), (832, 1248), (1536, 864), (864, 1536),
+    (1024, 1024),
+    (1152, 864),
+    (864, 1152),
+    (1248, 832),
+    (832, 1248),
+    (1536, 864),
+    (864, 1536),
 )
 _QWEN_NATIVE_SIZES_2K: tuple[tuple[int, int], ...] = (
-    (2048, 2048), (2400, 1792), (1792, 2400), (2528, 1696), (1696, 2528), (2752, 1536), (1536, 2752),
+    (2048, 2048),
+    (2400, 1792),
+    (1792, 2400),
+    (2528, 1696),
+    (1696, 2528),
+    (2752, 1536),
+    (1536, 2752),
 )
 
 
@@ -618,13 +787,18 @@ def _check_preset_fit(model: str, preset: str, cfg) -> None:
         steps = 0
     fast = any(k in low for k in ("lightning", "turbo", "schnell", "distill"))
     if fast and steps > 8:
-        logger.warning("模型 %s 是少步/蒸馏变体，却匹配到多步预设 %s（%d 步），出图可能严重不对。",
-                       model, preset, steps)
+        logger.warning(
+            "模型 %s 是少步/蒸馏变体，却匹配到多步预设 %s（%d 步），出图可能严重不对。", model, preset, steps
+        )
     fx = _family_fixups(model)
     if fx and not _same_version_family(low, preset):
-        logger.warning("模型 %s 疑似比预设 %s 更新，参数未必适配（已按族修正：%s）。"
-                       "若出图仍异常，说明该版本尚无配套预设，属预期内。",
-                       model, preset, ", ".join(f"{k}={v}" for k, v in fx.items()))
+        logger.warning(
+            "模型 %s 疑似比预设 %s 更新，参数未必适配（已按族修正：%s）。"
+            "若出图仍异常，说明该版本尚无配套预设，属预期内。",
+            model,
+            preset,
+            ", ".join(f"{k}={v}" for k, v in fx.items()),
+        )
     try:
         guidance = cfg["guidance"]
     except Exception:
@@ -645,7 +819,7 @@ def _native_size(model: str, w: int, h: int, max_side: int) -> tuple[int, int] |
     if "qwen" not in (model or "").lower():
         return None
     table = _QWEN_NATIVE_SIZES_2K if max_side and max_side >= 2048 else _QWEN_NATIVE_SIZES
-    tw, th = (w, h) if (w and h) else (1, 1)            # 未指定尺寸 → 按 1:1
+    tw, th = (w, h) if (w and h) else (1, 1)  # 未指定尺寸 → 按 1:1
     want = tw / th
     return min(table, key=lambda s: abs(math.log((s[0] / s[1]) / want)))
 
@@ -673,12 +847,12 @@ class DrawThingsClient:
         self.host, self.port = parse_endpoint(getattr(cfg, "base_url", ""))
         self.model_image = str(getattr(cfg, "model_image", "") or "").strip()
         self.model_video = str(getattr(cfg, "model_video", "") or "").strip()
-        self.max_side = 0             # 功能级（随项目 / 作品走，见 build_drawthings_client）
-        self.max_seconds = 0# 功能级视频秒数上限（同上）
-        self.max_steps_image = 0   # 功能级（随模型走，见 build_drawthings_client）
-        self.max_steps_video = 0   # 图像 / 视频分开，两者步数需求差别很大
-        self.ref_image = bool(getattr(cfg, "ref_image", 0))   # 图像模型支持参考图片（图生图）
-        self.ref_video = bool(getattr(cfg, "ref_video", 0))   # 视频模型支持参考图片（图生视频）
+        self.max_side = 0  # 功能级（随项目 / 作品走，见 build_drawthings_client）
+        self.max_seconds = 0  # 功能级视频秒数上限（同上）
+        self.max_steps_image = 0  # 功能级（随模型走，见 build_drawthings_client）
+        self.max_steps_video = 0  # 图像 / 视频分开，两者步数需求差别很大
+        self.ref_image = bool(getattr(cfg, "ref_image", 0))  # 图像模型支持参考图片（图生图）
+        self.ref_video = bool(getattr(cfg, "ref_video", 0))  # 视频模型支持参考图片（图生视频）
         self.media_dir = Path(data_dir) / "media"
         self.media_dir.mkdir(parents=True, exist_ok=True)
         # 生成过程中的状态回调（如「正在等待 Draw Things 恢复…」）；调用方按需要设置，可为 None
@@ -725,8 +899,7 @@ class DrawThingsClient:
         return "video" if self.model_video else "image"
 
     # ---------------- 对外接口 ----------------
-    def generate_image(self, prompt: str, ref_path: str | None = None,
-                       params: dict | None = None) -> str:
+    def generate_image(self, prompt: str, ref_path: str | None = None, params: dict | None = None) -> str:
         """返回生成图片的绝对路径。
         开启「支持参考图片」（ref_image）且 ref_path 非空 = 图生图（参考上一章）；未开启则忽略参考图，按文生图。
         冗余防错：参考图相关的失败（含 Draw Things 图生图闪退缺陷）→ 自动降级为「无参考图」重试一次，
@@ -735,6 +908,8 @@ class DrawThingsClient:
             ref_path = None
         try:
             return asyncio.run(self._generate(prompt, video=False, ref_path=ref_path, params=params or {}))
+        except GenerationCancelled:
+            raise  # 用户取消：绝不能落到下面的降级重试（否则会再发一次完整生成请求）
         except Exception:
             if not ref_path:
                 raise
@@ -742,17 +917,20 @@ class DrawThingsClient:
             self._report("参考图生成失败，已自动改为「无参考图」重试一次…")
             return asyncio.run(self._generate(prompt, video=False, ref_path=None, params=params or {}))
 
-    def generate_video(self, prompt: str, ref_video_path: str | None = None,
-                       params: dict | None = None) -> str:
+    def generate_video(
+        self, prompt: str, ref_video_path: str | None = None, params: dict | None = None
+    ) -> str:
         """返回生成视频的绝对路径。
         开启「支持参考图片」（ref_video）时 ref_video_path = 上一章视频，先抽末帧作为参考（短剧帧连续的关键）；
         未开启则忽略参考图，按文生视频（不抽帧、不传 init_image）。
         冗余防错：参考图相关的失败 → 自动降级为「无参考图」重试一次。"""
         ref_frame = None
         if ref_video_path and self.supports_video_ref():
-            ref_frame = extract_last_frame(ref_video_path, self.media_dir)
+            ref_frame = extract_last_frame(ref_video_path)
         try:
             return asyncio.run(self._generate(prompt, video=True, ref_path=ref_frame, params=params or {}))
+        except GenerationCancelled:
+            raise  # 用户取消：绝不能落到下面的降级重试（否则会再发一次完整生成请求）
         except Exception:
             if not ref_frame:
                 raise
@@ -777,10 +955,21 @@ class DrawThingsClient:
         if corrected == fps or not (_FPS_MIN <= corrected <= _FPS_MAX):
             logger.warning(
                 "视频音画不同步：模型 %s 视频 %.2fs / 音轨 %.2fs（反推帧率 %s，不可靠时不改文件）。"
-                "请为该模型补充帧率。", model, v_dur, a_dur, corrected)
+                "请为该模型补充帧率。",
+                model,
+                v_dur,
+                a_dur,
+                corrected,
+            )
             return fps
-        logger.warning("视频音画不同步：模型 %s 视频 %.2fs / 音轨 %.2fs，帧率 %s → %s 重新封装",
-                       model, v_dur, a_dur, fps, corrected)
+        logger.warning(
+            "视频音画不同步：模型 %s 视频 %.2fs / 音轨 %.2fs，帧率 %s → %s 重新封装",
+            model,
+            v_dur,
+            a_dur,
+            fps,
+            corrected,
+        )
         try:
             result.to_video(str(out), fps=corrected)
         except Exception as e:
@@ -797,14 +986,16 @@ class DrawThingsClient:
             from drawthings_py import Configs
         except Exception as e:  # 未安装 drawthings-py
             raise RuntimeError(
-                "未安装 drawthings-py，无法使用 Draw Things。请 `pip install \"drawthings-py[ffmpeg]\"`。"
-                f" / drawthings-py is not installed ({e})")
+                '未安装 drawthings-py，无法使用 Draw Things。请 `pip install "drawthings-py[ffmpeg]"`。'
+                f" / drawthings-py is not installed ({e})"
+            )
         preset = infer_preset(model)
         if not preset:
             raise RuntimeError(
                 f"无法根据模型名「{model}」推断生成预设：该模型不受 drawthings-py 预设支持。"
                 "请改用受支持的模型（如 ltx / flux / z_image / ernie_image / qwen_image / wan / hunyuan 等）。"
-                f" / Cannot infer a preset for model '{model}'.")
+                f" / Cannot infer a preset for model '{model}'."
+            )
         try:
             cfg = Configs.from_preset(preset)
         except Exception as e:
@@ -826,7 +1017,7 @@ class DrawThingsClient:
             except Exception:
                 pass
         try:
-            _log = "steps=%s guidance=%s" % (cfg["steps"], cfg["guidance"])
+            _log = f"steps={cfg['steps']} guidance={cfg['guidance']}"
         except Exception:
             _log = ""
         logger.info("生成参数：%s %s → 预设 %s（%s）", "视频" if video else "图像", model, preset, _log)
@@ -835,8 +1026,7 @@ class DrawThingsClient:
     async def _port_open(self, timeout: float = 2.0) -> bool:
         """探测 DrawThings gRPC 端口是否可达（快速判断 app 存活 / 已闪退）。"""
         try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port), timeout)
+            _, writer = await asyncio.wait_for(asyncio.open_connection(self.host, self.port), timeout)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -892,16 +1082,26 @@ class DrawThingsClient:
             now = time.monotonic()
             if now - last_report >= 10:
                 last_report = now
-                self._report(f"正在等待 Draw Things 恢复…（已等待 {int(now - t0)}s / 上限 {RECOVERY_TIMEOUT:.0f}s）")
+                self._report(
+                    f"正在等待 Draw Things 恢复…（已等待 {int(now - t0)}s / 上限 {RECOVERY_TIMEOUT:.0f}s）"
+                )
             await asyncio.sleep(RECOVERY_POLL)
         return False
 
-    async def _retry_video_fewer_frames(self, cfg, req, prompt: str, ref_path,
-                                        info: str, first_err: Exception,
-                                        avail_video: list[str] | None = None):
+    async def _retry_video_fewer_frames(
+        self,
+        cfg,
+        req,
+        prompt: str,
+        ref_path,
+        info: str,
+        first_err: Exception,
+        avail_video: list[str] | None = None,
+    ):
         """视频「无帧返回」时按更少帧数重试一次（帧数减半并落到合法帧步长）。
         成功返回结果；仍失败则抛出带排查提示的错误。"""
         from drawthings_py import DrawThings, RequestBuilder
+
         model = self._model_for(True)
         step = frame_step_for(model)
         try:
@@ -920,8 +1120,7 @@ class DrawThingsClient:
                 req2.init_image(ref_path)
             except Exception:
                 req2 = RequestBuilder(cfg, prompt)
-        svc = DrawThings.grpc(host=self.host, port=self.port,
-                              progressbar=False, disable_messages=True)
+        svc = DrawThings.grpc(host=self.host, port=self.port, progressbar=False, disable_messages=True)
         await svc.connect()
         try:
             result = await self._with_cancel(svc.generate(req2))
@@ -932,7 +1131,8 @@ class DrawThingsClient:
                 raise RuntimeError(self._no_frames_hint(info, e2, reduced=reduced, avail_video=avail_video))
             raise RuntimeError(
                 f"Draw Things 生成失败（降帧重试）：{e2}（本次请求：{info}）"
-                f" / Draw Things generation failed (reduced-frames retry): {e2} (request: {info})")
+                f" / Draw Things generation failed (reduced-frames retry): {e2} (request: {info})"
+            )
         finally:
             try:
                 await svc.close()
@@ -941,14 +1141,17 @@ class DrawThingsClient:
         return result
 
     @staticmethod
-    def _no_frames_hint(info: str, err: Exception, reduced: int = 0,
-                        avail_video: list[str] | None = None) -> str:
+    def _no_frames_hint(
+        info: str, err: Exception, reduced: int = 0, avail_video: list[str] | None = None
+    ) -> str:
         """「无帧返回」的可操作排查提示（Draw Things app 侧原因，非本应用请求错误）。"""
         extra = f"，已自动降帧（{reduced} 帧）重试仍无帧" if reduced else ""
         avail = ""
         if avail_video:
-            avail = (f" 当前 app 内检测到的视频模型：{', '.join(sorted(set(avail_video)))}——"
-                     "若本次所用模型不在此列，说明它未下载/文件名不符，请改用其中的模型。")
+            avail = (
+                f" 当前 app 内检测到的视频模型：{', '.join(sorted(set(avail_video)))}——"
+                "若本次所用模型不在此列，说明它未下载/文件名不符，请改用其中的模型。"
+            )
         return (
             f"Draw Things 未返回任何视频帧（本次请求：{info}{extra}）。"
             "请求已正确送出，属 Draw Things app 侧未产出画面，常见原因与排查："
@@ -957,19 +1160,22 @@ class DrawThingsClient:
             "② 模型显存占用过高（LTX 高分辨率/多帧容易爆显存）——请**降低分辨率或减少帧数/时长**后重试；"
             "③ 该模型/该帧数在 app 内不受支持——换用更短时长或换模型；"
             "④ 先在 Draw Things 里**手动跑一次同类生成**确认可用，再回到本应用重试。"
-            + avail +
-            f" / Draw Things returned no video frames (request: {info}). The request was sent correctly; "
+            + avail
+            + f" / Draw Things returned no video frames (request: {info}). The request was sent correctly; "
             f"this is Draw Things app-side. Check: the model currently selected in Draw Things matches the request; "
-            f"lower resolution/frames (possible OOM); model/frame-count support; run a manual generation first.")
+            f"lower resolution/frames (possible OOM); model/frame-count support; run a manual generation first."
+        )
 
     async def _generate(self, prompt: str, video: bool, ref_path: str | None, params: dict) -> str:
         from drawthings_py import DrawThings, RequestBuilder
+
         model = self._model_for(video)
         if not model:
             kind = "视频" if video else "图像"
             raise RuntimeError(
                 f"未配置{kind}模型：请在 DrawThings 配置里填写{kind}模型文件名。"
-                f" / No {kind} model configured.")
+                f" / No {kind} model configured."
+            )
         cfg = self._gen_config(model, video)
         # 尺寸：图片 = 调用方 params > 预设，再受 max_side 限幅；视频尺寸由预设/模型决定
         # 帧率：预设**显式声明**优先，否则按模型族推断。
@@ -993,9 +1199,15 @@ class DrawThingsClient:
                 # 原生档位优先于 max_side：非原生尺寸出的图本身就是坏的（qwen 文字崩坏），
                 # 宁可超出软上限也要落在原生档。
                 if self.max_side and max(native) > self.max_side:
-                    logger.warning("模型 %s 只在原生分辨率下正常，已用 %dx%d 超过最大分辨率 %d；"
-                                   "请把「最大分辨率」调到 %d 以上，否则出图布局会崩。",
-                                   model, native[0], native[1], self.max_side, max(native))
+                    logger.warning(
+                        "模型 %s 只在原生分辨率下正常，已用 %dx%d 超过最大分辨率 %d；"
+                        "请把「最大分辨率」调到 %d 以上，否则出图布局会崩。",
+                        model,
+                        native[0],
+                        native[1],
+                        self.max_side,
+                        max(native),
+                    )
                 w, h = native
             elif w and h and self.max_side:
                 w, h = cap_size(w, h, self.max_side)
@@ -1029,7 +1241,7 @@ class DrawThingsClient:
             # 硬上限 = 生效上限（配置 max_seconds，封顶内置 10s）换算的帧数；显式 num_frames 也不得越过。
             hard = max(1, int(fps * cap_sec))
             if frames > hard:
-                frames = snap_frames(hard, step, "floor")   # 硬上限以下的最大合法帧数
+                frames = snap_frames(hard, step, "floor")  # 硬上限以下的最大合法帧数
             frames = min(frames, hard)
             cfg["num_frames"] = max(1, frames)
             # 尺寸：调用方 params > 预设（0 = 用预设），再受 max_side（最长边）限幅 —— 与图片分支一致，
@@ -1069,19 +1281,22 @@ class DrawThingsClient:
             if _all and model not in _all:
                 # 名称不完全匹配：再试「归一化」匹配（忽略量化后缀 / 版本号，q6p vs q8p 等）。
                 # 命中 → 说明这是同一模型的其它量化：用 app 里**实际存在**的文件名替换后继续
-                #（app 只会加载它已有的文件名；发送不存在的文件名会「无帧返回」）。
+                # （app 只会加载它已有的文件名；发送不存在的文件名会「无帧返回」）。
                 near = sorted(f for f in _all if _norm_model(f) == _norm_model(model))
                 if not near:
                     raise RuntimeError(
                         f"模型「{model}」不在 Draw Things 的模型列表中（请确认文件名，或在 Draw Things 内下载该模型）。"
                         + (f" 可用视频模型：{', '.join(sorted(avail_video))}。" if avail_video else "")
-                        + f" / Model '{model}' is not in Draw Things' model list.")
+                        + f" / Model '{model}' is not in Draw Things' model list."
+                    )
                 # 优先与原请求同量化/同扩展名的候选，否则取第一个
-                pick = next((f for f in near if f == model), None) or \
-                       next((f for f in near if Path(f).suffix == Path(model).suffix), near[0])
+                pick = next((f for f in near if f == model), None) or next(
+                    (f for f in near if Path(f).suffix == Path(model).suffix), near[0]
+                )
                 self._report(f"请求模型「{model}」本机不存在，改用同族模型「{pick}」生成…")
-                logger.warning("请求模型「%s」不在 app 列表，自动改用同族文件「%s」（候选：%s）",
-                                model, pick, near)
+                logger.warning(
+                    "请求模型「%s」不在 app 列表，自动改用同族文件「%s」（候选：%s）", model, pick, near
+                )
                 model = pick
                 cfg["model"] = pick
         except RuntimeError:
@@ -1115,8 +1330,7 @@ class DrawThingsClient:
 
         async def _attempt():
             """一次完整生成：连接 → 校验模型 → 生成（finally 保证关闭连接）。"""
-            svc = DrawThings.grpc(host=self.host, port=self.port,
-                                  progressbar=False, disable_messages=True)
+            svc = DrawThings.grpc(host=self.host, port=self.port, progressbar=False, disable_messages=True)
             await svc.connect()
             try:
                 return await svc.generate(req)
@@ -1136,27 +1350,36 @@ class DrawThingsClient:
                 if video and _is_no_frames(e):
                     # 视频「无帧返回」常见于本次帧数/尺寸对当前 app 状态过大（显存不足）：
                     # 自动降帧重试一次（减半，仍受合法帧步长约束），成功则继续；仍失败则抛排查提示。
-                    result = await self._retry_video_fewer_frames(cfg, req, prompt, ref_path,
-                                                                  _info, e, avail_video)
+                    result = await self._retry_video_fewer_frames(
+                        cfg, req, prompt, ref_path, _info, e, avail_video
+                    )
                 else:
                     # 附带本次请求摘要后抛出（便于定位「No images received」等）
                     raise RuntimeError(
                         f"Draw Things 生成失败：{e}（本次请求：{_info}）"
-                        f" / Draw Things generation failed: {e} (request: {_info})")
+                        f" / Draw Things generation failed: {e} (request: {_info})"
+                    )
             else:
                 # 连接中断 / app 已掉线：Draw Things 图生图闪退的已知缺陷（社区 issue #121）
                 # → 等待用户重启 app，自动重试生成（最多 MAX_RECOVERY_RETRIES 轮）
                 last = e
                 for retry in range(1, MAX_RECOVERY_RETRIES + 1):
-                    logger.warning("DrawThings 连接中断（app 可能已闪退），等待恢复（第 %d/%d 轮重试）：%s",
-                                    retry, MAX_RECOVERY_RETRIES, e)
-                    self._report(f"与 Draw Things 的连接中断（app 可能已闪退），正在等待 app 重启后自动重试…（第 {retry}/{MAX_RECOVERY_RETRIES} 轮）")
+                    logger.warning(
+                        "DrawThings 连接中断（app 可能已闪退），等待恢复（第 %d/%d 轮重试）：%s",
+                        retry,
+                        MAX_RECOVERY_RETRIES,
+                        e,
+                    )
+                    self._report(
+                        f"与 Draw Things 的连接中断（app 可能已闪退），正在等待 app 重启后自动重试…（第 {retry}/{MAX_RECOVERY_RETRIES} 轮）"
+                    )
                     if not await self._wait_recovery():
                         raise RuntimeError(
                             f"与 Draw Things 应用的连接中断（app 可能已闪退），等待 {RECOVERY_TIMEOUT:.0f} 秒后仍未恢复。"
                             "请重启 Draw Things 后重试本次生成。"
                             f" / Draw Things connection was interrupted (the app may have crashed); "
-                            f"it did not recover within {RECOVERY_TIMEOUT:.0f}s. Please restart Draw Things and retry.")
+                            f"it did not recover within {RECOVERY_TIMEOUT:.0f}s. Please restart Draw Things and retry."
+                        )
                     logger.info("DrawThings 已恢复，自动重试生成（第 %d/%d 轮）", retry, MAX_RECOVERY_RETRIES)
                     self._report(f"Draw Things 已恢复，自动重试生成（第 {retry}/{MAX_RECOVERY_RETRIES} 轮）")
                     await asyncio.sleep(RECOVERY_SETTLE)  # 刚重启的 app 先稳定几秒
@@ -1173,14 +1396,16 @@ class DrawThingsClient:
                                 raise
                             raise RuntimeError(
                                 f"Draw Things 生成失败（恢复后自动重试）：{e2}"
-                                f" / Draw Things generation failed (auto-retry after recovery): {e2}")
+                                f" / Draw Things generation failed (auto-retry after recovery): {e2}"
+                            )
                 else:
                     # 每轮重试都再次闪退 / 失败：如实报错
                     if isinstance(last, RuntimeError):
                         raise last
                     raise RuntimeError(
                         f"Draw Things 生成失败（恢复后自动重试 {MAX_RECOVERY_RETRIES} 轮仍失败）：{last}"
-                        f" / Draw Things generation failed (still failing after {MAX_RECOVERY_RETRIES} auto-retries): {last}")
+                        f" / Draw Things generation failed (still failing after {MAX_RECOVERY_RETRIES} auto-retries): {last}"
+                    )
 
         if video:
             out = self.media_dir / f"gen_{uuid.uuid4().hex[:8]}.mp4"
@@ -1200,7 +1425,8 @@ class DrawThingsClient:
                     f"视频合成失败：未找到可用的 ffmpeg，且 OpenCV 合成不可用（本次请求：{_info}）。"
                     "请安装 opencv-python（或 ffmpeg：brew install ffmpeg）后重试。"
                     " / Failed to assemble video: no usable ffmpeg and OpenCV unavailable "
-                    f"(request: {_info}). Install opencv-python.")
+                    f"(request: {_info}). Install opencv-python."
+                )
             # 音画同步自检（仅 ffmpeg 合成含音轨时有意义；无 ffprobe 时内部自动跳过）
             self._remux_if_av_desynced(result, out, fps, model)
             return str(out)
@@ -1223,11 +1449,18 @@ def norm_ref_flag(v) -> int | None:
     return 1 if str(v).strip().lower() in ("1", "true", "yes", "on") else 0
 
 
-def build_drawthings_client(cfg, data_dir: Path,
-                             model_image: str = "", model_video: str = "",
-                             ref_image: int | None = None, ref_video: int | None = None,
-                             max_steps_image: int = 0, max_steps_video: int = 0,
-                             max_side: int = 0, max_seconds: int = 0) -> DrawThingsClient:
+def build_drawthings_client(
+    cfg,
+    data_dir: Path,
+    model_image: str = "",
+    model_video: str = "",
+    ref_image: int | None = None,
+    ref_video: int | None = None,
+    max_steps_image: int = 0,
+    max_steps_video: int = 0,
+    max_side: int = 0,
+    max_seconds: int = 0,
+) -> DrawThingsClient:
     """构造 Draw Things 客户端（仅 gRPC）。
 
     model_image / model_video：功能级模型覆盖（项目 / 微创作各自选模型）：

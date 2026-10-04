@@ -1,0 +1,39 @@
+name: CI
+
+# 轻量质量关卡：lint / 单测 / 契约校验 / 前端语法。任何 PR 或 main 推送都跑。
+# 依赖装到最小集合即可覆盖测试 import 链（无需 pywebview / drawthings-py / opencv 等重依赖）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install minimal deps (test import chain)
+        run: |
+          pip install --quiet "fastapi>=0.110" sqlalchemy pillow "pydantic-ai>=2.42" \
+            openai httpx "httpx2>=2.0" jinja2 python-multipart pytest ruff
+
+      - name: ruff lint
+        run: python -m ruff check .
+
+      - name: ruff format check (必须零 diff)
+        run: python -m ruff format --check .
+
+      - name: pytest
+        run: python -m pytest
+
+      - name: contract check (events + comic/drama symmetry)
+        run: python tools/check_contracts.py
+
+      - name: JS syntax check
+        run: |
+          for f in $(git ls-files 'static/spa/**/*.js'); do node --check "$f"; done

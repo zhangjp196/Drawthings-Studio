@@ -7,6 +7,7 @@
 启动时加载 `.env`（若存在；不覆盖已有环境变量）：优先当前工作目录，其次项目根 / 应用支持目录。
 这样 `cp .env.example .env` 后 DATA_DIR / HOST / PORT / LOG_LEVEL 会真正生效。
 """
+
 import os
 import sys
 from pathlib import Path
@@ -73,6 +74,6 @@ def env_int(name: str, default: int = 0) -> int:
         return int(v)
     except (TypeError, ValueError):
         import logging
-        logging.getLogger("drawthings").warning(
-            "环境变量 %s=%r 不是整数，使用默认值 %s", name, v, default)
+
+        logging.getLogger("drawthings").warning("环境变量 %s=%r 不是整数，使用默认值 %s", name, v, default)
         return default

@@ -287,8 +287,7 @@
 - **SQLite WAL 模式**：读写不互斥，`synchronous=NORMAL` 减少 fsync，`busy_timeout` 抗锁竞争。
 - **常用索引**：`chapters.project_id`、`projects.status/kind/created_at`。
 - **响应压缩**：JSON/HTML/CSS/JS 走 GZip（`GZipMiddleware`，>500B 才压缩）。
-- **静态缓存**：`/static/*`（含 vendor 依赖与 SPA 文件）带 `Cache-Control: max-age=3600`；
-  SPA 外壳返回 `no-cache`（依赖路径变化即时生效）。
+- **静态缓存**：`/static/vendor/*` 与 `/media/*` 带 `Cache-Control: max-age=31536000, immutable`（一年强缓存，媒体自带 mtime 版本号）；`/static/spa/*` 为 `no-cache`（改码即生效，命中 304）。
 - **图片懒加载**：章节图 `loading="lazy"`；列表/作品页按需拉取 JSON，媒体不随列表下发。
 - **本地响应**：API 均为本地调用，页面数据毫秒级返回。
 

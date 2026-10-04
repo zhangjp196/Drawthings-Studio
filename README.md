@@ -329,7 +329,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 - **SQLite WAL mode**: reads and writes don't block each other; `synchronous=NORMAL` reduces fsyncs; `busy_timeout` resists lock contention.
 - **Common indexes**: `chapters.project_id`, `projects.status/kind/created_at`.
 - **Response compression**: JSON/HTML/CSS/JS go through GZip (`GZipMiddleware`, only >500B is compressed).
-- **Static caching**: `/static/*` (vendor deps + SPA files) gets `Cache-Control: max-age=3600`;
+- **Static caching**: `/static/vendor/*` and `/media/*` get `Cache-Control: max-age=31536000, immutable` (media carries an mtime version); `/static/spa/*` is `no-cache` (code changes take effect immediately, hits 304).
   the SPA shell returns `no-cache` (so path changes take effect immediately).
 - **Image lazy loading**: chapter images use `loading="lazy"`; list/work pages fetch JSON on demand; media is not bundled with lists.
 - **Local responsiveness**: all APIs are local calls, so page data returns in milliseconds.

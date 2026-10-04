@@ -4,9 +4,10 @@
 本模块只放它们都会用到的「基础设施级」工具（角色设定解析 / 时间 / 线程池 / 字体探测等），
 不含任何漫画或短剧的业务逻辑。
 """
+
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
@@ -16,14 +17,23 @@ MAX_SCORE_REDO = 2
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-async def run_sync(func, *args):
+async def run_sync(func, *args, **kwargs):
     """把同步阻塞调用放到线程池执行（生图/生视频、ffmpeg、读图编码、HTTP 探测）。
 
-    pipeline 与 main 中所有阻塞型调用统一走这里，避免占用事件循环导致并发请求卡顿。"""
-    return await anyio.to_thread.run_sync(func, *args)
+    pipeline 与 main 中所有阻塞型调用统一走这里，避免占用事件循环导致并发请求卡顿。
+
+    用自己的 CapacityLimiter（8）而不是默认 40：`anyio.to_thread` 默认限制器与
+    Starlette 的同步 def 路由**共用同一把线程池**。生图一次要占住一个线程几分钟，
+    卡进去 40 个并发生成就会把 /media、/api/dt-status、导出等全部同步路由饿死。"""
+    return await anyio.to_thread.run_sync(func, *args, limiter=_GEN_LIMITER, **kwargs)
+
+
+# 并发生成上限（图片 / 视频）：本地单机 GPU 同一时间本来也跑不了几个，8 足够并行批处理，
+# 同时保证同步路由（media 服务 / 探测 / 导出）始终有线程可用。
+_GEN_LIMITER = anyio.CapacityLimiter(8)
 
 
 # 封面自动模式叠加作品名称用的中文字体：按系统取第一个存在的（结果缓存，避免反复探盘）
@@ -80,12 +90,14 @@ def chars_from_raw(raw: str) -> list[dict]:
         for item in data:
             if not isinstance(item, dict):
                 continue
-            out.append({
-                "id": str(item.get("id") or "") or uuid.uuid4().hex[:12],
-                "name": str(item.get("name") or "").strip(),
-                "description": str(item.get("description") or "").strip(),
-                "image": str(item.get("image") or "").strip(),
-            })
+            out.append(
+                {
+                    "id": str(item.get("id") or "") or uuid.uuid4().hex[:12],
+                    "name": str(item.get("name") or "").strip(),
+                    "description": str(item.get("description") or "").strip(),
+                    "image": str(item.get("image") or "").strip(),
+                }
+            )
         return out
     return [{"id": uuid.uuid4().hex[:12], "name": "", "description": raw, "image": ""}]
 
@@ -113,9 +125,18 @@ DEFAULT_COUNT_MIN, DEFAULT_COUNT_MAX = 6, 12
 
 
 def count_range(count_min, count_max) -> tuple[int, int]:
-    """规范化章节数量范围 (lo, hi)：未设置（0/None）时回退默认 6~12；hi 不小于 lo。"""
-    lo = int(count_min or 0) or DEFAULT_COUNT_MIN
-    hi = int(count_max or 0) or DEFAULT_COUNT_MAX
+    """规范化章节数量范围 (lo, hi)：未设置（0/None）时回退默认 6~12；hi 不小于 lo。
+
+    非法数值（"abc" 之类）回退默认而不是抛异常：这是所有设置弹框数值入参的汇聚点，
+    一旦抛 ValueError 会变成 500（缺少可读的错误），且用户改一个字段就崩保存。"""
+    try:
+        lo = int(count_min or 0) or DEFAULT_COUNT_MIN
+    except (TypeError, ValueError):
+        lo = DEFAULT_COUNT_MIN
+    try:
+        hi = int(count_max or 0) or DEFAULT_COUNT_MAX
+    except (TypeError, ValueError):
+        hi = DEFAULT_COUNT_MAX
     lo = max(1, lo)
     return lo, max(lo, hi)
 

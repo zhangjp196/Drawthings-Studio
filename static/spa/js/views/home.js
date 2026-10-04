@@ -41,6 +41,12 @@ Views.home = {
             </div>
           </div>
         </div>
+        <el-empty v-else-if="loadErr" :image-size="80">
+          <template #default>
+            <p class="muted small mb8">{{ I18N.t('wb.loadFail') }}</p>
+            <el-button size="small" type="primary" plain @click="retry">{{ I18N.t('wb.retry') }}</el-button>
+          </template>
+        </el-empty>
         <el-empty v-else :description="I18N.t('wb.empty')" :image-size="80" />
       </section>
     </div>
@@ -50,9 +56,11 @@ Views.home = {
     const loading = ref(true);
     // 新建创作类型：按钮旁切换（选哪个就是哪个）
     const newKind = ref('comic');
+    const loadErr = ref('');
     function goNew() { router.push('/new/' + newKind.value); }
     async function load() {
       loading.value = true;
+      loadErr.value = '';
       try {
         // 列表已按类型分开：工作台是跨类型的，故各取最近 6 条再合并
         const qs = new URLSearchParams({ page: 1, size: 6, sort: 'active' });
@@ -64,13 +72,16 @@ Views.home = {
         all.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
         projects.value = all.slice(0, 6);
       } catch (e) {
-        /* 工作台加载失败不打断使用（可去「创作中心」重试） */
+        // 网络失败若被静默吞掉会显示成「还没有作品」，误导用户以为没数据
+        loadErr.value = e.message || 'error';
+        projects.value = [];
       } finally {
         loading.value = false;
       }
     }
+    function retry() { load(); }
     function open(p) { router.push(p.kind === 'comic' ? '/comic/' + p.id : '/drama/' + p.id); }
     onMounted(load);
-    return { projects, loading, open, newKind, goNew };
+    return { projects, loading, loadErr, retry, open, newKind, goNew };
   },
 };

@@ -25,6 +25,9 @@ window.Theme = (function () {
   return {
     current: () => cur,
     set,
-    onChange: (f) => listeners.push(f),
+    onChange: (f) => {              // 返回退订函数：组件卸载时必须调用，否则每次进出页面都永久新增监听
+      listeners.push(f);
+      return () => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); };
+    },
   };
 })();

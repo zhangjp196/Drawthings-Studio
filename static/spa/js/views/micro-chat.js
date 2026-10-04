@@ -176,10 +176,11 @@ Views.microChat = {
       pinned = true;
       scrollBottom(true);
     }
+    let alive = true;   // onBeforeUnmount 后置 false：防止 nextTick 回调在卸载后建 observer
     function setupObserver() {
       if (!window.ResizeObserver) return;
       nextTick(() => {
-        if (!chatInner.value) return;
+        if (!alive || !chatInner.value) return;
         if (ro) ro.disconnect();
         ro = new ResizeObserver(() => {
           if (pinned) {
@@ -496,6 +497,7 @@ Views.microChat = {
       });
     });
     onBeforeUnmount(() => {
+      alive = false;
       stopTimer();
       if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; }
       if (ro) { ro.disconnect(); ro = null; }

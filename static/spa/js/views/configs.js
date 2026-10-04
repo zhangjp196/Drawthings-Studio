@@ -63,6 +63,26 @@ Views.configs = {
         </div>
       </section>
 
+      <section class="cfg-sec" id="sec-maint">
+        <div class="cfg-sec-head">
+          <div class="cfg-sec-title">
+            <span class="cfg-ico">🔧</span>
+            {{ I18N.t('mt.title') }}
+          </div>
+        </div>
+        <div class="maint-box">
+          <p class="hint">{{ I18N.t('mt.hint') }}</p>
+          <div class="actions">
+            <el-button plain :loading="mtBusy === 'scan'" @click="scanOrphans">{{ I18N.t('mt.scan') }}</el-button>
+            <el-button plain type="danger" :loading="mtBusy === 'purge'" :disabled="!orphanReport"
+                       @click="purgeOrphans">{{ I18N.t('mt.purge') }}</el-button>
+            <el-button plain :loading="mtBusy === 'backup'" @click="backupDb">{{ I18N.t('mt.backup') }}</el-button>
+            <el-button plain :loading="mtBusy === 'exports'" @click="cleanExports">{{ I18N.t('mt.cleanExports') }}</el-button>
+          </div>
+          <p v-if="orphanReport" class="hint">{{ orphanReport }}</p>
+        </div>
+      </section>
+
       <section class="cfg-sec" id="sec-llm">
         <div class="cfg-sec-head">
           <div class="cfg-sec-title">
@@ -198,6 +218,51 @@ Views.configs = {
     const dlg = ref(false);
     const saving = ref(false);
     const editId = ref('');          // 非空 = 编辑模式（值为配置 id）
+
+    // ---------------- 数据维护（孤儿媒体 / 备份 / 导出清理） ----------------
+    const mtBusy = ref('');
+    const orphanReport = ref('');
+    function fmtMb(n) { return (n / 1024 / 1024).toFixed(1) + ' MB'; }
+    async function scanOrphans() {
+      mtBusy.value = 'scan';
+      try {
+        const d = await API.post('/api/maintenance/scan-orphans');
+        orphanReport.value = d.orphan_count
+          ? I18N.t('mt.orphanFound', d.orphan_count, fmtMb(d.orphan_bytes), fmtMb(d.media_bytes))
+          : I18N.t('mt.orphanNone');
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { mtBusy.value = ''; }
+    }
+    async function purgeOrphans() {
+      if (!orphanReport.value) { ElementPlus.ElMessage.warning(I18N.t('mt.scanFirst')); return; }
+      try { await ElementPlus.ElMessageBox.confirm(I18N.t('mt.purgeConfirm'), I18N.t('mt.title'), { type: 'warning' }); }
+      catch (e) { return; }   // 取消
+      mtBusy.value = 'purge';
+      try {
+        const d = await API.post('/api/maintenance/purge-orphans');
+        orphanReport.value = d.message;
+        ElementPlus.ElMessage.success(d.message);
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { mtBusy.value = ''; }
+    }
+    async function backupDb() {
+      mtBusy.value = 'backup';
+      try {
+        const d = await API.post('/api/maintenance/backup-db');
+        ElementPlus.ElMessage.success(I18N.t('mt.backupDone', d.name));
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { mtBusy.value = ''; }
+    }
+    async function cleanExports() {
+      try { await ElementPlus.ElMessageBox.confirm(I18N.t('mt.exportsConfirm'), I18N.t('mt.title'), { type: 'warning' }); }
+      catch (e) { return; }
+      mtBusy.value = 'exports';
+      try {
+        const d = await API.post('/api/maintenance/clean-exports');
+        ElementPlus.ElMessage.success(d.message);
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { mtBusy.value = ''; }
+    }
     const modelOpts = ref([]);      // 从 /models 拉取的模型 id 列表
     const loadingModels = ref(false);
     const f = reactive({
@@ -270,9 +335,10 @@ Views.configs = {
     // 基础配置（语言/主题为本地偏好，不走后端；默认配置/默认参数存后端）
     const lang = ref(I18N.current());
     const theme = ref(Theme.current());
-    // 顶栏也能切换语言/主题：订阅变更，保持本页单选组同步（不重建组件）
-    I18N.onChange(v => { lang.value = v; });
-    Theme.onChange(v => { theme.value = v; });
+    // 顶栏也能切换语言/主题：订阅变更，保持本页单选组同步（不重建组件）。
+    // onChange 现在返回退订函数，卸载时必须退订，否则每次进 /configs 都永久新增监听
+    const offLang = I18N.onChange(v => { lang.value = v; });
+    const offTheme = Theme.onChange(v => { theme.value = v; });
     const s = reactive({
       default_llm_config_id: '', default_dt_config_id: '',
     });
@@ -331,15 +397,23 @@ Views.configs = {
 
     function openEdit(type, row) {
       editId.value = row.id;
+      // 先重置**全部**字段：否则上一个编辑的 LLM 的 api_key/model/thinking 会残留在 f 里，
+      // save() 把整个 f POST 出去时，会把 LLM 的 api_key 写进 DrawThings 配置行。
+      Object.assign(f, {
+        config_type: type, name: '', base_url: '', api_key: '', model: '',
+        thinking: 'default', thinking_param: 'auto',
+        model_image: '', model_video: '',
+        ref_image: false, ref_video: false,
+      });
       if (type === 'drawthings') {
         Object.assign(f, {
-          config_type: 'drawthings', name: row.name, base_url: row.base_url,
+          name: row.name, base_url: row.base_url,
           model_image: row.model_image || '', model_video: row.model_video || '',
           ref_image: !!row.ref_image, ref_video: !!row.ref_video,
         });
       } else {
         Object.assign(f, {
-          config_type: 'llm', name: row.name, base_url: row.base_url,
+          name: row.name, base_url: row.base_url,
           api_key: '', model: row.model,
           thinking: row.thinking || 'default',
           thinking_param: row.thinking_param || 'auto',
@@ -408,12 +482,17 @@ Views.configs = {
       // 在线徽标轮询：30s 一次（后端有 3s 结果缓存，多个配置同端点只建一次连）；页面隐藏时不打扰
       statusTimer = setInterval(() => { if (!document.hidden) checkAllStatus(); }, 30000);
     });
-    onBeforeUnmount(() => { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } });
+    onBeforeUnmount(() => {
+      offLang && offLang();
+      offTheme && offTheme();
+      if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+    });
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
       urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,
       checkingStatus, checkAllStatus, checkStatusOne, statusText, statusClass, statusTip,
+      mtBusy, orphanReport, scanOrphans, purgeOrphans, backupDb, cleanExports,
     };
   },
 };

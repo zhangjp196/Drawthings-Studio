@@ -28,8 +28,13 @@ Views.createFormComic = {
     const f = reactive({ llm: '', name: '' });
 
     async function load() {
-      const data = await API.get('/api/choices');
-      llms.value = data.llm_configs;
+      try {
+        const data = await API.get('/api/choices');
+        llms.value = data.llm_configs;
+      } catch (e) {
+        llms.value = [];
+        ElementPlus.ElMessage.error(I18N.t('cf.loadFail', e.message));
+      }
       try {
         const s = await API.get('/api/settings');
         if (s.default_llm_config_id && llms.value.some(c => c.id === s.default_llm_config_id)) {

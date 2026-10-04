@@ -1,0 +1,4 @@
+# 开发期依赖（运行期依赖见 pyproject.toml [project].dependencies）
+#   pip install -e ".[dev]"
+ruff>=0.6
+pytest>=8.0

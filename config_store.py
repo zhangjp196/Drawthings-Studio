@@ -2,12 +2,13 @@
 
 由 main.py 按请求传入 db 会话构造（ConfigStore(db)），不持有全局状态。
 """
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import or_
 
-from models import LLMConfig, DrawThingConfig, AppSettings, Project
+from models import AppSettings, DrawThingConfig, LLMConfig, Project
 
 # 基础配置（单行 JSON）：新建创作的默认 LLM / DrawThings 配置
 SETTINGS_DEFAULTS = {
@@ -17,7 +18,7 @@ SETTINGS_DEFAULTS = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ConfigStore:
@@ -25,9 +26,9 @@ class ConfigStore:
         self.db = db
 
     # ---------------- LLM 配置 ----------------
-    def create_llm(self, name, base_url, api_key, model,
-                   supports_vision="yes", thinking="default",
-                   thinking_param="auto") -> LLMConfig:
+    def create_llm(
+        self, name, base_url, api_key, model, supports_vision="yes", thinking="default", thinking_param="auto"
+    ) -> LLMConfig:
         cfg = LLMConfig(
             id=uuid.uuid4().hex[:12],
             name=name,
@@ -45,9 +46,17 @@ class ConfigStore:
         self.db.refresh(cfg)
         return cfg
 
-    def update_llm(self, config_id, name=None, base_url=None, api_key=None,
-                   model=None, supports_vision=None, thinking=None,
-                   thinking_param=None) -> LLMConfig | None:
+    def update_llm(
+        self,
+        config_id,
+        name=None,
+        base_url=None,
+        api_key=None,
+        model=None,
+        supports_vision=None,
+        thinking=None,
+        thinking_param=None,
+    ) -> LLMConfig | None:
         """编辑 LLM 配置：传 None 的字段保持不变（api_key 空串由调用方转 None=保留原值）。"""
         cfg = self.db.get(LLMConfig, config_id)
         if not cfg:
@@ -173,13 +182,18 @@ class ConfigStore:
     # ---------------- 引用检查（删除前）----------------
     def is_referenced(self, config_id) -> bool:
         """某配置是否已被任一项目/微创作作品选用（避免删除后无法运行）。"""
-        n = self.db.query(Project).filter(
-            or_(Project.llm_config_id == config_id, Project.drawthings_config_id == config_id)
-        ).count()
+        n = (
+            self.db.query(Project)
+            .filter(or_(Project.llm_config_id == config_id, Project.drawthings_config_id == config_id))
+            .count()
+        )
         if n:
             return True
         from models import MicroWork
-        n = self.db.query(MicroWork).filter(
-            or_(MicroWork.llm_config_id == config_id, MicroWork.drawthings_config_id == config_id)
-        ).count()
+
+        n = (
+            self.db.query(MicroWork)
+            .filter(or_(MicroWork.llm_config_id == config_id, MicroWork.drawthings_config_id == config_id))
+            .count()
+        )
         return n > 0

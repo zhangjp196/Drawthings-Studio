@@ -734,13 +734,15 @@ Views.projectDrama = {
         }, (ev, d) => {
           if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.planProgress', d.current, d.total, d.title);
           else if (ev === EVENTS.CHAPTER) applyChapterPlan(d);
+          else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('d.planSaved'));
         selected.value = [];
         await load();
       } catch (e) {
-        if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
+        if (e.cancelled) { selected.value = []; await load(); }               // 用户/服务端停止：静默
+        else if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { actBusy.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
@@ -852,6 +854,11 @@ Views.projectDrama = {
     }
 
     // 批量（SSE 进度）
+    // 服务端「停止生成」会通过 DONE{cancelled:true} 结束流（非客户端 abort）；
+    // 用带 cancelled 标记的 Error 让各 SSE 消费端统一走「静默停止」分支，而不是弹「完成」或「失败」。
+    function cancelledErr() {
+      return Object.assign(new Error('cancelled'), { cancelled: true });
+    }
     // 批量生成时单章两步完成：实时把该章提示词/媒体/状态写回本地并跟随定位，页面逐个刷新（后续章节仍会参考它）
     // 自动评分事件：刷新进度文案（评分中 / 低于阈值重做中 / 评分结果）
     function applyScoreLive(d) {
@@ -916,13 +923,14 @@ Views.projectDrama = {
           if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.genProgress', d.current, d.total, d.title);
           else if (ev === EVENTS.SCORE) applyScoreLive(d);
           else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
+          else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         selected.value = [];
         await load();
       } catch (e) {
-        if (ctrl.signal.aborted) { await load(); }  // 用户停止：后端已提交进度，同步刷新
+        if (e.cancelled || ctrl.signal.aborted) { selected.value = []; await load(); }   // 停止：静默
         else { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { busyGenAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
@@ -938,13 +946,14 @@ Views.projectDrama = {
           if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.scoreProgress', d.current, d.total, d.title);
           else if (ev === EVENTS.SCORE) applyScoreLive(d);
           else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
+          else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
           else if (ev === EVENTS.ERROR) throw new Error(d.message);
         }, ctrl.signal);
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         selected.value = [];
         await load();
       } catch (e) {
-        if (ctrl.signal.aborted) { await load(); }  // 用户停止：后端已提交进度，同步刷新
+        if (e.cancelled || ctrl.signal.aborted) { selected.value = []; await load(); }   // 停止：静默
         else { ElementPlus.ElMessage.error(e.message); await load(); }
       }
       finally { busyScoreAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
@@ -1051,7 +1060,15 @@ Views.projectDrama = {
     }
 
     onMounted(load);
-    watch(() => props.id, () => { tabInit.value = false; load(); });  // 同一路由切换不同项目时重载
+    watch(() => props.id, () => {
+      // 同一路由切换不同项目：实例被复用（<component> 无 key），上一个项目的选中态 /
+      // 当前片段 / 侧栏页签必须清掉，否则「生成全部/评分全部」会把上一个项目的序号提交给新项目
+      selected.value = [];
+      cur.value = 0;
+      oSub.value = 'arc';
+      tabInit.value = false;
+      load();
+    });
     onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
       data, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, setScoreFilter, scoreFilterOptions, visibleChapters,

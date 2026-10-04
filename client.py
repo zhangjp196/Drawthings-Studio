@@ -16,6 +16,7 @@
     python client.py            # 自动起服务 + 开原生窗口
     HOST=127.0.0.1 PORT=8010 python client.py   # 可选覆盖
 """
+
 import base64
 import os
 import subprocess
@@ -24,7 +25,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from paths import frozen, resource_root, data_dir, env_int, APP_NAME
+from paths import APP_NAME, data_dir, env_int, frozen, resource_root
 from services.logging_setup import setup_logging
 
 setup_logging()
@@ -49,7 +50,7 @@ def acquire_lock() -> bool:
                 pid = int(LOCK_FILE.read_text().strip() or 0)
                 if pid > 0:
                     os.kill(pid, 0)  # 信号 0 = 仅探测存活
-                    return False     # 旧实例还在 → 拒绝
+                    return False  # 旧实例还在 → 拒绝
             except (ValueError, ProcessLookupError, PermissionError):
                 pass  # 锁文件失效（进程已退出）→ 覆盖
         LOCK_FILE.write_text(str(os.getpid()))
@@ -70,10 +71,13 @@ def release_lock() -> None:
 def _log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
     try:
+        from services.logging_setup import rotating_log_path
+
         p = data_dir() / "client.log"
         p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("a", encoding="utf-8") as f:
-            f.write(line)
+        f = rotating_log_path(p)  # 带大小轮转；临时对象写一次即回收
+        f.write(line)
+        f.flush()
     except Exception:
         pass
     if not frozen():  # 源码模式同时输出到终端
@@ -146,12 +150,14 @@ class NativeApi:
     def notify(self, title: str, message: str = "") -> dict:
         if sys.platform == "darwin":
             _macos_osascript(
-                f'display notification "{_apple_quote(message)}" with title "{_apple_quote(title)}"')
+                f'display notification "{_apple_quote(message)}" with title "{_apple_quote(title)}"'
+            )
         return {"ok": True}
 
     # ---- 外部链接：系统浏览器 ----
     def openExternal(self, url: str) -> dict:
         import webbrowser
+
         if url.startswith(("http://", "https://")):
             webbrowser.open(url)
             return {"ok": True}
@@ -159,9 +165,11 @@ class NativeApi:
 
     # ---- 服务状态 ----
     def serverStatus(self) -> dict:
-        return {"running": self._c.server_healthy(),
-                "base_url": BASE_URL,
-                "started_by_client": self._c.we_started_server}
+        return {
+            "running": self._c.server_healthy(),
+            "base_url": BASE_URL,
+            "started_by_client": self._c.we_started_server,
+        }
 
 
 # ---------------- 客户端主体 ----------------
@@ -181,8 +189,9 @@ class DesktopClient:
     def start_server(self) -> None:
         """拉起本地服务：打包模式复用本 .app 的 --server 服务模式；源码模式 python main.py。"""
         env = dict(os.environ)
-        env.update({"RELOAD": "0", "HOST": HOST, "PORT": str(PORT),
-                    "PARENT_PID": str(os.getpid())})  # 服务端据此监视本客户端存活
+        env.update(
+            {"RELOAD": "0", "HOST": HOST, "PORT": str(PORT), "PARENT_PID": str(os.getpid())}
+        )  # 服务端据此监视本客户端存活
         if frozen():
             cmd, cwd = [sys.executable, "--server"], str(Path.home())
         else:
@@ -194,7 +203,11 @@ class DesktopClient:
         except Exception:
             out = subprocess.DEVNULL
         self.server_proc = subprocess.Popen(
-            cmd, env=env, cwd=cwd, stdout=out, stderr=subprocess.STDOUT,
+            cmd,
+            env=env,
+            cwd=cwd,
+            stdout=out,
+            stderr=subprocess.STDOUT,
         )
         self.we_started_server = True
 
@@ -249,7 +262,9 @@ def main() -> int:
     if not acquire_lock():
         _log("Drawthings Studio is already running.")
         if sys.platform == "darwin":
-            _macos_osascript('display notification "Drawthings Studio is already running" with title "Notice"')
+            _macos_osascript(
+                'display notification "Drawthings Studio is already running" with title "Notice"'
+            )
         return 0
 
     try:
@@ -264,14 +279,19 @@ def main() -> int:
     if not client.server_healthy():
         client.start_server()
         if not client.wait_ready():
-            _log(f"Failed to start local service ({HEALTH_URL} not ready). You can try manually first: python main.py")
+            _log(
+                f"Failed to start local service ({HEALTH_URL} not ready). You can try manually first: python main.py"
+            )
             if sys.platform == "darwin":
-                _macos_osascript('display notification "Failed to start local service. Please check the terminal log" with title "Drawthings Studio"')
+                _macos_osascript(
+                    'display notification "Failed to start local service. Please check the terminal log" with title "Drawthings Studio"'
+                )
             release_lock()
             return 1
 
-    webview.create_window(APP_TITLE, BASE_URL, js_api=NativeApi(client),
-                          width=1280, height=860, min_size=(960, 640))
+    webview.create_window(
+        APP_TITLE, BASE_URL, js_api=NativeApi(client), width=1280, height=860, min_size=(960, 640)
+    )
 
     webview.start()  # Blocks until the window is closed
     client.cleanup()

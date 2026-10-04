@@ -8,6 +8,7 @@
 
 把这些「覆盖规则」集中到这里，避免项目侧与微创作各写一份而漂移。
 """
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from services.drawthings import build_drawthings_client, norm_ref_flag
 @dataclass(frozen=True)
 class Capabilities:
     """一次生成生效的能力：能否出图/出视频 + 是否启用参考图。"""
+
     can_image: bool
     can_video: bool
     ref_image: bool
@@ -45,7 +47,8 @@ def dt_client(cfg, data_dir, subject):
     if not cfg:
         return None
     return build_drawthings_client(
-        cfg, Path(data_dir),
+        cfg,
+        Path(data_dir),
         model_image=_model_override(subject, "dt_model_image"),
         model_video=_model_override(subject, "dt_model_video"),
         ref_image=norm_ref_flag(getattr(subject, "dt_ref_image", "")),

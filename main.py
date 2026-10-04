@@ -11,6 +11,7 @@
 其余路径返回 SPA 外壳（前端路由接管）。
 界面支持中文 / English（前端 I18N 切换 + 后端按 Accept-Language 本地化错误文案）。
 """
+
 import os
 
 # 关闭 pydantic 的第三方插件加载：logfire 的 pydantic 插件会调用 inspect.getsource()，
@@ -20,24 +21,29 @@ os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "__all__")
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
-from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from starlette.middleware.gzip import GZipMiddleware
 
-from paths import resource_root, env_int, APP_NAME
 from config import data_dir
+from config_store import ConfigStore
 from db import engine, get_db, init_db
 from i18n import L
-from config_store import ConfigStore
+from paths import APP_NAME, env_int, resource_root
+from services import api_comic, api_drama, api_maintenance, api_micro
 from services.agent import make_httpx_client
-from services.logging_setup import setup_logging
 from services.api_common import (
-    MEDIA_DIR, _lang, _json_body, _llm_view, _dt_view, _dt_gen_fields,
+    MEDIA_DIR,
+    _dt_gen_fields,
+    _dt_view,
+    _json_body,
+    _lang,
+    _llm_view,
 )
-from services import api_comic, api_drama, api_micro
+from services.logging_setup import setup_logging
 
 setup_logging()  # 统一日志（LOG_LEVEL 控制；重复调用无副作用）
 
@@ -51,7 +57,10 @@ async def _lifespan(app: FastAPI):
     """启动/关闭钩子：启动打印关键信息；关闭释放数据库连接池（进程退出更干净）。"""
     logging.getLogger("drawthings").info(
         "Drawthings Studio 启动：data=%s host=%s port=%s",
-        data_dir, os.getenv("HOST", "127.0.0.1"), os.getenv("PORT", "8010"))
+        data_dir,
+        os.getenv("HOST", "127.0.0.1"),
+        os.getenv("PORT", "8010"),
+    )
     try:
         yield
     finally:
@@ -64,30 +73,37 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title=APP_NAME, lifespan=_lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)  # HTML/CSS/JS 压缩，减少传输体积
-app.include_router(api_comic.router)   # 漫画 API（/api/comics/*）
-app.include_router(api_drama.router)   # 短剧 API（/api/dramas/*）
-app.include_router(api_micro.router)   # 微创作 API（/api/micro/*）
+app.include_router(api_comic.router)  # 漫画 API（/api/comics/*）
+app.include_router(api_drama.router)  # 短剧 API（/api/dramas/*）
+app.include_router(api_micro.router)  # 微创作 API（/api/micro/*）
+app.include_router(api_maintenance.router)  # 数据维护（/api/maintenance/*）
 
 logger = logging.getLogger("drawthings")
-
-
 
 
 @app.exception_handler(RequestValidationError)
 async def _validation_error(request: Request, exc: RequestValidationError):
     """参数校验失败：统一返回本地化的 JSON，避免前端拿到结构化 detail 数组无法展示。"""
-    return JSONResponse(status_code=422,
-                        content={"detail": L(_lang(request), "请求参数不合法",
-                                             "Invalid request parameters")})
+    return JSONResponse(
+        status_code=422, content={"detail": L(_lang(request), "请求参数不合法", "Invalid request parameters")}
+    )
 
 
 @app.exception_handler(Exception)
 async def _unhandled_error(request: Request, exc: Exception):
     """兜底：任何未捕获异常都返回 JSON（而非 HTML 纯文本），并记录堆栈便于排查。"""
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500,
-                        content={"detail": L(_lang(request), "服务器内部错误，请查看服务端日志",
-                                             "Internal server error — check the server logs")})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": L(
+                _lang(request),
+                "服务器内部错误，请查看服务端日志",
+                "Internal server error — check the server logs",
+            )
+        },
+    )
+
 
 app.mount("/static", StaticFiles(directory=str(STATIC_ROOT)), name="static")
 
@@ -115,25 +131,14 @@ async def _limit_request_body(request: Request, call_next):
     if cl and cl.isdigit() and int(cl) > MAX_REQUEST_BODY:
         return JSONResponse(
             status_code=413,
-            content={"detail": L(_lang(request), "请求体过大（上限 64MB）",
-                                 "Request body too large (64MB max)")})
+            content={
+                "detail": L(_lang(request), "请求体过大（上限 64MB）", "Request body too large (64MB max)")
+            },
+        )
     return await call_next(request)
 
+
 init_db()  # 建表（幂等）
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ---------------- 静态媒体 ----------------
@@ -147,8 +152,6 @@ def serve_media(filename: str):
     return FileResponse(path)
 
 
-
-
 # ---------------- 配置管理（JSON API） ----------------
 CFG_LIMITS = {"llm": 3, "drawthings": 9}  # 配置数量上限：LLM 最多 3 个，DrawThings 最多 9 个
 
@@ -157,8 +160,10 @@ CFG_LIMITS = {"llm": 3, "drawthings": 9}  # 配置数量上限：LLM 最多 3 �
 def choices(db: Session = Depends(get_db)):
     """新建作品/创作时的可选项：全部 LLM + 全部 DrawThings 配置。"""
     cs = ConfigStore(db)
-    return {"llm_configs": [_llm_view(c) for c in cs.list_llm()],
-            "drawthing_configs": [_dt_view(c) for c in cs.list_drawthing()]}
+    return {
+        "llm_configs": [_llm_view(c) for c in cs.list_llm()],
+        "drawthing_configs": [_dt_view(c) for c in cs.list_drawthing()],
+    }
 
 
 @app.get("/api/configs")
@@ -170,8 +175,10 @@ def configs_list(db: Session = Depends(get_db)):
     return {
         "llm_items": [_llm_view(c) for c in llms],
         "dt_items": [_dt_view(c) for c in dts],
-        "llm_count": len(llms), "drawthing_count": len(dts),
-        "llm_max": CFG_LIMITS["llm"], "dt_max": CFG_LIMITS["drawthings"],
+        "llm_count": len(llms),
+        "drawthing_count": len(dts),
+        "llm_max": CFG_LIMITS["llm"],
+        "dt_max": CFG_LIMITS["drawthings"],
     }
 
 
@@ -180,22 +187,24 @@ def dt_models(request: Request, base_url: str = "", refresh: int = 1):
     """连接 Draw Things gRPC 返回已下载的基座模型清单（供配置页下拉选择）。"""
     lang = _lang(request)
     if not base_url.strip():
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "请先填写 gRPC 端点（host:port）",
-                                     "Enter the gRPC endpoint (host:port) first"))
+        raise HTTPException(
+            status_code=400,
+            detail=L(lang, "请先填写 gRPC 端点（host:port）", "Enter the gRPC endpoint (host:port) first"),
+        )
     try:
-        from services.drawthings import parse_endpoint, fetch_models
+        from services.drawthings import fetch_models, parse_endpoint
+
         host, port = parse_endpoint(base_url)
         models = fetch_models(host, port, refresh=bool(refresh))
     except Exception as e:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"获取模型列表失败：{e}", f"Failed to fetch models: {e}"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, f"获取模型列表失败：{e}", f"Failed to fetch models: {e}")
+        )
     return {"models": models}
 
 
 @app.get("/api/dt-status")
-def dt_status(request: Request, base_url: str = "", config_id: str = "",
-              db: Session = Depends(get_db)):
+def dt_status(request: Request, base_url: str = "", config_id: str = "", db: Session = Depends(get_db)):
     """Draw Things 在线状态检测（配置页显示在线徽标）。
 
     - `base_url`（新建/编辑弹框里手填的端点）或 `config_id` → 检测该端点；
@@ -204,6 +213,7 @@ def dt_status(request: Request, base_url: str = "", config_id: str = "",
     离线不报错，返回 {online: false, error} 由前端显示原因；只连一次 gRPC，不触发生成。"""
     lang = _lang(request)
     from concurrent.futures import ThreadPoolExecutor
+
     from services.drawthings import parse_endpoint, probe_endpoint
 
     def _probe(url: str) -> dict:
@@ -211,8 +221,12 @@ def dt_status(request: Request, base_url: str = "", config_id: str = "",
             host, port = parse_endpoint(url)
             return probe_endpoint(host, port)
         except Exception as e:
-            return {"online": False, "models": 0, "elapsed_ms": 0,
-                    "error": str(e).strip() or e.__class__.__name__}
+            return {
+                "online": False,
+                "models": 0,
+                "elapsed_ms": 0,
+                "error": str(e).strip() or e.__class__.__name__,
+            }
 
     cs = ConfigStore(db)
     if base_url.strip():
@@ -227,9 +241,7 @@ def dt_status(request: Request, base_url: str = "", config_id: str = "",
         return {"statuses": {}}
     with ThreadPoolExecutor(max_workers=min(8, len(cfgs))) as pool:
         results = list(pool.map(lambda c: _probe(c.base_url), cfgs))
-    return {"statuses": {c.id: s for c, s in zip(cfgs, results)}}
-
-
+    return {"statuses": {c.id: s for c, s in zip(cfgs, results, strict=True)}}
 
 
 @app.post("/api/configs")
@@ -240,41 +252,54 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
     name = str(body.get("name") or "").strip()
     base_url = str(body.get("base_url") or "").strip()
     if not name or not base_url:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "名称和端点地址不能为空", "Name and endpoint URL are required"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, "名称和端点地址不能为空", "Name and endpoint URL are required")
+        )
     thinking = str(body.get("thinking") or "default").lower()
     if thinking not in ("default", "yes", "no"):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "深度思考选项无效", "Invalid thinking option"))
+        raise HTTPException(status_code=400, detail=L(lang, "深度思考选项无效", "Invalid thinking option"))
     thinking_param = str(body.get("thinking_param") or "auto").lower()
     if thinking_param not in ("auto", "reasoning_effort", "enable_thinking"):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "思考参数选项无效", "Invalid thinking parameter option"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, "思考参数选项无效", "Invalid thinking parameter option")
+        )
     cs = ConfigStore(db)
     limit = CFG_LIMITS.get(config_type)
     if limit is not None:
         cur = len(cs.list_llm()) if config_type == "llm" else len(cs.list_drawthing())
         if cur >= limit:
             if config_type == "llm":
-                msg = L(lang, f"VLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
-                        f"VLM config limit reached ({limit} max) — delete an unused one first")
+                msg = L(
+                    lang,
+                    f"VLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
+                    f"VLM config limit reached ({limit} max) — delete an unused one first",
+                )
             else:
-                msg = L(lang, f"DrawThings 配置最多 {limit} 个，请先删除现有配置",
-                        f"Only {limit} DrawThings config allowed — delete the existing one first")
+                msg = L(
+                    lang,
+                    f"DrawThings 配置最多 {limit} 个，请先删除现有配置",
+                    f"Only {limit} DrawThings config allowed — delete the existing one first",
+                )
             raise HTTPException(status_code=400, detail=msg)
     try:
         if config_type == "llm":
             model = str(body.get("model") or "").strip()
             if not model:
-                raise HTTPException(status_code=400,
-                                    detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name"))
-            cs.create_llm(name, base_url, str(body.get("api_key") or ""), model,
-                          thinking=thinking, thinking_param=thinking_param)
+                raise HTTPException(
+                    status_code=400, detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name")
+                )
+            cs.create_llm(
+                name,
+                base_url,
+                str(body.get("api_key") or ""),
+                model,
+                thinking=thinking,
+                thinking_param=thinking_param,
+            )
         elif config_type == "drawthings":
             cs.create_drawthing(name, base_url, **_dt_gen_fields(body, lang))
         else:
-            raise HTTPException(status_code=400,
-                                detail=L(lang, "未知配置类型", "Unknown config type"))
+            raise HTTPException(status_code=400, detail=L(lang, "未知配置类型", "Unknown config type"))
     except HTTPException:
         raise
     except Exception as e:
@@ -291,48 +316,61 @@ async def config_update(request: Request, config_type: str, config_id: str, db: 
     name = str(body.get("name") or "").strip()
     base_url = str(body.get("base_url") or "").strip()
     if not name or not base_url:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "名称和端点地址不能为空", "Name and endpoint URL are required"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, "名称和端点地址不能为空", "Name and endpoint URL are required")
+        )
     cs = ConfigStore(db)
     try:
         if config_type == "llm":
             model = str(body.get("model") or "").strip()
             if not model:
-                raise HTTPException(status_code=400,
-                                    detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name"))
+                raise HTTPException(
+                    status_code=400, detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name")
+                )
             thinking = str(body.get("thinking") or "default").lower()
             if thinking not in ("default", "yes", "no"):
-                raise HTTPException(status_code=400,
-                                    detail=L(lang, "深度思考选项无效", "Invalid thinking option"))
+                raise HTTPException(
+                    status_code=400, detail=L(lang, "深度思考选项无效", "Invalid thinking option")
+                )
             thinking_param = str(body.get("thinking_param") or "auto").lower()
             if thinking_param not in ("auto", "reasoning_effort", "enable_thinking"):
-                raise HTTPException(status_code=400,
-                                    detail=L(lang, "思考参数选项无效", "Invalid thinking parameter option"))
+                raise HTTPException(
+                    status_code=400, detail=L(lang, "思考参数选项无效", "Invalid thinking parameter option")
+                )
             raw_key = body.get("api_key")
-            updated = cs.update_llm(config_id, name=name, base_url=base_url,
-                                    api_key=None if raw_key in (None, "") else str(raw_key),
-                                    model=model,
-                                    thinking=thinking, thinking_param=thinking_param)
+            updated = cs.update_llm(
+                config_id,
+                name=name,
+                base_url=base_url,
+                api_key=None if raw_key in (None, "") else str(raw_key),
+                model=model,
+                thinking=thinking,
+                thinking_param=thinking_param,
+            )
         elif config_type == "drawthings":
-            updated = cs.update_drawthing(config_id, name=name, base_url=base_url,
-                                          **_dt_gen_fields(body, lang))
+            updated = cs.update_drawthing(
+                config_id, name=name, base_url=base_url, **_dt_gen_fields(body, lang)
+            )
         else:
-            raise HTTPException(status_code=400,
-                                detail=L(lang, "未知配置类型", "Unknown config type"))
+            raise HTTPException(status_code=400, detail=L(lang, "未知配置类型", "Unknown config type"))
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=L(lang, f"保存失败：{e}", f"Save failed: {e}"))
     if not updated:
-        raise HTTPException(status_code=404,
-                            detail=L(lang, "配置不存在", "Config not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "配置不存在", "Config not found"))
     db.commit()
     return {"ok": True}
 
 
 @app.get("/api/llm/models")
-def llm_models(request: Request, base_url: str = "", api_key: str = "", config_id: str = "",
-               db: Session = Depends(get_db)):
+def llm_models(
+    request: Request,
+    base_url: str = "",
+    api_key: str = "",
+    config_id: str = "",
+    db: Session = Depends(get_db),
+):
     """从 OpenAI 兼容端点的 /models 接口拉取可用模型 id 列表（新建/编辑 LLM 配置时自动填充）。
 
     编辑已有配置时前端传 config_id：表单未填地址/Key 时回退用库里已存值
@@ -342,8 +380,9 @@ def llm_models(request: Request, base_url: str = "", api_key: str = "", config_i
     cfg = ConfigStore(db).get_llm(config_id) if config_id else None
     base_url = (base_url or "").strip() or (cfg.base_url if cfg else "")
     if not base_url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "端点地址需为 http(s) URL", "Endpoint must be an http(s) URL"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, "端点地址需为 http(s) URL", "Endpoint must be an http(s) URL")
+        )
     key = (api_key or "").strip() or (cfg.api_key if cfg else "")
     url = base_url.rstrip("/") + "/models"
     headers = {}
@@ -353,20 +392,30 @@ def llm_models(request: Request, base_url: str = "", api_key: str = "", config_i
         with make_httpx_client(base_url, timeout=15.0) as client:
             r = client.get(url, headers=headers)
         if r.status_code in (401, 403):
-            detail = L(lang, "端点鉴权失败：请检查 API Key" if key else "端点需要鉴权（401）：请先填写 API Key",
-                       "Endpoint authentication failed: check the API Key" if key
-                       else "Endpoint requires auth (401): please fill in an API Key")
+            detail = L(
+                lang,
+                "端点鉴权失败：请检查 API Key" if key else "端点需要鉴权（401）：请先填写 API Key",
+                "Endpoint authentication failed: check the API Key"
+                if key
+                else "Endpoint requires auth (401): please fill in an API Key",
+            )
             raise HTTPException(status_code=400, detail=detail)
         if r.status_code != 200:
-            raise HTTPException(status_code=400,
-                                detail=L(lang, f"端点返回 {r.status_code}，请检查地址与 API Key",
-                                         f"Endpoint returned {r.status_code}; check the URL and API Key"))
+            raise HTTPException(
+                status_code=400,
+                detail=L(
+                    lang,
+                    f"端点返回 {r.status_code}，请检查地址与 API Key",
+                    f"Endpoint returned {r.status_code}; check the URL and API Key",
+                ),
+            )
         data = r.json()
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400,
-                            detail=L(lang, f"获取模型失败：{e}", f"Failed to fetch models: {e}"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, f"获取模型失败：{e}", f"Failed to fetch models: {e}")
+        )
     items = data.get("data") if isinstance(data, dict) else data
     if not isinstance(items, list):
         items = []
@@ -384,15 +433,19 @@ def config_delete(request: Request, config_type: str, config_id: str, db: Sessio
     cs = ConfigStore(db)
     if config_type in ("llm", "drawthings"):
         if cs.is_referenced(config_id):
-            raise HTTPException(status_code=400,
-                                detail=L(lang, "该配置仍被项目使用，无法删除",
-                                         "This config is still used by a project and cannot be deleted"))
+            raise HTTPException(
+                status_code=400,
+                detail=L(
+                    lang,
+                    "该配置仍被项目使用，无法删除",
+                    "This config is still used by a project and cannot be deleted",
+                ),
+            )
         ok = cs.delete_llm(config_id) if config_type == "llm" else cs.delete_drawthing(config_id)
     else:
         raise HTTPException(status_code=400, detail=L(lang, "未知配置类型", "Unknown config type"))
     if not ok:
-        raise HTTPException(status_code=404,
-                            detail=L(lang, "配置不存在", "Config not found"))
+        raise HTTPException(status_code=404, detail=L(lang, "配置不存在", "Config not found"))
     cs.clear_default_ref(config_type, config_id)  # 删掉的配置若被设为默认 → 清空引用
     db.commit()
     return {"ok": True}
@@ -413,16 +466,20 @@ async def settings_update(request: Request, db: Session = Depends(get_db)):
     llm_id = str(body.get("default_llm_config_id") or "").strip()
     dt_id = str(body.get("default_dt_config_id") or "").strip()
     if llm_id and not cs.get_llm(llm_id):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "默认 VLM 配置不存在", "Default VLM config not found"))
+        raise HTTPException(
+            status_code=400, detail=L(lang, "默认 VLM 配置不存在", "Default VLM config not found")
+        )
     if dt_id and not cs.get_drawthing(dt_id):
-        raise HTTPException(status_code=400,
-                            detail=L(lang, "默认 DrawThings 配置不存在", "Default DrawThings config not found"))
-    return cs.update_settings({
-        "default_llm_config_id": llm_id,
-        "default_dt_config_id": dt_id,
-    })
-
+        raise HTTPException(
+            status_code=400,
+            detail=L(lang, "默认 DrawThings 配置不存在", "Default DrawThings config not found"),
+        )
+    return cs.update_settings(
+        {
+            "default_llm_config_id": llm_id,
+            "default_dt_config_id": dt_id,
+        }
+    )
 
 
 # ---------------- 应用健康检查（CS 桌面客户端探测用） ----------------
@@ -447,10 +504,14 @@ def spa_shell(full_path: str):
 
 if __name__ == "__main__":
     import os as _os
+
     import uvicorn
+
     # CS 桌面客户端以 RELOAD=0 拉起本进程（生产模式）；开发时可用 RELOAD=1 python main.py。
     # 默认只绑 127.0.0.1（本地单用户，不对外；如需局域网访问可显式设 HOST=0.0.0.0）。
-    uvicorn.run("main:app",
-                host=_os.getenv("HOST", "127.0.0.1"),
-                port=env_int("PORT", 8010),
-                reload=_os.getenv("RELOAD", "0") == "1")
+    uvicorn.run(
+        "main:app",
+        host=_os.getenv("HOST", "127.0.0.1"),
+        port=env_int("PORT", 8010),
+        reload=_os.getenv("RELOAD", "0") == "1",
+    )

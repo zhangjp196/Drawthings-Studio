@@ -47,12 +47,15 @@ Views.dramaSeasonCover = {
   `,
   setup(props, { emit }) {
     const coverRef = ref(!!props.season.cover_as_first_ref);
+    // 父组件复用实例（按 seasonId 重挂时 props 变了，本地开关要跟着新季同步）
+    watch(() => props.season.id, () => { coverRef.value = !!props.season.cover_as_first_ref; });
 
     async function onCoverRefChange(v) {
       try {
         await API.post(`/api/dramas/${props.projectId}/seasons/${props.seasonId}/first-image/ref`,
           { enabled: !!v });
       } catch (e) {
+        coverRef.value = !v;   // 失败回滚：开关跟服务端真实状态保持一致
         ElementPlus.ElMessage.error(e.message);
       }
     }

@@ -1,0 +1,60 @@
+[project]
+name = "drawthings-studio"
+version = "0.1.0"
+description = "漫画 / 短剧一体化生成工作台（FastAPI + 免构建 Vue3 SPA + SQLite）"
+requires-python = ">=3.11"
+# 运行期依赖的**唯一来源**；requirements.txt 由此生成，勿双处手改。
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "openai>=3.0",
+    "pydantic-ai>=2.42",
+    "httpx>=0.27",
+    "httpx2>=2.0",
+    "python-dotenv>=1.0",
+    "pillow>=10.0",
+    "opencv-python-headless>=4.8",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "sqlalchemy>=2.0",
+    "drawthings-py[ffmpeg]>=0.4.0",
+    "imageio-ffmpeg>=0.5.0",
+    "pywebview>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",       # lint / format
+    "pytest>=8.0",     # 单测
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+# 免构建 SPA 与 vendor 目录不参与 lint
+extend-exclude = ["static/vendor", "build", "dist", ".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle 错误
+    "F",    # pyflakes（未用变量 / import、f-string 占位等）
+    "W",    # 警告
+    "I",    # import 排序
+    "B",    # bugbear：可变默认值、循环变量绑定、except Exception:pass 等
+    "UP",   # pyupgrade：新语法
+]
+ignore = [
+    "E501",    # 行长由 formatter 管
+    "B008",    # FastAPI 的 Depends()/File() 就是依赖默认值，这是惯用法
+    "E402",    # main.py 需在 import 前设置环境变量（pydantic 插件禁用）
+    "B904",    # 仓库惯例：except 内 raise HTTPException 不带 from（错误已并入 detail 文案）
+]
+
+[tool.ruff.lint.per-file-ignores]
+# db.py 的迁移里大量「表不存在 / 旧版本 SQLite 不支持」的历史兼容 except 是刻意为之
+"db.py" = ["E722"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

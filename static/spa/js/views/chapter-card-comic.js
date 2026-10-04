@@ -111,6 +111,11 @@ Views.chapterCardComic = {
     const title = ref(props.chapter.title || '');
     const summary = ref(props.chapter.summary || '');
     const prompt = ref(props.chapter.prompt || '');
+    // 父组件按 curCh.index 复用卡片实例；编辑/生成后 load() 只换 props.chapter 对象，
+    // 不加 watch 的话这三个本地 ref 会一直停留在旧值（生成了图，提示词页签却还是空的）。
+    watch(() => props.chapter.prompt, v => { prompt.value = v || ''; }, { immediate: true });
+    watch(() => props.chapter.summary, v => { summary.value = v || ''; });
+    watch(() => props.chapter.title, v => { title.value = v || ''; });
     const done = computed(() => props.chapter.status === 'done');
     const statusLabel = computed(() => I18N.t('p.chStatus.' + props.chapter.status) || props.chapter.status);
     const statusType = computed(() =>

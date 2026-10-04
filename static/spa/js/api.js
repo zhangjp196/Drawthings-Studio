@@ -92,24 +92,29 @@ window.API = {
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf('\n\n')) !== -1) {
-        const frame = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        let event = 'message', data = '';
-        for (const line of frame.split('\n')) {
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          else if (line.startsWith('data:')) data = line.slice(5).trim();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          let event = 'message', data = '';
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) data = line.slice(5).trim();
+          }
+          if (!data) continue;
+          let d = {};
+          try { d = JSON.parse(data); } catch (e) { d = { text: data }; }
+          onEvent(event, d);
         }
-        if (!data) continue;
-        let d = {};
-        try { d = JSON.parse(data); } catch (e) { d = { text: data }; }
-        onEvent(event, d);
       }
+    } finally {
+      // 回调抛错（如 EVENTS.ERROR）时也要关掉连接：否则 reader 无人消费，HTTP 挂到超时
+      try { await reader.cancel(); } catch (e) { /* 已断 */ }
     }
   },
 

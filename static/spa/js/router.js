@@ -34,9 +34,13 @@ window.nextTick = Vue.nextTick;
 // 输入防抖：用于搜索框等高频输入，避免每次按键都打后端
 window.debounce = (fn, wait = 300) => {
   let timer = null;
-  return function () {
+  const wrapped = function () {
     const ctx = this, args = arguments;
     clearTimeout(timer);
     timer = setTimeout(() => fn.apply(ctx, args), wait);
   };
+  // cancel()：组件卸载时调用，否则残留的延时回调会在页面已离开后触发
+  // （例如 350ms 后 query 同步跳回 /projects，把用户从别的页面拽走）
+  wrapped.cancel = () => { clearTimeout(timer); timer = null; };
+  return wrapped;
 };

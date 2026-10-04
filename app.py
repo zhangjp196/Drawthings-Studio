@@ -6,6 +6,7 @@
 打包后（dist/Drawthings Studio.app）客户端会以「本程序 --server」起服务，
 同一份二进制两种模式，无需外置 python。
 """
+
 import os
 import sys
 
@@ -20,9 +21,11 @@ def _redirect_logs() -> None:
         return
     try:
         from paths import data_dir
+        from services.logging_setup import rotating_log_path
+
         p = data_dir() / "server.log"
         p.parent.mkdir(parents=True, exist_ok=True)
-        f = open(p, "a", encoding="utf-8", buffering=1)
+        f = rotating_log_path(p)  # 带大小轮转（5MB × 3），避免长期运行日志无限膨胀
         sys.stdout = f
         sys.stderr = f
     except Exception:
@@ -36,6 +39,7 @@ def _watch_parent() -> None:
     import os
     import threading
     import time
+
     pid = int(os.getenv("PARENT_PID", "0") or 0)
     if pid <= 0:
         return
@@ -44,11 +48,11 @@ def _watch_parent() -> None:
         while True:
             time.sleep(3)
             try:
-                os.kill(pid, 0)          # 信号 0：仅探测存活
+                os.kill(pid, 0)  # 信号 0：仅探测存活
             except ProcessLookupError:
-                os._exit(0)               # 父进程已消失 → 自动退出
+                os._exit(0)  # 父进程已消失 → 自动退出
             except PermissionError:
-                continue                  # 进程还在（仅无权限），继续监视
+                continue  # 进程还在（仅无权限），继续监视
 
     threading.Thread(target=_loop, daemon=True, name="parent-watch").start()
 
@@ -58,18 +62,22 @@ def run_server() -> None:
     _redirect_logs()
     try:
         import os
+
         from paths import env_int
         from services.logging_setup import setup_logging
+
         setup_logging()
         _watch_parent()
         import uvicorn
+
         from main import app as fastapi_app
-        uvicorn.run(fastapi_app,
-                    host=os.getenv("HOST", "127.0.0.1"),
-                    port=env_int("PORT", 8010),
-                    reload=False)
+
+        uvicorn.run(
+            fastapi_app, host=os.getenv("HOST", "127.0.0.1"), port=env_int("PORT", 8010), reload=False
+        )
     except BaseException:
         import traceback
+
         traceback.print_exc()
         raise
 
@@ -79,6 +87,7 @@ def main() -> int:
         run_server()
         return 0
     from client import main as client_main
+
     return client_main()
 
 

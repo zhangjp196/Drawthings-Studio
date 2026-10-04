@@ -7,6 +7,7 @@ LLM / DrawThings 等外部端点配置已迁到页面（数据库存储），见
 `MEDIA_DIR` / `media_url()` 放这里（而不是 services/api_common），使 `services/media_files`
 等底层工具无需依赖 API 层，避免循环导入。
 """
+
 from pathlib import Path
 
 from paths import data_dir as _data_dir
@@ -14,6 +15,11 @@ from paths import data_dir as _data_dir
 data_dir: Path = _data_dir()
 
 MEDIA_DIR: Path = Path(data_dir) / "media"
+# 临时目录：视频抽帧等**中间产物**只放这里，不进 MEDIA_DIR
+# （它们只是本地路径，喂给 DrawThings gRPC，从不落库也不经 HTTP 提供；
+#   放媒体目录会让「孤儿媒体」清理把它们误判为垃圾，且随每次生成不断堆积）。
+# 启动时整体清空，见 services.media_files.purge_tmp。
+TMP_DIR: Path = Path(data_dir) / "tmp"
 
 
 def media_url(media_path: str) -> str:

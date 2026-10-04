@@ -63,7 +63,7 @@ Views.projects = {
       </div>
       <el-empty v-else :description="I18N.t('proj.empty')" />
 
-      <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next" :total="total" :page-size="f.size" :current-page="f.page" @current-change="load" />
+      <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next" :total="total" :page-size="f.size" :current-page="f.page" @current-change="p => { f.page = p; load(); }" />
 
       <!-- 新建弹框：漫画 / 短剧完全分开，各自独立组件 -->
       <el-dialog v-model="newComicDlg" :title="I18N.t('proj.newDlgComic')" width="560px">
@@ -90,6 +90,7 @@ Views.projects = {
         chaptered: t('proj.status.chaptered'),
       };
     });
+    const statusTag = (s) => (s === 'planning' ? 'info' : 'primary');
     const f = reactive({ page: 1, size: 10, q: '', kind: (router.currentRoute.value.query.kind === 'drama' ? 'drama' : 'comic'), status: '', sort: 'desc' });
     // 页标题随类型筛选变化：漫画创作 / 视频创作 / 创作中心（全部）
     const kindTitle = computed(() =>
@@ -136,12 +137,30 @@ Views.projects = {
       if (k !== f.kind) { f.kind = k; f.page = 1; load(); }
     });
     const onSearch = debounce(apply, 350);
+    onBeforeUnmount(() => onSearch.cancel());   // 卸载后不再触发 query 同步跳转
+
+    let loadSeq = 0;   // 兜住「旧响应后到覆盖新状态」：只有最新一次 load 的响应才能写状态
+    async function load() {
+      const my = ++loadSeq;
+      try {
+        // 创作中心按类型分开：漫画走 /api/comics、短剧走 /api/dramas
+        const data = await API.get(`/api/${f.kind === 'drama' ? 'dramas' : 'comics'}?` + new URLSearchParams({
+          page: f.page, size: f.size, q: f.q, status: f.status, sort: f.sort,
+        }));
+        if (my !== loadSeq) return;   // 期间又有新的 load：本响应用于更早的一次
+        rows.value = data.projects;
+        total.value = data.total;
+        totalPages.value = data.total_pages;
+      } catch (e) {
+        if (my !== loadSeq) return;
+        ElementPlus.ElMessage.error(e.message);
+      }
+    }
     function reset() {
       Object.assign(f, { page: 1, size: 10, q: '', status: '', sort: 'desc' });
       syncKindQuery();
       load();
     }
-    const statusTag = (s) => (s === 'planning' ? 'info' : 'primary');
 
     function open(row) { router.push(row.kind === 'comic' ? '/comic/' + row.id : '/drama/' + row.id); }
     function askRename(row) {

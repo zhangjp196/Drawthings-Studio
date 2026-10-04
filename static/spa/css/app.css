@@ -7,6 +7,7 @@
   --bg: #f4f5f7;            /* 内容区底色（macOS 窗口灰） */
   --bg-grad: #f4f5f7;
   --card: #ffffff;          /* 面板 / 卡片（实心） */
+  --panel: var(--card);     /* 浮层/菜单底色（.mc-ctxmenu 等），随主题变 */
   --sidebar: #eceef2;       /* 侧边栏底色 */
   --line: rgba(20, 24, 38, .10);
   --edge: rgba(255, 255, 255, .9);
@@ -30,6 +31,7 @@
   --bg: #17181c;
   --bg-grad: #17181c;
   --card: #1f2127;
+  --panel: var(--card);
   --sidebar: #16171b;
   --line: rgba(255, 255, 255, .10);
   --edge: rgba(255, 255, 255, .06);
@@ -406,6 +408,10 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 
 /* ---------- 章节预览页签：平铺（小图网格）/ 画廊（大图），无分页 ---------- */
 .pv-grid { display: grid; gap: 10px; }
+/* 平铺 = 多列小图网格；画廊 = 单列大图（之前只写过 .pv-grid，这两种模式的列定义缺失，
+   导致平铺/画廊切换一直是同一布局 —— 纯摆设） */
+.pv-grid.pv-tile { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.pv-grid.pv-gallery { grid-template-columns: 1fr; }
 /* 短剧预览：单列、一行一个（可播放）视频 */
 .pv-list { display: flex; flex-direction: column; gap: 12px; }
 .pv-row video.pv-video {
@@ -565,6 +571,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 /* ---------- 配置管理：分区（无 tab，基础 / LLM / DrawThings 同页展示） ---------- */
 .cfg-sec { border-radius: 12px; margin-bottom: 18px; overflow: hidden; }
 .cfg-sec:last-of-type { margin-bottom: 0; }
+.maint-box { padding: 16px 18px; }
 .cfg-sec-head {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 13px 18px; border-bottom: 1px solid var(--line);
@@ -588,7 +595,6 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .cfg-quota.full { color: var(--warn); border-color: var(--warn); background: transparent; }
 .cfg-sec-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cfg-sec-body { padding: 16px 18px 18px; }
 @media (max-width: 760px) {
   .cfg-sec-sub { display: none; }
 }

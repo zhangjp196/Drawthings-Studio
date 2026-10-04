@@ -11,6 +11,7 @@
 背景：drawthings-py 的 GenConfig 会给未声明 fps 的预设回填 schema 默认值 5（非真实帧率），
 若把 25fps 的帧按 5fps 封装，视频被拉长 5 倍、音轨只覆盖开头（表现为「视频声音只有 1 秒」）。
 """
+
 import sys
 import tempfile
 from pathlib import Path
@@ -44,7 +45,7 @@ def check_fps_table() -> None:
         "hunyuan_video_1.5_q8p.ckpt": (30, 4),
         "wan_2_2_14b_t2v_q8p.ckpt": (16, 4),
         "skyreels_v2_i2v.ckpt": (24, 4),
-        "some_unknown_model.ckpt": (25, 1),   # 未知家族：帧率按 25 兜底、帧数步长不约束（1）
+        "some_unknown_model.ckpt": (25, 1),  # 未知家族：帧率按 25 兜底、帧数步长不约束（1）
     }
     for model, (fps, step) in cases.items():
         check(f"video_fps({model})", video_fps(model), fps)
@@ -74,20 +75,23 @@ def check_av_sync() -> None:
         print(f"skip drawthings-py 未安装：{e}")
         return
     import shutil
+
     if not shutil.which("ffprobe"):
         print("skip 未安装 ffprobe（无法校验时长）")
         return
 
-    W, H, N = 128, 96, 25           # 25 帧 = LTX 真实内容 1 秒（25fps）
-    audio = AudioBuffer(48000, sample_rate=48000)   # 1.0 秒音轨
+    W, H, N = 128, 96, 25  # 25 帧 = LTX 真实内容 1 秒（25fps）
+    audio = AudioBuffer(48000, sample_rate=48000)  # 1.0 秒音轨
     audio.data[:] = 0.01
     result = ImageGenerationResult(images=[_Frame(W, H) for _ in range(N)], audio=audio)
 
     tmp = Path(tempfile.mkdtemp())
     client = DrawThingsClient(
-        SimpleNamespace(base_url="127.0.0.1:7859", model_image="", model_video="ltx.ckpt",
-                        max_side=0, max_seconds=8),
-        tmp)
+        SimpleNamespace(
+            base_url="127.0.0.1:7859", model_image="", model_video="ltx.ckpt", max_side=0, max_seconds=8
+        ),
+        tmp,
+    )
     model = "ltx_2.3_22b_distilled_q8p.ckpt"
 
     # ① 错误帧率（5）：视频 5s / 音轨 1s → 自检应发现并重封装为 25fps（视频 1s / 音轨 1s）

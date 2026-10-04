@@ -25,6 +25,8 @@ window.I18N = (function () {
       'wb.recent': '最近创作',
       'wb.all': '全部 →',
       'wb.empty': '还没有创作，点「新建创作」开始吧',
+      'wb.loadFail': '最近创作加载失败（网络或服务端异常）',
+      'wb.retry': '重试',
 
       'proj.title': '创作中心',
       'proj.total': '共 {0} 个',
@@ -75,6 +77,7 @@ window.I18N = (function () {
       'cf.newCfg': '＋ 新建配置',
       'cf.start': '开始创作',
       'cf.wLlm': '请选择 VLM 配置',
+      'cf.loadFail': '加载创建选项失败：{msg}',
 
       'p.metaIdea': '主题：{0}',
       'p.metaLength': '篇幅：{0} 章',
@@ -412,6 +415,18 @@ window.I18N = (function () {
       'cfg.defNone': '（留空 = 每次手动选择）',
       'cfg.defLlm': '新建创作默认 VLM',
       'cfg.defDt': '新建创作默认 DrawThings',
+      'mt.title': '数据维护',
+      'mt.hint': '清理不再被任何作品引用的媒体文件（生成覆盖/失败留下的孤儿），手动备份数据库，清理历史导出产物。均为本地操作，建议先扫描确认。',
+      'mt.scan': '扫描孤儿媒体',
+      'mt.purge': '清理孤儿媒体',
+      'mt.backup': '备份数据库',
+      'mt.cleanExports': '清空导出目录',
+      'mt.orphanFound': '发现 {1} 个孤儿文件（{2}，媒体目录共 {3}）。确认后点「清理」；上次扫描结果仅作预览。',
+      'mt.orphanNone': '没有孤儿文件 👍',
+      'mt.scanFirst': '请先扫描确认',
+      'mt.purgeConfirm': '将永久删除扫描到的孤儿媒体文件（不可恢复）。确定继续？',
+      'mt.backupDone': '已备份：{1}（data/backups/）',
+      'mt.exportsConfirm': '将删除 data/exports 下的历史 ZIP / PDF（已交付的下载产物）。确定继续？',
       'cfg.secLlm': 'VLM 配置',
       'cfg.secLlmSub': 'OpenAI 协议 · 兼容 Ollama / vLLM / 云端',
       'cfg.secDt': 'DrawThings 配置',
@@ -607,6 +622,8 @@ window.I18N = (function () {
       'wb.recent': 'Recent',
       'wb.all': 'All →',
       'wb.empty': 'No creations yet — click "New project" to start.',
+      'wb.loadFail': 'Recent creations failed to load (network or server error)',
+      'wb.retry': 'Retry',
 
       'proj.title': 'Studio',
       'proj.total': '{0} total',
@@ -656,6 +673,7 @@ window.I18N = (function () {
       'cf.newCfg': '＋ New config',
       'cf.start': 'Start creating',
       'cf.wLlm': 'Please select a VLM config',
+      'cf.loadFail': 'Failed to load creation options: {msg}',
 
       'p.metaIdea': 'Idea: {0}',
       'p.metaLength': 'Length: {0} ch',
@@ -982,6 +1000,19 @@ window.I18N = (function () {
       'd.pvMissing': 'No video generated for this clip yet',
       'd.exportVideoHint2': 'Concatenate this episode\'s clips in order into one MP4 (needs generated clip videos).',
 
+      'mt.title': 'Maintenance',
+      'mt.hint': 'Clean media files no longer referenced by any record (orphans left by regens/failures), manually back up the database, and clear old exports. All local — scan first to confirm.',
+      'mt.scan': 'Scan orphan media',
+      'mt.purge': 'Purge orphan media',
+      'mt.backup': 'Back up DB',
+      'mt.cleanExports': 'Clear export dir',
+      'mt.orphanFound': '{1} orphan files ({2}) of {3} total media. Purge after scanning.',
+      'mt.orphanNone': 'No orphans 👍',
+      'mt.scanFirst': 'Scan first to confirm',
+      'mt.purgeConfirm': 'This permanently deletes the orphan media found by the scan (not recoverable). Continue?',
+      'mt.backupDone': 'Backed up: {1} (data/backups/)',
+      'mt.exportsConfirm': 'This deletes historical ZIP/PDF files under data/exports (already delivered downloads). Continue?',
+
 
 
       'cfg.title': 'Settings',
@@ -1184,7 +1215,10 @@ window.I18N = (function () {
     const lang = langRef.value;
     let s = dict[lang][key];
     if (s === undefined) s = dict.zh[key];
-    if (s === undefined) s = key;
+    if (s === undefined) {
+      if (typeof console !== 'undefined') console.warn('[i18n] missing key:', key);
+      s = key;   // 兜底显示 key 本身；调用处的 `I18N.t(...) || fallback` 因此能感知缺失
+    }
     args.forEach((a, i) => {
       s = s.split('{' + i + '}').join(a);
     });
@@ -1211,6 +1245,9 @@ window.I18N = (function () {
     isEn: () => langRef.value === 'en',
     t,
     set,
-    onChange: (f) => listeners.push(f),
+    onChange: (f) => {
+      listeners.push(f);
+      return () => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); };
+    },
   };
 })();

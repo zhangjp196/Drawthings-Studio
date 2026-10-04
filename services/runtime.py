@@ -2,6 +2,7 @@
 
 放在独立模块里，供 main.py 与各 API 路由模块共享同一实例，避免循环导入。
 """
+
 from config import data_dir
 from services.pipeline import Pipeline
 
