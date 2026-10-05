@@ -289,8 +289,8 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   (components / dark theme variables / zh & en locales / icon package), all loaded locally from `static/vendor/` via `<script>`/`<link>`,
   **no Node / build tooling required** — editing files under `static/spa/` takes effect immediately.
 - **Desktop shell (CS style)**: a collapsible left **sidebar** (Workspace / Comic Studio / Video Studio / Quick Create / Settings) + a compact top **toolbar**
-  (current page title + language / theme / quit); the content area fills the window and scrolls internally; panels are **solid, native-style**
-  (no glass, small radii, high density); on narrow windows the sidebar collapses to icons.
+  (current page title + language / theme / quit); the content area fills the window and scrolls internally; panels are **solid, modern creative-tool style**
+  (no glass — generous spacing, medium radii, layered soft shadows, subtle canvas gradient); on narrow windows the sidebar collapses to icons.
 - **Routes**: `/` home · `/projects` list · `/new` create · `/project/:id` detail · `/configs` settings ·
   `/micro` work list · `/micro/:id(/:sid)` work chat. Unknown paths fall back to the SPA shell from FastAPI,
   so deep-link refreshes work (the frontend router re-matches; unmatched routes redirect home).
