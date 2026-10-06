@@ -26,7 +26,7 @@ class TextBlock(BaseModel):
 
 
 class ToolBlock(BaseModel):
-    """生成块：一次 generate_media 调用（生成中 → 已生成 / 失败）。
+    """生成块：一次 generate_image / generate_video 调用（生成中 → 已生成 / 失败）。
 
     附「生成参数快照」（model/width/height/seconds/ref_url），用于结果复现与一键重跑。
     """

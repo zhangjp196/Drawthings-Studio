@@ -12,7 +12,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.drawthings import build_drawthings_client, norm_ref_flag
+from services.drawthings import build_drawthings_client, norm_prompt_lang, norm_ref_flag
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,18 @@ def ref_video_enabled(cfg, subject) -> bool:
     """生效的「视频支持参考图片」：功能级优先，配置兜底。"""
     _r = norm_ref_flag(getattr(subject, "dt_ref_video", ""))
     return bool(_r) if _r is not None else bool(getattr(cfg, "ref_video", 0))
+
+
+def prompt_language(cfg, kind: str, lang: str = "zh") -> str:
+    """生效的提示词语言（'zh' | 'en'）：按模型分开读配置里的 prompt_lang_image / prompt_lang_video。
+
+    - 'zh' = 始终中文；'en' = 始终英文；
+    - 'default' = 跟随界面语言（lang 以 en 开头 → 英文，否则中文）。
+    cfg 为空时同样按界面语言兜底。"""
+    val = norm_prompt_lang(getattr(cfg, f"prompt_lang_{kind}", "default"))
+    if val in ("zh", "en"):
+        return val
+    return "en" if str(lang or "zh").strip().lower().startswith("en") else "zh"
 
 
 def _model_override(subject, attr: str) -> str:
@@ -70,4 +82,11 @@ def caps(dt, cfg, subject) -> Capabilities:
     )
 
 
-__all__ = ["Capabilities", "caps", "dt_client", "ref_image_enabled", "ref_video_enabled"]
+__all__ = [
+    "Capabilities",
+    "caps",
+    "dt_client",
+    "prompt_language",
+    "ref_image_enabled",
+    "ref_video_enabled",
+]

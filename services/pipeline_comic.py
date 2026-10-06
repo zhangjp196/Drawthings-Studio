@@ -48,7 +48,7 @@ from .agent import (
     image_data_uri,
     make_agent,
 )
-from .capabilities import dt_client, ref_image_enabled
+from .capabilities import dt_client, prompt_language, ref_image_enabled
 from .drawthings import extract_last_frame
 from .jobs import JobCancelled
 from .media_files import image_size, safe_file_base, save_images_pdf
@@ -1025,8 +1025,9 @@ class ComicPipeline:
         llm_cfg, dt_cfg = self._configs(db, project, lang)
         return llm_cfg, dt_cfg
 
-    def _script_system(self, project: Project) -> str:
-        """剧本/提示词写作的系统提示词（漫画）。"""
+    def _script_system(self, project: Project, prompt_lang: str = "en") -> str:
+        """剧本/提示词写作的系统提示词（漫画）。prompt_lang 决定出图提示词语言（zh|en）。"""
+        pl = "中文" if prompt_lang == "zh" else "英文"
         shot = (
             "漫画：prompt 描述『一页多格漫画』——一张图内含多个分镜格（竖版漫画页），"
             "并让画面带文字（分镜旁白、对白气泡）；构图优先竖版（3:4 或 2:3）。"
@@ -1036,12 +1037,12 @@ class ComicPipeline:
         )
         return (
             "你是编剧兼分镜提示词作者。根据上一章内容和本章场景，"
-            "写本章详细剧本描述（description）和出图/出视频提示词（prompt 用英文，保持风格与上一章连贯）。\n"
+            f"写本章详细剧本描述（description）和出图/出视频提示词（prompt 用{pl}，保持风格与上一章连贯）。\n"
             f"{shot}\n"
             "分辨率统一由项目总体设定决定，无需决定 width/height（不要在提示词里写具体分辨率）。\n"
             "只输出一个 JSON 对象，字段固定为 description 与 prompt（都是字符串）："
             "description 用一段文字概括本章（即使包含多个分镜，也合成一段文字，不要拆成数组）；"
-            "prompt 为单个英文提示词。不要输出数组、Markdown 代码块或任何额外文字。"
+            f"prompt 为单个{pl}提示词。不要输出数组、Markdown 代码块或任何额外文字。"
         )
 
     async def _gen_one_script(
@@ -1060,8 +1061,11 @@ class ComicPipeline:
         chapters 为该季的章节列表；i 为季内 0 起序号。model 复用调用方构建的模型（避免逐章重建客户端）。
         extra_prompt：人工「重新生成」时填写的补充修正要求，会作为额外指令交给 LLM 写进 prompt。"""
         llm_cfg, dt_cfg = self._script_agent_context(db, project, lang)
+        plang = prompt_language(dt_cfg, "image", lang)  # 漫画章节固定出图 → 用图像模型的提示词语言
         gprompt = (project.global_prompt or "").strip()
-        agent = make_agent(model or build_model(llm_cfg), self._script_system(project), output_type=ScriptOut)
+        agent = make_agent(
+            model or build_model(llm_cfg), self._script_system(project, plang), output_type=ScriptOut
+        )
         prev = chapters[i - 1] if i > 0 else None
         context = ""
         ref_img = None
@@ -1602,13 +1606,14 @@ class ComicPipeline:
         分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
         include_title 为真时在成品图上用 PIL 叠加作品名称（标题保持原文）。
         产物存为 data/media/first_<项目id>.<ext>（可重复生成覆盖）。"""
-        llm_cfg = self._llm_cfg(db, project, lang)
-        dt = self._clients(db, project, lang)
+        llm_cfg, dt_cfg = self._configs(db, project, lang)
+        dt = dt_client(dt_cfg, self.data_dir, project)
+        pl = "中文" if prompt_language(dt_cfg, "image", lang) == "zh" else "英文"
         extra = (prompt or "").strip()
         gprompt = (project.global_prompt or "").strip()
         system = (
             "你是封面美术提示词作者。请结合项目名称（主题）、全局要求、故事大纲与角色设定，"
-            "写一段详细的封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+            f"写一段详细的封面{pl}提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
             "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
             "（作品名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。"
         )
@@ -1686,13 +1691,14 @@ class ComicPipeline:
         分辨率统一跟随总体设定（project.res_width × res_height，与章节一致）。
         include_title 为真时在成品图上用 PIL 叠加季名（季名为空回退「第N季」，标题保持原文）。
         产物存为 data/media/seasonfirst_<季id>.<ext>（可重复生成覆盖）。"""
-        llm_cfg = self._llm_cfg(db, project, lang)
-        dt = self._clients(db, project, lang)
+        llm_cfg, dt_cfg = self._configs(db, project, lang)
+        dt = dt_client(dt_cfg, self.data_dir, project)
+        pl = "中文" if prompt_language(dt_cfg, "image", lang) == "zh" else "英文"
         extra = (prompt or "").strip()
         gprompt = (project.global_prompt or "").strip()
         system = (
             "你是封面美术提示词作者。请结合项目名称（主题）、全局要求、角色设定与本季标题/大纲，"
-            "写一段详细的季封面英文提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
+            f"写一段详细的季封面{pl}提示词（主体角色、场景、构图、光线、氛围、风格关键词）。"
             "只输出提示词文本。画面**不得出现任何文字/标题/字幕条/水印/logo/时间码/时钟/网址或 UI 叠加**"
             "（季名由程序叠加，不要在提示词里加入任何文字渲染要求）；光影与场景保持一致稳定。"
         )

@@ -1,10 +1,10 @@
-"""微创作会话引擎：系统提示词拼装 + generate_media 工具 + 有序内容块 + 落库。
+"""微创作会话引擎：系统提示词拼装 + generate_image / generate_video 工具 + 有序内容块 + 落库。
 
 从 main.py 的 `_micro_stream` 抽出，与项目侧 `pipeline_comic/drama` 形成对称结构：
 本模块只负责「一次对话的推理与生成」，传输（SSE 帧 / 心跳）由 `services/api_micro.py` 负责。
 
 - `build_instructions(...)`：按生效能力（图片/视频/参考图）拼装系统提示词；
-- `run_micro_chat(...)`：多轮对话（LLM 流式 + generate_media 工具调用）；
+- `run_micro_chat(...)`：多轮对话（LLM 流式 + generate_image / generate_video 工具调用）；
 - `run_regenerate(...)`：一键重跑（跳过 LLM，按已保存参数直接重生成，结果可复现）；
 - 两者都把事件写入 `asyncio.Queue`，并**增量落库**（可恢复流）：断连/崩溃时保留已产出的部分。
 
@@ -28,7 +28,7 @@ from models import Asset, MicroMessage
 from services import events as E
 from services.agent import ScoreOut, build_model, image_data_uri, make_agent, to_message_history, user_prompt
 from services.api_common import _media_url
-from services.capabilities import caps, dt_client
+from services.capabilities import caps, dt_client, prompt_language
 from services.drawthings import MAX_VIDEO_SECONDS, MODEL_NONE, extract_last_frame
 from services.media_files import media_path_from_url
 from services.micro_parts import dump_parts, load_parts
@@ -36,8 +36,8 @@ from services.pipeline import _now, run_sync
 
 MC_SYSTEM = (
     "你是漫画/短剧创作的创意助手，擅长创意构思、角色与剧情设计、分镜和提示词，回答简洁、具体。"
-    "用户只是提问时直接文本回答；用户要求生成图片/视频时，先调用 generate_media 工具"
-    "（提供详细英文提示词：主体、场景、构图、光线、风格；视频补充运镜与动态），"
+    "用户只是提问时直接文本回答；用户要求生成图片/视频时，调用对应的生成工具"
+    "（提供详细提示词：主体、场景、构图、光线、风格；视频补充运镜与动态；语言按下方要求），"
     "生成成功后用一两句话说明结果。"
     "始终用用户所用的语言回答（用户用中文提问则答中文，用英文提问则答英文）。"
 )
@@ -52,16 +52,20 @@ def build_instructions(
     lang: str = "zh",
     max_side: int = 0,
     max_seconds: int = 0,
+    prompt_lang_image: str = "en",
+    prompt_lang_video: str = "en",
 ) -> str:
-    """按生效能力拼装系统提示词（生成类型 / 比例 / 时长 / 参考图模式 / 无生成服务）。
+    """按生效能力拼装系统提示词（生成类型 / 提示词语言 / 比例 / 时长 / 参考图模式 / 无生成服务）。
 
     `max_side` / `max_seconds` = 功能级上限（作品的dt_max_side / dt_max_seconds），
     已从 DrawThings 连接配置移到功能级，故由调用方传入而非读 dt_cfg。
+    `prompt_lang_image` / `prompt_lang_video` = 图像 / 视频各自生效的提示词语言（'zh' | 'en'），
+    由调用方用 `prompt_language(dt_cfg, kind, lang)` 解析后传入。
     """
     if not (can_image or can_video):
         return (
             MC_SYSTEM + "当前不出图/出视频：用户要求生成时，请说明暂时无法生成，"
-            "但可以代为撰写详细的英文提示词供其后续使用。"
+            "但可以代为撰写详细的提示词供其后续使用。"
         )
     kinds = []
     if can_image:
@@ -69,30 +73,43 @@ def build_instructions(
     if can_video:
         kinds.append("视频")
     avail = "、".join(kinds)
+    # 独立工具：图片走 generate_image、视频走 generate_video（不再用 media 参数区分）
+    if can_image and can_video:
+        tool_hint = (
+            f"当前可生成：{avail}。生成图片调用 generate_image 工具，生成视频调用 generate_video 工具"
+            f"（用户未明确要图还是视频时默认生成视频）。"
+        )
+    elif can_image:
+        tool_hint = f"当前可生成：{avail}。生成图片调用 generate_image 工具。"
+    else:
+        tool_hint = f"当前可生成：{avail}。生成视频调用 generate_video 工具。"
+    # 提示词语言（按模型分开）：图像 / 视频可各自不同
+    img_pl = "中文" if prompt_lang_image == "zh" else "英文"
+    vid_pl = "中文" if prompt_lang_video == "zh" else "英文"
+    if can_image and can_video:
+        lang_hint = f"提示词语言：generate_image 用{img_pl}，generate_video 用{vid_pl}。"
+    elif can_image:
+        lang_hint = f"提示词语言：generate_image 用{img_pl}。"
+    else:
+        lang_hint = f"提示词语言：generate_video 用{vid_pl}。"
     ratio = ""
     if can_image:
         limit = int(max_side or 0) or 1024
         ratio = (
             f"生成图片时：用户指定比例或用途（海报 / 手机壁纸 / 横屏 / 竖屏 / 方形等）时，"
-            f"换算成具体宽高传给 generate_media 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
+            f"换算成具体宽高传给 generate_image 的 width/height（均为 64 的倍数，最长边 ≤ {limit}；"
             f"参考：1:1=768×768、3:4 竖=576×768、4:3 横=768×576、9:16 竖=576×1024、16:9 横=1024×576）；"
             f"用户未指定时 width/height 传 0。"
         )
-    default_media = "video" if can_video else "image"
     sec_hint = ""
     if can_video:
         cap = int(max_seconds or 0) or MAX_VIDEO_SECONDS
         cap = min(cap, MAX_VIDEO_SECONDS)
         sec_hint = (
-            f"生成视频时用 seconds 参数指定时长（秒，1~{cap}；用户未指定时传 0 = 用 {cap} 秒），"
+            f"生成视频时用 generate_video 的 seconds 参数指定时长（秒，1~{cap}；用户未指定时传 0 = 用 {cap} 秒），"
             f"单段视频最长 {cap} 秒。"
         )
-    instructions = MC_SYSTEM + (
-        f"当前只能生成：{avail}。调用 generate_media 时必须用 media 参数指明类型"
-        f'（图片传 media="image"，视频传 media="video"）；用户未明确时默认用 {default_media}。'
-        + sec_hint
-        + ratio
-    )
+    instructions = MC_SYSTEM + tool_hint + lang_hint + sec_hint + ratio
     # 参考图模式：勾选「支持参考图片」后，附图 / 最近生成的媒体会作为参考图 →
     # 提示词写成基于参考图的修改指令，而不是从头完整描述
     if eff_ref_img or eff_ref_vid:
@@ -100,7 +117,8 @@ def build_instructions(
             "参考图模式：附图（无附图时为本会话最近一次生成的媒体）将作为图生图 / 图生视频的参考图。"
             "此时 prompt 必须写成针对参考图的修改指令：先用一句话点明需与参考图保持一致的元素"
             "（角色、服装、画风、光照、构图），再具体描述用户本次要求的改动；不要从头重新描述整个画面。"
-            "若要参考本会话中更早的某张已生成媒体，给 generate_media 传 ref_index（1=最近一张，2=倒数第二张…）。"
+            "若要参考本会话中更早的某张已生成媒体，给 generate_image / generate_video 传 ref_index"
+            "（1=最近一张，2=倒数第二张…）。"
         )
     return instructions
 
@@ -251,23 +269,29 @@ class _PromptOut(BaseModel):
     prompt: str = ""
 
 
-_REFINE_SYSTEM = (
-    "你是出图/出视频的提示词优化师。根据「原始英文提示词」与「评分评语」，"
-    "在保持主体、角色与风格一致的前提下，针对评语指出的问题给出改进后的英文提示词。"
-    "只输出一个 JSON 对象，字段：prompt（改进后的英文提示词）。"
-)
+def _refine_system(prompt_lang: str = "en") -> str:
+    """重做（改进提示词）的系统提示词；提示词语言与被改进的块保持一致（zh|en）。"""
+    pl = "中文" if prompt_lang == "zh" else "英文"
+    return (
+        f"你是出图/出视频的提示词优化师。根据「原始{pl}提示词」与「评分评语」，"
+        f"在保持主体、角色与风格一致的前提下，针对评语指出的问题给出改进后的{pl}提示词。"
+        f"只输出一个 JSON 对象，字段：prompt（改进后的{pl}提示词）。"
+    )
 
 
-async def refine_prompt(llm_cfg, prompt: str, score: int, note: str, lang: str = "zh") -> str:
-    """结合评分评语改进提示词（失败则回退原提示词）。"""
+async def refine_prompt(
+    llm_cfg, prompt: str, score: int, note: str, lang: str = "zh", prompt_lang: str = "en"
+) -> str:
+    """结合评分评语改进提示词（失败则回退原提示词）。prompt_lang 决定改进后提示词的语言（zh|en）。"""
     if not llm_cfg or not prompt:
         return prompt
     try:
         model = build_model(llm_cfg)
-        agent = make_agent(model, _REFINE_SYSTEM, output_type=_PromptOut)
+        agent = make_agent(model, _refine_system(prompt_lang), output_type=_PromptOut)
+        pl = "中文" if prompt_lang == "zh" else "英文"
         user = (
             f"原始提示词：{prompt}\n评分：{int(score or 0)}\n评语：{note or '（无）'}\n"
-            f"请给出改进后的英文提示词。"
+            f"请给出改进后的{pl}提示词。"
         )
         out = (await agent.run(user)).output
         p = str(getattr(out, "prompt", "") or "").strip()
@@ -538,6 +562,8 @@ async def run_micro_chat(
             lang,
             max_side=int(getattr(work, "dt_max_side", 0) or 0),
             max_seconds=int(getattr(work, "dt_max_seconds", 0) or 0),
+            prompt_lang_image=prompt_language(dt_cfg, "image", lang),
+            prompt_lang_video=prompt_language(dt_cfg, "video", lang),
         )
         model = build_model(llm_cfg)
         agent = Agent(model, instructions=instructions)
@@ -550,43 +576,15 @@ async def run_micro_chat(
                 parts.append({"type": "text", "text": delta})
 
         async with agent:
-            # 图像与视频都被显式「不启用」时根本不注册 generate_media：
-            # 与其让模型去调一个必然失败的工具（每次都返回 TOOL_ERROR），不如让它按纯对话处理。
+            # 图片 / 视频各用一个独立 function call；某一类「不启用」时该工具不注册，
+            # 两类都「不启用」时一个都不注册 → 与其让模型去调一个必然失败的工具
+            # （每次都返回 TOOL_ERROR），不如让它按纯对话处理。
             if dt and (can_image or can_video):
 
-                @agent.tool
-                async def generate_media(
-                    ctx: RunContext,
-                    prompt: str,
-                    media: str = "",
-                    width: int = 0,
-                    height: int = 0,
-                    seconds: int = 0,
-                    ref_index: int = 0,
+                async def _run_generation(
+                    kind: str, prompt: str, *, width: int, height: int, seconds: int, ref_index: int
                 ) -> str:
-                    """生成图片或视频：根据详细英文提示词产出单张图或单个视频。
-
-                    若用户当前消息附带了图片，会自动作为参考图做图生图 / 图生视频（受配置「支持参考图片」开关
-                    控制，未开启时按文生图 / 文生视频）；无附图时回退使用本会话最近一次生成的媒体作参考。
-                    若用户想参考本会话中**更早的某张已生成媒体**，用 ref_index 指定（1=最近一张，2=倒数第二张…）。
-
-                    Args:
-                        prompt: 详细英文提示词（主体、场景、构图、光线、风格；视频补充运镜与动态）
-                        media: 产出类型："image" 生成图片 / "video" 生成视频（用户未明确时可留空）
-                        width: 图片宽（64 的倍数；用户未指定比例时传 0）
-                        height: 图片高（64 的倍数；用户未指定比例时传 0）
-                        seconds: 视频时长（秒，1~上限；用户未指定时传 0 = 用配置上限）
-                        ref_index: 参考本会话倒数第几张生成媒体（0/1=最近一张；>1 更早；无附图时生效）
-                    """
-                    kind = (media or "").strip().lower()
-                    if kind not in ("image", "video"):
-                        kind = "video" if can_video else "image"
-                    if (kind == "video" and not can_video) or (kind == "image" and not can_image):
-                        msg = _no_cap_msg(kind, work, lang)
-                        await out.put(
-                            (E.TOOL_ERROR, {"id": f"t{next(tool_ids)}", "message": msg, "prompt": prompt})
-                        )
-                        return f"生成失败：{msg}"
+                    """两个工具共用的执行体：解析参考图 → 调 _do_generation → 落库里程碑。"""
                     tid = f"t{next(tool_ids)}"
                     # 参考优先级：右键「引用」的媒体 > 本条消息附图 > 历史资产(ref_index) > 本会话最近生成的媒体
                     ref = quoted_ref or (img_paths[-1] if img_paths else None)
@@ -616,6 +614,58 @@ async def run_micro_chat(
                     )
                     persister.save("streaming")  # 生成的里程碑立即落库（断连可恢复）
                     return result
+
+                if can_image:
+
+                    @agent.tool
+                    async def generate_image(
+                        ctx: RunContext,
+                        prompt: str,
+                        width: int = 0,
+                        height: int = 0,
+                        ref_index: int = 0,
+                    ) -> str:
+                        """生成图片：根据详细提示词产出单张图片。
+
+                        若用户当前消息附带了图片，会自动作为参考图做图生图（受配置「支持参考图片」开关
+                        控制，未开启时按文生图）；无附图时回退使用本会话最近一次生成的媒体作参考。
+                        若用户想参考本会话中**更早的某张已生成图片/视频**，用 ref_index 指定
+                        （1=最近一张，2=倒数第二张…）。
+
+                        Args:
+                            prompt: 详细提示词（主体、场景、构图、光线、风格）；语言按系统要求
+                            width: 图片宽（64 的倍数；用户未指定比例时传 0）
+                            height: 图片高（64 的倍数；用户未指定比例时传 0）
+                            ref_index: 参考本会话倒数第几张生成媒体（0/1=最近一张；>1 更早；无附图时生效）
+                        """
+                        return await _run_generation(
+                            "image", prompt, width=width, height=height, seconds=0, ref_index=ref_index
+                        )
+
+                if can_video:
+
+                    @agent.tool
+                    async def generate_video(
+                        ctx: RunContext,
+                        prompt: str,
+                        seconds: int = 0,
+                        ref_index: int = 0,
+                    ) -> str:
+                        """生成视频：根据详细提示词产出单个视频。
+
+                        若用户当前消息附带了图片，会自动作为参考图做图生视频（受配置「支持参考图片」开关
+                        控制，未开启时按文生视频）；无附图时回退使用本会话最近一次生成的媒体作参考。
+                        若用户想参考本会话中**更早的某张已生成媒体**，用 ref_index 指定
+                        （1=最近一张，2=倒数第二张…）。
+
+                        Args:
+                            prompt: 详细提示词（主体、场景、构图、光线、风格；补充运镜与动态）；语言按系统要求
+                            seconds: 视频时长（秒，1~上限；用户未指定时传 0 = 用配置上限）
+                            ref_index: 参考本会话倒数第几张生成媒体（0/1=最近一张；>1 更早；无附图时生效）
+                        """
+                        return await _run_generation(
+                            "video", prompt, width=0, height=0, seconds=seconds, ref_index=ref_index
+                        )
 
             async with agent.run_stream(
                 user_prompt(user_message, img_paths), message_history=to_message_history(history)
@@ -699,9 +749,11 @@ async def run_regenerate(
         if ref is None:
             p = latest_session_media_path(db, session.id)
             ref = p
-        # 重做：结合评分评语用 LLM 改进提示词（失败回退原提示词）
+        # 重做：结合评分评语用 LLM 改进提示词（失败回退原提示词）；语言与该块一致
         if improve:
-            prompt = await refine_prompt(llm_cfg, prompt, score, note, lang)
+            prompt = await refine_prompt(
+                llm_cfg, prompt, score, note, lang, prompt_language(dt_cfg, kind, lang)
+            )
         await _do_generation(
             out,
             dt=dt,

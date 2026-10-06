@@ -1,6 +1,6 @@
 """Pydantic AI v2 统一 Agent 层：后端所有 LLM 调用都走这里。
 
-- 微创作：流式对话 + generate_media function call（SSE 推送）
+- 微创作：流式对话 + generate_image / generate_video function call（SSE 推送）
 - 流水线：结构化输出（篇幅 / 分章 / 剧本）与纯文本生成
 
 所有 LLM 走 OpenAI 兼容协议（Ollama / vLLM / 云端），

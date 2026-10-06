@@ -194,15 +194,10 @@ Views.microWork = {
         dtModels.value = [];  // app 未开 gRPC 不阻塞：可手动输入模型文件名
       }
     }
-    function syncCfg() {
+    // 同步 DrawThings 配置相关字段（作品级未显式选模型时预填配置里的；参考图开关：作品显式值优先，否则跟随配置）
+    function syncDtFields() {
       const w = data.value.work;
-      cfg.title = w.title;
-      cfg.llm = w.llm_config_id;
-      cfg.dt = w.drawthings_config_id || '';
-      cfg.score_mode = w.score_mode || 'image';
-      cfg.auto_score = !!w.auto_score;
       const c = (data.value.drawthing_configs || []).find(x => x.id === cfg.dt);
-      // 作品级未显式选模型时预填配置里的；参考图开关：作品显式值优先，否则跟随配置
       cfg.mi = w.dt_model_image || (c ? (c.model_image || '') : '');
       cfg.mv = w.dt_model_video || (c ? (c.model_video || '') : '');
       cfg.ref_i = (w.dt_ref_image === '1') || (w.dt_ref_image === '' && !!c && !!c.ref_image);
@@ -213,19 +208,16 @@ Views.microWork = {
       cfg.seconds = w.dt_max_seconds || 0;
       fetchModels();
     }
-    watch(() => cfg.dt, (id) => {
+    function syncCfg() {
       const w = data.value.work;
-      const c = (data.value.drawthing_configs || []).find(x => x.id === id);
-      cfg.mi = w.dt_model_image || (c ? (c.model_image || '') : '');
-      cfg.mv = w.dt_model_video || (c ? (c.model_video || '') : '');
-      cfg.ref_i = (w.dt_ref_image === '1') || (w.dt_ref_image === '' && !!c && !!c.ref_image);
-      cfg.ref_v = (w.dt_ref_video === '1') || (w.dt_ref_video === '' && !!c && !!c.ref_video);
-      cfg.steps_i = w.dt_max_steps_image || 0;
-      cfg.steps_v = w.dt_max_steps_video || 0;
-      cfg.side = w.dt_max_side || 0;
-      cfg.seconds = w.dt_max_seconds || 0;
-      fetchModels();
-    });
+      cfg.title = w.title;
+      cfg.llm = w.llm_config_id;
+      cfg.dt = w.drawthings_config_id || '';
+      cfg.score_mode = w.score_mode || 'image';
+      cfg.auto_score = !!w.auto_score;
+      syncDtFields();
+    }
+    watch(() => cfg.dt, syncDtFields);
 
     // 图片放大（灯箱）：子组件 emit('preview', list, idx)
     const lb = reactive({ show: false, list: [], idx: 0 });

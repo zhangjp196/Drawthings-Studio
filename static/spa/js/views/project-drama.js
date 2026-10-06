@@ -182,7 +182,8 @@ Views.projectDrama = {
             <div class="md-detail">
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :project-id="data.project.id" :season-id="seasonId" :season-index="cur" :def-w="oW" :def-h="oH" :score-min="(data.project.score_min || 60)" :beats="epBeats" :clip-count="seasonChapters.length" :ref-kind="curRefKind(cur)" :expanded="true" :no-toggle="true" :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
                             @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
-                            @saveplan="savePlan" />
+                            @saveplan="savePlan" @update:chapter="onChapterUpdate"
+                            @update:score="onChapterScore" @update:clear="onChapterClear" />
               <el-empty v-else :description="I18N.t('d.clipPlanEmpty')" :image-size="54" />
             </div>
 
@@ -791,66 +792,58 @@ Views.projectDrama = {
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
     }
     // 总体（全局）：只保存全局字段（全局要求 / 分辨率）
-    function saveStory() {
+    async function saveStory() {
       busySave.value = true;
-      (async () => {
-        try {
-          await API.post(`/api/dramas/${props.id}/outline`, {
-            global_prompt: oGlobal.value, res_width: oW.value, res_height: oH.value,
-          });
-          ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
-          await load();
-        } catch (e) { ElementPlus.ElMessage.error(e.message); }
-        finally { busySave.value = false; }
-      })();
+      try {
+        await API.post(`/api/dramas/${props.id}/outline`, {
+          global_prompt: oGlobal.value, res_width: oW.value, res_height: oH.value,
+        });
+        ElementPlus.ElMessage.success(I18N.t('p.outSaved'));
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { busySave.value = false; }
     }
     // 企划（每季）：保存本季大纲
-    function saveSeasonArc() {
+    async function saveSeasonArc() {
       if (!seasonId.value) return;
       busySave.value = true;
-      (async () => {
-        try {
-          await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, { title: seasonTitleText.value, arc: seasonArcText.value });
-          ElementPlus.ElMessage.success(I18N.t('d.epSaved'));
-          await load();
-        } catch (e) { ElementPlus.ElMessage.error(e.message); }
-        finally { busySave.value = false; }
-      })();
+      try {
+        await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, { title: seasonTitleText.value, arc: seasonArcText.value });
+        ElementPlus.ElMessage.success(I18N.t('d.epSaved'));
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { busySave.value = false; }
     }
     // 企划（每季）：保存本季角色
-    function saveSeasonChars() {
+    async function saveSeasonChars() {
       if (!seasonId.value) return Promise.resolve();
       busySave.value = true;
       // 返回 promise：新增角色存参考图 / AI 描述前需先落盘取 id（ensureSeasonCharSaved 会 await）
-      return (async () => {
-        try {
-          await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, {
-            characters: seasonChars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
-          });
-          ElementPlus.ElMessage.success(I18N.t('d.epSaved'));
-          await load();
-          return seasonChars.value;   // 保存成功：把刷新后的角色交给调用方（ensureSeasonCharSaved）
-        } catch (e) {
-          ElementPlus.ElMessage.error(e.message);
-          return null;               // 失败返回 null（不抛异常：按钮 @confirm 直接调用它）
-        } finally { busySave.value = false; }
-      })();
+      try {
+        await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, {
+          characters: seasonChars.value.map(c => ({ id: c.id, name: c.name, description: c.description })),
+        });
+        ElementPlus.ElMessage.success(I18N.t('d.epSaved'));
+        await load();
+        return seasonChars.value;   // 保存成功：把刷新后的角色交给调用方（ensureSeasonCharSaved）
+      } catch (e) {
+        ElementPlus.ElMessage.error(e.message);
+        return null;               // 失败返回 null（不抛异常：按钮 @confirm 直接调用它）
+      } finally { busySave.value = false; }
     }
-    function savePlan() {
+    async function savePlan() {
       if (!seasonId.value) return;
       busySave.value = true;
-      (async () => {
-        try {
-          await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, {
-            count_min: planCount.value,
-            count_max: planCount.value,
-            chapters: seasonChapters.value.map(c => ({ title: c.title, summary: c.summary })),
-          });
-          ElementPlus.ElMessage.success(I18N.t('d.planSaved'));
-          await load();
-        } catch (e) { ElementPlus.ElMessage.error(e.message); }
-        finally { busySave.value = false; }
-      })();
+      try {
+        await API.patch(`/api/dramas/${props.id}/seasons/${seasonId.value}`, {
+          count_min: planCount.value,
+          count_max: planCount.value,
+          chapters: seasonChapters.value.map(c => ({ title: c.title, summary: c.summary })),
+        });
+        ElementPlus.ElMessage.success(I18N.t('d.planSaved'));
+        await load();
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { busySave.value = false; }
     }
 
     // 批量（SSE 进度）
@@ -913,14 +906,15 @@ Views.projectDrama = {
       }
     }
     // 生成画面：勾选章节则只生成它们，未勾选则生成全部（两步连贯、逐章进行、后章参考前章已生成图）
-    async function genAll() {
+    // 通用批量操作（生成/评分）：SSE 流式处理，支持取消、进度显示、完成后刷新
+    async function runBatchAction(step, busyRef, progressKey) {
       if (!seasonId.value) return;
-      busyGenAll.value = true; progress.text = '';
+      busyRef.value = true; progress.text = '';
       const indices = selected.value.length ? selected.value : null;
       const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
-        await API.sse(`/api/dramas/${props.id}/action-stream`, { step: 'generate', season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.genProgress', d.current, d.total, d.title);
+        await API.sse(`/api/dramas/${props.id}/action-stream`, { step, season_id: seasonId.value, indices }, (ev, d) => {
+          if (ev === EVENTS.PROGRESS) progress.text = I18N.t(progressKey, d.current, d.total, d.title);
           else if (ev === EVENTS.SCORE) applyScoreLive(d);
           else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
           else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
@@ -933,31 +927,11 @@ Views.projectDrama = {
         if (e.cancelled || ctrl.signal.aborted) { selected.value = []; await load(); }   // 停止：静默
         else { ElementPlus.ElMessage.error(e.message); await load(); }
       }
-      finally { busyGenAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+      finally { busyRef.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
+    async function genAll() { return runBatchAction('generate', busyGenAll, 'd.genProgress'); }
     // VLM 批量评分：勾选章节则只评它们，未勾选则评全部（逐章进行；单章失败不阻塞后续）
-    async function scoreAll() {
-      if (!seasonId.value) return;
-      busyScoreAll.value = true; progress.text = '';
-      const indices = selected.value.length ? selected.value : null;
-      const ctrl = new AbortController(); sseCtrl = ctrl;
-      try {
-        await API.sse(`/api/dramas/${props.id}/action-stream`, { step: 'score', season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('d.scoreProgress', d.current, d.total, d.title);
-          else if (ev === EVENTS.SCORE) applyScoreLive(d);
-          else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
-          else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
-          else if (ev === EVENTS.ERROR) throw new Error(d.message);
-        }, ctrl.signal);
-        ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
-        selected.value = [];
-        await load();
-      } catch (e) {
-        if (e.cancelled || ctrl.signal.aborted) { selected.value = []; await load(); }   // 停止：静默
-        else { ElementPlus.ElMessage.error(e.message); await load(); }
-      }
-      finally { busyScoreAll.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
-    }
+    async function scoreAll() { return runBatchAction('score', busyScoreAll, 'd.scoreProgress'); }
 
     // 批量清空章节产物：勾选章节则只清它们，未勾选则清全部（清理产物/出视频提示词/评分，保留标题/摘要/剧本）
     async function clearAll() {
@@ -1004,6 +978,31 @@ Views.projectDrama = {
     function onChapterReloaded(index) {
       if (typeof index === 'number' && index >= 0) cur.value = index; // 生成/写剧本后切到该章
       load();
+    }
+    // 章节卡片保存后更新本地数据（避免直接修改 props）
+    function onChapterUpdate({ prompt, title, summary, seconds }) {
+      if (!curCh.value) return;
+      curCh.value.prompt = prompt;
+      curCh.value.title = title;
+      curCh.value.summary = summary;
+      curCh.value.seconds = seconds;
+    }
+    // 章节卡片评分后更新本地数据
+    function onChapterScore({ score, score_note }) {
+      if (!curCh.value) return;
+      curCh.value.score = score;
+      curCh.value.score_note = score_note;
+    }
+    // 章节卡片清空后重置本地数据
+    function onChapterClear() {
+      if (!curCh.value) return;
+      curCh.value.media_path = '';
+      curCh.value.media_url = '';
+      curCh.value.prompt = '';
+      curCh.value.score = 0;
+      curCh.value.score_note = '';
+      curCh.value.status = 'pending';
+      curCh.value.error = '';
     }
 
     function openCfg() {
@@ -1079,7 +1078,7 @@ Views.projectDrama = {
       oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, imgChoices, vidChoices, lb, genDlg, genDlgTitle, genDlgExtra,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
-      exportZip, exportVideo, previewVideo, videoDlg, videoUrl, delChapter, onChapterReloaded,
+      exportZip, exportVideo, previewVideo, videoDlg, videoUrl, delChapter, onChapterReloaded, onChapterUpdate, onChapterScore, onChapterClear,
       openCfg, saveCfg, openLb, load, backTo, router,
     };
   },

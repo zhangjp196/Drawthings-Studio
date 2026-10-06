@@ -1449,6 +1449,17 @@ def norm_ref_flag(v) -> int | None:
     return 1 if str(v).strip().lower() in ("1", "true", "yes", "on") else 0
 
 
+PROMPT_LANGS = ("default", "zh", "en")
+
+
+def norm_prompt_lang(v) -> str:
+    """提示词语言归一：default（跟随界面语言）/ zh（始终中文）/ en（始终英文）。
+
+    非法值或缺省 → 'default'（安全兜底，不报错）。"""
+    v = str(v or "default").strip().lower()
+    return v if v in PROMPT_LANGS else "default"
+
+
 def build_drawthings_client(
     cfg,
     data_dir: Path,

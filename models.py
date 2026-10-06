@@ -47,6 +47,10 @@ class DrawThingConfig(Base):
 
     「支持参考图片」（`ref_image` / `ref_video`）分别声明图像/视频模型能否图生图 / 图生视频：
     勾选后才会把上一章媒体作为参考图传给 Draw Things，未勾选一律按文生图 / 文生视频。
+
+    「提示词语言」（`prompt_lang_image` / `prompt_lang_video`）按模型分开：default = 跟随界面语言
+    （中文界面出中文提示词 / 英文界面出英文提示词），zh = 始终中文，en = 始终英文。
+    提示词由 LLM 生成，此项决定其语言（部分模型只认英文，部分支持中文）。
     """
 
     __tablename__ = "drawthing_configs"
@@ -58,6 +62,8 @@ class DrawThingConfig(Base):
     model_video = Column(String(200), default="")  # 视频模型文件名（可空）
     ref_image = Column(Integer, default=0)  # 图像模型支持参考图片（图生图）；0=纯文生图
     ref_video = Column(Integer, default=0)  # 视频模型支持参考图片（图生视频）；0=纯文生视频
+    prompt_lang_image = Column(String(10), default="default")  # 出图提示词语言：default|zh|en
+    prompt_lang_video = Column(String(10), default="default")  # 出视频提示词语言：default|zh|en
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
 

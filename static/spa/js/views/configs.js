@@ -141,7 +141,6 @@ Views.configs = {
                 <span class="dt-dot" :class="statusClass(row.id)"></span>
                 <span class="cfg-meta muted">{{ statusText(row.id) }}</span>
               </div>
-              <div class="cfg-meta muted">{{ dtMeta(row) }}</div>
               <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
               <div class="wc-meta muted">{{ I18N.t('cfg.created', fmt(row.created_at)) }}</div>
               <div class="wc-actions">
@@ -196,6 +195,23 @@ Views.configs = {
                 <el-option value="enable_thinking" :label="I18N.t('cfg.thinkingParamEnable')" />
               </el-select>
               <div class="hint">{{ I18N.t('cfg.thinkingParamHint') }}</div>
+            </el-form-item>
+          </template>
+          <template v-if="f.config_type === 'drawthings'">
+            <el-form-item :label="I18N.t('cfg.promptLangImage')">
+              <el-select v-model="f.prompt_lang_image" style="width: 100%">
+                <el-option value="default" :label="I18N.t('cfg.promptLangDefault')" />
+                <el-option value="zh" :label="I18N.t('cfg.promptLangZh')" />
+                <el-option value="en" :label="I18N.t('cfg.promptLangEn')" />
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="I18N.t('cfg.promptLangVideo')">
+              <el-select v-model="f.prompt_lang_video" style="width: 100%">
+                <el-option value="default" :label="I18N.t('cfg.promptLangDefault')" />
+                <el-option value="zh" :label="I18N.t('cfg.promptLangZh')" />
+                <el-option value="en" :label="I18N.t('cfg.promptLangEn')" />
+              </el-select>
+              <div class="hint">{{ I18N.t('cfg.promptLangHint') }}</div>
             </el-form-item>
           </template>
         </el-form>
@@ -270,6 +286,7 @@ Views.configs = {
       thinking: 'default', thinking_param: 'auto',
       model_image: '', model_video: '',
       ref_image: false, ref_video: false,   // 勾选后才图生图 / 图生视频（默认不勾选 = 文生图 / 文生视频）
+      prompt_lang_image: 'default', prompt_lang_video: 'default',  // 提示词语言：default|zh|en（按模型分开）
     });
 
     // DrawThings 在线状态：config_id → {online, models, elapsed_ms, error}（后端 30s 自动轮询，此处只是展示）
@@ -390,6 +407,7 @@ Views.configs = {
         thinking: 'default', thinking_param: 'auto',
         model_image: '', model_video: '',
         ref_image: false, ref_video: false,
+        prompt_lang_image: 'default', prompt_lang_video: 'default',
       });
       modelOpts.value = [];
       dlg.value = true;
@@ -404,12 +422,15 @@ Views.configs = {
         thinking: 'default', thinking_param: 'auto',
         model_image: '', model_video: '',
         ref_image: false, ref_video: false,
+        prompt_lang_image: 'default', prompt_lang_video: 'default',
       });
       if (type === 'drawthings') {
         Object.assign(f, {
           name: row.name, base_url: row.base_url,
           model_image: row.model_image || '', model_video: row.model_video || '',
           ref_image: !!row.ref_image, ref_video: !!row.ref_video,
+          prompt_lang_image: row.prompt_lang_image || 'default',
+          prompt_lang_video: row.prompt_lang_video || 'default',
         });
       } else {
         Object.assign(f, {
@@ -472,10 +493,6 @@ Views.configs = {
     }
 
     const fmt = (s) => (s || '').slice(0, 19).replace('T', ' ');
-    function dtMeta(r) {
-      const p = [];
-      return p.join(' · ');
-    }
     let statusTimer = null;
     onMounted(() => {
       load(); loadBasic(); scrollByQuery();
@@ -490,7 +507,7 @@ Views.configs = {
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
-      urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, dtMeta,
+      urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt,
       checkingStatus, checkAllStatus, checkStatusOne, statusText, statusClass, statusTip,
       mtBusy, orphanReport, scanOrphans, purgeOrphans, backupDb, cleanExports,
     };

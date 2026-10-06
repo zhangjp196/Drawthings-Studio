@@ -295,6 +295,8 @@ def _migrate():
             "model_video": "VARCHAR(200) DEFAULT ''",
             "ref_image": "INTEGER DEFAULT 0",
             "ref_video": "INTEGER DEFAULT 0",
+            "prompt_lang_image": "VARCHAR(10) DEFAULT 'default'",
+            "prompt_lang_video": "VARCHAR(10) DEFAULT 'default'",
         },
         "chapters": {
             "width": "INTEGER DEFAULT 0",

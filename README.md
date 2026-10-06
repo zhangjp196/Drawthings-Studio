@@ -137,7 +137,7 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
 - **Chat area interaction**: the message area adapts to the viewport height (no more brittle offset); opening a session / images loading
   auto-pins to the bottom, while scrolling up stops the follow and reveals a "↓ Back to bottom" button; the session sidebar collapses
   (remembered per work), and switching sessions aborts any in-flight generation.
-- **Auto-generation via function calling**: when an image/video is needed, the model **auto-calls the `generate_media` tool**
+- **Auto-generation via function calling**: when an image/video is needed, the model **auto-calls the `generate_image` (image) / `generate_video` (video) tool**
   (distilling a detailed English prompt from the context), then calls Draw Things to produce a single image/video;
   the result is embedded directly into the chat bubble (with the prompt).
 - **Durable stream (recoverable output)**: the assistant reply is written to the database **incrementally** (a draft is
@@ -156,7 +156,7 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   and prompt; `GET /api/micro/{work}/jobs` lists them and `POST .../jobs/{id}/cancel` stops a running one **without
   relying on the client connection** (a live job also shows a Stop control in the chat).
 - **Reference orchestration**: the model can target an **earlier asset** of the session via the `ref_index` argument of
-  `generate_media` (1 = most recent, 2 = second most recent…), so multi-step "use the 2nd image as reference" flows are
+  `generate_image` / `generate_video` (1 = most recent, 2 = second most recent…), so multi-step "use the 2nd image as reference" flows are
   deterministic instead of always chaining the latest.
 - **Always scrolls while generating**: the chat pins to the bottom as the reply streams (scrolling up mid-stream no longer
   stops the follow), so output is always visible at the bottom.
@@ -264,7 +264,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 │   ├── api_comic.py     # comic project routes (/api/comics/*)
 │   ├── api_drama.py     # short-drama project routes (/api/dramas/*)
 │   ├── api_micro.py     # micro-creation routes (/api/micro/*) + SSE transport (drive engine queue + heartbeat)
-│   ├── micro_agent.py   # micro-creation session engine (system prompt / generate_media tool / parts / durable writes / rerun)
+│   ├── micro_agent.py   # micro-creation session engine (system prompt / generate_image + generate_video tools / parts / durable writes / rerun)
 │   ├── micro_parts.py   # assistant "ordered content blocks" schema + versioned (de)serialization
 │   ├── capabilities.py  # effective generation capabilities (feature-level model / ref-image overrides; shared)
 │   ├── media_files.py   # media cleanup / path resolve / user-attachment save / ZIP·PDF export (shared)
@@ -464,9 +464,10 @@ endpoint as `host:port`). The HTTP API has been removed: it only returns a singl
   audio`) and the file is re-muxed once — logged, never silent. (`tools/check_video_fps.py` covers this end to end.)
 - A gRPC request **must carry the full generation config**, so the config specifies:
   - **image model / video model** (`model_image` / `model_video`): each may be empty — the effective model comes from the feature (project / micro-creation), falling back to the config.
-    The per-feature value is **three-state**: `Follow config default` (empty string, falls back to the config) / a specific model / **`Disabled`** (sentinel `__none__` — no image or no video even when the config has a model of that type; image and video can be disabled independently). When both are disabled the `generate_media` tool is **not registered at all**, so the session runs as a plain conversation.
+    The per-feature value is **three-state**: `Follow config default` (empty string, falls back to the config) / a specific model / **`Disabled`** (sentinel `__none__` — no image or no video even when the config has a model of that type; image and video can be disabled independently). When a type is disabled its tool is not registered; when both are disabled the `generate_image` / `generate_video` tools are **not registered at all**, so the session runs as a plain conversation.
     Click "Fetch models" to read the **downloaded models** from the app
     (gRPC `get_models`, with names and a video flag).
+  - **Prompt language** (`prompt_lang_image` / `prompt_lang_video`, configured per model): `Default` = follow the UI language (Chinese UI → Chinese prompt, English UI → English prompt), `Supports Chinese` = always Chinese, `English only` = always English. Prompts are written by the LLM, so this decides their language (some models only understand English, some support Chinese).
   - The generation **preset** (steps / sampler / size) is **inferred from the model name** (normalized match against
     drawthings-py preset models, ignoring quantization/version suffixes, e.g. `ltx_2.3_22b_distilled_1.1_q6p` →
     `ltx_2_3_distilled`, `flux_2_klein_9b_q6p` → `flux_2_klein_9b`), no input needed. Normalization **ignores separator

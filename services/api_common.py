@@ -14,7 +14,7 @@ from config import media_url as _media_url
 from config_store import ConfigStore
 from i18n import L, lang_of
 from models import Project
-from services.drawthings import MAX_STEPS_LIMIT, norm_ref_flag
+from services.drawthings import MAX_STEPS_LIMIT, norm_prompt_lang, norm_ref_flag
 from services.pipeline import hex_to_rgb
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -83,6 +83,8 @@ def _dt_view(c) -> dict:
         "model_video": getattr(c, "model_video", "") or "",
         "ref_image": int(getattr(c, "ref_image", 0) or 0),  # 图像支持参考图片（图生图）
         "ref_video": int(getattr(c, "ref_video", 0) or 0),  # 视频支持参考图片（图生视频）
+        "prompt_lang_image": norm_prompt_lang(getattr(c, "prompt_lang_image", "default")),
+        "prompt_lang_video": norm_prompt_lang(getattr(c, "prompt_lang_video", "default")),
         "created_at": c.created_at,
     }
 
@@ -139,6 +141,7 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
 
     模型改为功能级选择（项目 / 微创作各自选），配置里的模型仅作兜底默认，可为空。
     ref_image / ref_video：「支持参考图片」能力开关，随配置声明（图生图 / 图生视频）。
+    prompt_lang_image / prompt_lang_video：提示词语言（按模型分开）：default（跟随界面语言）/ zh / en。
     最大分辨率 / 最大秒数已移到功能级（Project / MicroWork 的 dt_max_side / dt_max_seconds）。"""
     model_image = str(body.get("model_image") or "").strip()
     model_video = str(body.get("model_video") or "").strip()
@@ -156,6 +159,9 @@ def _dt_gen_fields(body: dict, lang: str = "zh") -> dict:
         # 能力开关：模型已在功能级选择，配置只声明「支持参考图片」
         "ref_image": flag("ref_image"),
         "ref_video": flag("ref_video"),
+        # 提示词语言（按模型分开）：default|zh|en，非法/缺省 → default
+        "prompt_lang_image": norm_prompt_lang(body.get("prompt_lang_image")),
+        "prompt_lang_video": norm_prompt_lang(body.get("prompt_lang_video")),
     }
 
 

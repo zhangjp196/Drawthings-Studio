@@ -260,6 +260,52 @@ Views.microChat = {
       stream.parts.push({ type: 'error', message: d.message || I18N.t('mw.err') });
     }
 
+    // ---------- 通用 SSE 流式处理 ----------
+    // 提取 send/rerun 共同的 SSE 逻辑：状态管理、事件分发、清理
+    async function runSse(url, payload, handlers = {}) {
+      const ctrl = new AbortController();
+      sseCtrl = ctrl;
+      let failed = false;
+      try {
+        await API.sse(url, payload, (ev, d) => {
+          if (ev === EVENTS.TOKEN && handlers.onToken) {
+            handlers.onToken(d);
+          } else if (ev === EVENTS.TOOL) {
+            onTool(d);
+            status.value = '';
+            stickBottom();
+          } else if (ev === EVENTS.MEDIA) {
+            onMedia(d);
+            stickBottom();
+          } else if (ev === EVENTS.TOOL_STATUS) {
+            onToolStatus(d);
+          } else if (ev === EVENTS.TOOL_ERROR) {
+            onToolError(d);
+          } else if (ev === EVENTS.ERROR) {
+            failed = true;
+            onError(d);
+          }
+        }, ctrl.signal);
+        if (failed) {
+          status.value = I18N.t('mw.errRetry');
+          return false;
+        }
+        return true;
+      } catch (e) {
+        if (!ctrl.signal.aborted) {
+          onError({ message: e.message });
+          status.value = I18N.t('mw.errRetry');
+        }
+        return false;
+      } finally {
+        stopTimer();
+        busy.value = false;
+        streaming.value = false;
+        if (sseCtrl === ctrl) sseCtrl = null;
+        checkJob();
+      }
+    }
+
     // ---------- 发送（SSE 流式） ----------
     async function send() {
       if (busy.value || !props.hasSession) return;
@@ -282,50 +328,14 @@ Views.microChat = {
       pinned = true;
       scrollBottom(true);
 
-      let failed = false;
-      const ctrl = new AbortController();
-      sseCtrl = ctrl;
       const refUrl = quoted.value ? quoted.value.url : '';
-      try {
-        await API.sse(`/api/micro/${props.id}/${props.sid}/chat`, { message, images: shot, ref_url: refUrl }, (ev, d) => {
-          if (ev === EVENTS.TOKEN) {
-            pushText(d.text);
-            status.value = '';
-            stickBottom();
-          } else if (ev === EVENTS.TOOL) {
-            onTool(d);
-            status.value = '';
-            stickBottom();
-          } else if (ev === EVENTS.MEDIA) {
-            onMedia(d);
-            stickBottom();
-          } else if (ev === EVENTS.TOOL_STATUS) {
-            onToolStatus(d);
-          } else if (ev === EVENTS.TOOL_ERROR) {
-            onToolError(d);
-          } else if (ev === EVENTS.ERROR) {
-            failed = true;
-            onError(d);
-          }
-        }, ctrl.signal);
-        if (failed) {
-          status.value = I18N.t('mw.errRetry');
-        } else {
-          quoted.value = null;  // 引用已用于本轮生成，成功后清除
-          // 落库完成：由父组件重新拉取持久化历史（含左侧列表/标题同步）
-          emit('sent');
-        }
-      } catch (e) {
-        if (!ctrl.signal.aborted) {
-          onError({ message: e.message });
-          status.value = I18N.t('mw.errRetry');
-        }
-      } finally {
-        stopTimer();
-        busy.value = false;
-        streaming.value = false;
-        if (sseCtrl === ctrl) sseCtrl = null;
-        checkJob();
+      const ok = await runSse(`/api/micro/${props.id}/${props.sid}/chat`,
+        { message, images: shot, ref_url: refUrl },
+        { onToken: (d) => { pushText(d.text); status.value = ''; stickBottom(); } });
+      if (ok) {
+        quoted.value = null;  // 引用已用于本轮生成，成功后清除
+        // 落库完成：由父组件重新拉取持久化历史（含左侧列表/标题同步）
+        emit('sent');
       }
     }
 
@@ -343,48 +353,14 @@ Views.microChat = {
       pinned = true;
       scrollBottom(true);
 
-      let failed = false;
-      const ctrl = new AbortController();
-      sseCtrl = ctrl;
-      try {
-        await API.sse(`/api/micro/${props.id}/${props.sid}/regenerate`, {
-          prompt: b.prompt, media: b.media || 'image',
-          width: b.width || 0, height: b.height || 0, seconds: b.seconds || 0,
-          ref_url: opts.ref_url != null ? opts.ref_url : (b.ref_url || ''),
-          improve: !!opts.improve, score: b.score || 0, note: b.score_note || '',
-        }, (ev, d) => {
-          if (ev === EVENTS.TOOL) {
-            onTool(d);
-            status.value = '';
-            stickBottom();
-          } else if (ev === EVENTS.MEDIA) {
-            onMedia(d);
-            stickBottom();
-          } else if (ev === EVENTS.TOOL_STATUS) {
-            onToolStatus(d);
-          } else if (ev === EVENTS.TOOL_ERROR) {
-            onToolError(d);
-          } else if (ev === EVENTS.ERROR) {
-            failed = true;
-            onError(d);
-          }
-        }, ctrl.signal);
-        if (failed) {
-          status.value = I18N.t('mw.errRetry');
-        } else {
-          emit('sent');  // 落库完成：父组件刷新持久化历史
-        }
-      } catch (e) {
-        if (!ctrl.signal.aborted) {
-          onError({ message: e.message });
-          status.value = I18N.t('mw.errRetry');
-        }
-      } finally {
-        stopTimer();
-        busy.value = false;
-        streaming.value = false;
-        if (sseCtrl === ctrl) sseCtrl = null;
-        checkJob();
+      const ok = await runSse(`/api/micro/${props.id}/${props.sid}/regenerate`, {
+        prompt: b.prompt, media: b.media || 'image',
+        width: b.width || 0, height: b.height || 0, seconds: b.seconds || 0,
+        ref_url: opts.ref_url != null ? opts.ref_url : (b.ref_url || ''),
+        improve: !!opts.improve, score: b.score || 0, note: b.score_note || '',
+      });
+      if (ok) {
+        emit('sent');  // 落库完成：父组件刷新持久化历史
       }
     }
 

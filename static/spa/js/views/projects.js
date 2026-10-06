@@ -110,16 +110,20 @@ Views.projects = {
     const renameKind = ref('comic');
     const busy = ref(false);
 
+    let loadSeq = 0;   // 兜住「旧响应后到覆盖新状态」：只有最新一次 load 的响应才能写状态
     async function load() {
+      const my = ++loadSeq;
       try {
         // 创作中心按类型分开：漫画走 /api/comics、短剧走 /api/dramas
         const data = await API.get(`/api/${f.kind === 'drama' ? 'dramas' : 'comics'}?` + new URLSearchParams({
           page: f.page, size: f.size, q: f.q, status: f.status, sort: f.sort,
         }));
+        if (my !== loadSeq) return;   // 期间又有新的 load：本响应用于更早的一次
         rows.value = data.projects;
         total.value = data.total;
         totalPages.value = data.total_pages;
       } catch (e) {
+        if (my !== loadSeq) return;
         ElementPlus.ElMessage.error(e.message);
       }
     }
@@ -138,24 +142,6 @@ Views.projects = {
     });
     const onSearch = debounce(apply, 350);
     onBeforeUnmount(() => onSearch.cancel());   // 卸载后不再触发 query 同步跳转
-
-    let loadSeq = 0;   // 兜住「旧响应后到覆盖新状态」：只有最新一次 load 的响应才能写状态
-    async function load() {
-      const my = ++loadSeq;
-      try {
-        // 创作中心按类型分开：漫画走 /api/comics、短剧走 /api/dramas
-        const data = await API.get(`/api/${f.kind === 'drama' ? 'dramas' : 'comics'}?` + new URLSearchParams({
-          page: f.page, size: f.size, q: f.q, status: f.status, sort: f.sort,
-        }));
-        if (my !== loadSeq) return;   // 期间又有新的 load：本响应用于更早的一次
-        rows.value = data.projects;
-        total.value = data.total;
-        totalPages.value = data.total_pages;
-      } catch (e) {
-        if (my !== loadSeq) return;
-        ElementPlus.ElMessage.error(e.message);
-      }
-    }
     function reset() {
       Object.assign(f, { page: 1, size: 10, q: '', status: '', sort: 'desc' });
       syncKindQuery();

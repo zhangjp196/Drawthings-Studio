@@ -16,7 +16,7 @@ Views.chapterCardComic = {
     defH: { type: Number, default: 0 },
     scoreMin: { type: Number, default: 60 },        // 评分阈值（分值标签配色用）
   },
-  emits: ['preview', 'reloaded', 'toggle', 'saveplan'],
+  emits: ['preview', 'reloaded', 'toggle', 'saveplan', 'update:chapter', 'update:score', 'update:clear'],
   template: `
     <el-card class="chapter" shadow="never" :class="{ 'is-expanded': expanded }">
       <div class="ch-head" :class="{ 'no-toggle': noToggle }" @click="!noToggle && $emit('toggle')">
@@ -149,9 +149,8 @@ Views.chapterCardComic = {
       try {
         await API.post(`/api/comics/${props.projectId}/edit/${props.seasonIndex}`,
                        { season_id: props.seasonId, prompt: prompt.value });
-        props.chapter.prompt = prompt.value;
-        props.chapter.title = title.value;
-        props.chapter.summary = summary.value;
+        // 通过 emit 通知父组件更新，避免直接修改 props
+        emit('update:chapter', { prompt: prompt.value, title: title.value, summary: summary.value });
         emit('saveplan');
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
@@ -163,9 +162,9 @@ Views.chapterCardComic = {
       try {
         const r = await API.post(`/api/comics/${props.projectId}/chapters/${props.seasonIndex}/score`,
                                  { season_id: props.seasonId });
-        props.chapter.score = (r && r.score) || 0;
-        props.chapter.score_note = (r && r.note) || '';
-        ElementPlus.ElMessage.success(I18N.t('p.scoreResult', props.chapter.title, props.chapter.score));
+        // 通过 emit 通知父组件更新，避免直接修改 props
+        emit('update:score', { score: (r && r.score) || 0, score_note: (r && r.note) || '' });
+        ElementPlus.ElMessage.success(I18N.t('p.scoreResult', props.chapter.title, (r && r.score) || 0));
         emit('reloaded');
       } catch (e) { ElementPlus.ElMessage.error(e.message); }
       finally { busy.value = ''; }
@@ -188,13 +187,8 @@ Views.chapterCardComic = {
       try {
         await API.post(`/api/comics/${props.projectId}/chapters/${props.seasonIndex}/clear`,
                        { season_id: props.seasonId });
-        props.chapter.media_path = '';
-        props.chapter.media_url = '';
-        props.chapter.prompt = '';
-        props.chapter.score = 0;
-        props.chapter.score_note = '';
-        props.chapter.status = 'pending';
-        props.chapter.error = '';
+        // 通过 emit 通知父组件更新，避免直接修改 props
+        emit('update:clear');
         prompt.value = '';
         ElementPlus.ElMessage.success(I18N.t('p.chCleared'));
         emit('reloaded');
