@@ -25,6 +25,12 @@
   --shadow: 0 2px 6px rgba(23, 26, 42, .05), 0 12px 32px rgba(23, 26, 42, .08);
   --shadow-lg: 0 4px 12px rgba(23, 26, 42, .07), 0 24px 60px rgba(23, 26, 42, .13);
   --glass: none;            /* 关闭毛玻璃（保留变量以免逐条清理） */
+  /* ---- 无界（borderless）分层 ----
+     页内表面（卡片 / 分区 / 侧栏 / 工具栏）一律「无底色、无描边、无阴影」，
+     层次只靠留白 + 字号字重 + 悬停淡底；浮层与控件仍需实体底 + 细边，否则不可辨识。 */
+  --surface: transparent;        /* 页内表面底色 */
+  --surface-hover: rgba(23, 26, 42, .035);  /* 页内表面悬停淡底 */
+  --surface-line: transparent;   /* 页内表面描边（无界 = 无） */
   --chat-bubble: #f5f6f9;
   --code-bg: rgba(91, 91, 214, .07);
   --btn-fill: #ffffff;
@@ -34,7 +40,9 @@
   --r-sm: 10px;
   --r-md: 14px;
   --r-lg: 18px;
-  --pad-page: 26px 30px 48px;
+  /* 无界：面板外壳全部取消，内容按窗口宽度自由铺开；这里只留一道安全留白，
+     避免标题/正文贴死窗口边缘（想完全贴边改成 0 即可）。 */
+  --pad-page: 0 22px 44px;
 }
 [data-theme="dark"] {
   --bg: #14161c;
@@ -49,6 +57,9 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .32);
   --shadow: 0 2px 6px rgba(0, 0, 0, .36), 0 16px 40px rgba(0, 0, 0, .36);
   --shadow-lg: 0 4px 12px rgba(0, 0, 0, .42), 0 28px 70px rgba(0, 0, 0, .5);
+  --surface: transparent;
+  --surface-hover: rgba(255, 255, 255, .04);
+  --surface-line: transparent;
   --chat-bubble: rgba(255, 255, 255, .045);
   --code-bg: rgba(123, 123, 234, .14);
 }
@@ -132,25 +143,31 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .mb8 { margin-bottom: 8px; }
 .loading { padding: 40px 0; }
 
-/* ---------- 表面：卡片 / 浮层统一质感（现代创作工具 = 实心 + 细边 + 分层阴影） ---------- */
-.el-card, .cfg-sec, .work-card, .mc-side, .mc-main, .mc-expand,
+/* ---------- 表面：无界分层 ----------
+   页内表面：透明底、无描边、无阴影（层次靠留白/字重/悬停淡底）；
+   浮层（弹框/下拉/菜单）与画布上悬浮控件：实体底 + 分层阴影，否则浮在页面上不可辨识。 */
+.el-card, .cfg-sec, .work-card, .mc-side, .mc-main {
+  background: var(--surface);
+  border: 1px solid var(--surface-line);
+  box-shadow: none;
+}
 .el-dialog, .el-popover, .el-select-dropdown, .el-dropdown-menu {
   background: var(--card);
-  -webkit-backdrop-filter: var(--glass);
-  backdrop-filter: var(--glass);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge);
+  border: 1px solid var(--surface-line);
+  box-shadow: var(--shadow-lg);
 }
-/* 浮层（弹框 / 下拉 / 菜单）带更深的弥散阴影，与卡片表面拉开层次 */
-.el-dialog, .el-popover, .el-select-dropdown, .el-dropdown-menu {
-  box-shadow: var(--shadow), inset 0 1px 0 var(--edge);
+/* 画布上的悬浮控件（会话侧栏拉手、回到底部）：需要实体底 */
+.mc-expand, .scroll-btn {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
 }
 
-/* ---------- 应用外壳：左栏 + 工具栏 + 内容 ---------- */
+/* ---------- 应用外壳：左栏 + 工具栏 + 内容（无界：无底色，仅靠留白与字重分区） ---------- */
 .app-shell { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .sidebar {
   width: 232px; flex-shrink: 0; display: flex; flex-direction: column;
-  background: var(--sidebar); border-right: 1px solid var(--line);
+  background: transparent; padding-right: 10px;
   transition: width .16s ease;
 }
 .sidebar.collapsed { width: 56px; }
@@ -177,7 +194,7 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
   box-shadow: inset 0 0 0 1px var(--el-color-primary-light-7);
 }
 .sb-ico { width: 18px; text-align: center; flex-shrink: 0; font-size: 14px; }
-.sb-foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--line); }
+.sb-foot { flex-shrink: 0; padding: 10px; }
 .sb-collapse {
   width: 100%; border: none; background: transparent; color: var(--muted);
   padding: 8px; border-radius: 10px; cursor: pointer; font-size: 13px; font-family: inherit;
@@ -189,7 +206,7 @@ h1, h2, h3 { line-height: 1.4; letter-spacing: -.2px; }
 .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .toolbar {
   height: 58px; flex-shrink: 0; display: flex; align-items: center; gap: 16px;
-  padding: 0 22px; background: var(--card); border-bottom: 1px solid var(--line);
+  padding: 0 8px 0 4px; background: transparent;
 }
 .tb-title { font-size: 15px; font-weight: 700; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
@@ -272,11 +289,11 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
   color: #fff; font-weight: 600;
 }
 .el-table {
-  background: var(--card);
+  background: transparent;
   -webkit-backdrop-filter: var(--glass);
   backdrop-filter: var(--glass);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge);
+  box-shadow: none;
   --el-table-bg-color: transparent;
   --el-table-header-bg-color: transparent;
   --el-table-row-hover-bg-color: rgba(91, 91, 214, .06);
@@ -306,18 +323,18 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .wb-action:hover { border-color: var(--primary); color: var(--primary); box-shadow: var(--shadow); }
 .wb-action.primary { background: linear-gradient(135deg, var(--primary), var(--primary2)); color: #fff; border-color: transparent; box-shadow: 0 4px 14px rgba(91, 91, 214, .35); }
 .wb-action.primary:hover { color: #fff; filter: brightness(1.05); box-shadow: 0 8px 20px rgba(91, 91, 214, .42); }
-.wb-sec { margin-bottom: 28px; }
-.wb-sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+.wb-sec { margin-bottom: 34px; }
+.wb-sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
 .wb-sec-head h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.2px; }
 .wb-more { font-size: 12.5px; color: var(--primary); text-decoration: none; }
-.wb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 16px; }
+.wb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 20px; }
+/* 无界卡片：无底色无描边，悬停淡底 + 极轻上浮；层次由图片本身承担 */
 .wb-card {
-  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card);
+  border: none; border-radius: var(--r-md); background: transparent;
   overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
-  box-shadow: var(--shadow-sm);
-  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+  transition: background-color .16s ease, transform .16s ease;
 }
-.wb-card:hover { border-color: var(--el-color-primary-light-5); box-shadow: var(--shadow); transform: translateY(-2px); }
+.wb-card:hover { background: var(--surface-hover); transform: translateY(-2px); }
 .wb-thumb { aspect-ratio: 16 / 10; background: var(--chat-bubble); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .wb-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .wb-ph { font-size: 26px; opacity: .4; }
@@ -334,8 +351,8 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .first-card { margin-bottom: 16px; }
 .first-row { display: flex; gap: 20px; }
 .first-preview {
-  width: 200px; height: 150px; flex-shrink: 0; border-radius: 12px; overflow: hidden;
-  border: 1px solid var(--line); background: var(--chat-bubble);
+  width: 200px; height: 150px; flex-shrink: 0; border-radius: var(--r-md); overflow: hidden;
+  background: var(--chat-bubble);
   display: flex; align-items: center; justify-content: center;
 }
 .first-preview img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
@@ -348,7 +365,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .chapter.is-expanded { border-color: var(--primary); }
 .ch-head { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 2px 4px; }
 .ch-thumb { width: 84px; height: 60px; flex-shrink: 0; border-radius: 10px; overflow: hidden;
-  background: rgba(120, 120, 140, .08); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; }
+  background: var(--chat-bubble); display: flex; align-items: center; justify-content: center; }
 .ch-thumb img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block;
   transition: transform .22s ease; }
 .ch-thumb:hover img { transform: scale(1.06); }
@@ -375,7 +392,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .ch-chev { flex-shrink: 0; opacity: .5; font-size: 13px; }
 .ch-detail { display: flex; gap: 16px; padding-top: 14px; }
 .ch-media { width: 300px; flex-shrink: 0; }
-.ch-media img { width: 100%; border-radius: 12px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+.ch-media img { width: 100%; border-radius: var(--r-md); cursor: zoom-in; display: block; }
 .ch-media video { width: 100%; border-radius: 12px; background: #000; display: block; }
 .ch-detail-body { flex: 1; min-width: 0; }
 .res-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
@@ -386,9 +403,9 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 
 .row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .proj-tabs { margin-top: 6px; }
-.char-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; }
+.char-card { border: none; border-radius: var(--r-md); padding: 12px 14px; margin: 0 0 12px; background: var(--surface-hover); }
 .char-ref { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.char-ref-img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+.char-ref-img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; cursor: zoom-in; display: block; }
 
 /* ---------- 大纲：内部纵向子页签（左侧竖排导航 + 右侧内容）----------
    自定义实现，不依赖 Element Plus el-tabs 的 placement（EP 3.0 不输出 is-left 修饰类）。 */
@@ -396,7 +413,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .subtabs-nav {
   flex: 0 0 152px; width: 152px;
   display: flex; flex-direction: column; gap: 4px;
-  border-right: 1px solid var(--el-border-color-light); margin-right: 14px;
+  margin-right: 14px;
 }
 .subtabs-item {
   text-align: center; padding: 0 12px; height: 46px; line-height: 46px;
@@ -446,7 +463,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .pv-media { position: relative; line-height: 0; }
 .pv-cell img {
   display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover;
-  background: #fff; border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+  background: var(--chat-bubble); border: none; border-radius: 10px; cursor: pointer;
   transition: transform .22s ease, box-shadow .22s ease;
 }
 .pv-cell:hover img { transform: scale(1.03); box-shadow: var(--shadow-sm); }
@@ -465,7 +482,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
   border: 1px solid var(--line); border-radius: 8px;
 }
 .pv-ph {
-  width: 100%; aspect-ratio: 2 / 3; background: #fff; border: 1px dashed var(--line);
+  width: 100%; aspect-ratio: 2 / 3; background: var(--chat-bubble); border: 1px dashed var(--line);
   border-radius: 8px; display: flex; align-items: center; justify-content: center;
   color: #ccd0d9; font-size: 20px; font-weight: 600;
 }
@@ -483,9 +500,9 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .md-list {
   flex: 1; min-height: 0; overflow-y: auto;
-  border: 1px solid var(--line); border-radius: var(--r-md); padding: 8px;
+  border: none; border-radius: var(--r-md); padding: 4px;
   display: flex; flex-direction: column; gap: 4px;
-  background: var(--el-bg-color);
+  background: transparent;
 }
 .md-item {
   display: flex; align-items: center; gap: 8px;
@@ -507,8 +524,8 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 /* ---------- 章节工作区：章节规划 / 章节详情 / 预览 合并为一屏 ----------
    顶部工具条（规划 + 批量生成）→ 三栏（左章节列表导航 | 中章详情 | 右本季预览），各栏独立滚动。 */
 .ch-toolbar {
-  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card);
-  box-shadow: var(--shadow-sm); padding: 10px 12px; margin-bottom: 12px;
+  border: none; border-radius: var(--r-md); background: transparent;
+  box-shadow: none; padding: 4px 6px 12px; margin-bottom: 10px;
   display: flex; flex-direction: column; gap: 8px;
 }
 .ch-tb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -523,19 +540,20 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .cs-item {
   display: flex; align-items: center; gap: 6px; flex: none; white-space: nowrap;
-  padding: 5px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
-  background: var(--chat-bubble);
+  padding: 6px 11px; border: none; border-radius: 10px; cursor: pointer;
+  background: transparent;
+  transition: background-color .15s ease;
 }
-.cs-item:hover { border-color: var(--primary); }
-.cs-item.active { border-color: var(--primary); background: rgba(91, 91, 214, .10); }
+.cs-item:hover { background: var(--surface-hover); }
+.cs-item.active { background: var(--el-color-primary-light-9); color: var(--primary); font-weight: 600; }
 .cs-idx { font-weight: 600; color: var(--muted); }
 .cs-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 /* 右栏：本季预览（标题行 + 独立滚动网格） */
 .pv-side { width: 340px; flex: none; display: flex; flex-direction: column; gap: 8px; }
 .pv-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .pv-side-body {
-  flex: 1; min-height: 0; overflow-y: auto; padding: 10px;
-  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--el-bg-color);
+  flex: 1; min-height: 0; overflow-y: auto; padding: 6px;
+  border: none; border-radius: var(--r-md); background: transparent;
 }
 /* 章卡片内子页签：主题摘要 / 剧本描述 / 出图提示词 */
 .ch-tabs { display: flex; gap: 4px; margin: 10px 0 8px; border-bottom: 1px solid var(--line); }
@@ -548,14 +566,14 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .ch-tab-body { min-height: 134px; }
 
 /* ---------- 微创作：作品列表 ---------- */
-.work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+.work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 22px; }
 .work-card {
   border-radius: var(--r-md);
-  padding: 18px 20px;
+  padding: 16px 18px;
   display: flex; flex-direction: column; gap: 10px;
-  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  transition: background-color .16s ease, transform .16s ease;
 }
-.work-card:hover { transform: translateY(-2px); box-shadow: var(--shadow), inset 0 1px 0 var(--edge); border-color: var(--el-color-primary-light-5); }
+.work-card:hover { background: var(--surface-hover); transform: translateY(-2px); }
 .wc-top { display: flex; align-items: center; gap: 8px; }
 .wc-top .el-link { font-weight: 600; font-size: 16px; flex: 1; min-width: 0; }
 .wc-meta { font-size: 12px; }
@@ -565,20 +583,19 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .wc-prev { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .wc-prev-item {
   width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block;
-  border-radius: 10px; border: 1px solid var(--line); background: #000;
+  border-radius: 10px; background: #000;
   transition: transform .22s ease, box-shadow .22s ease;
 }
 .wc-prev-item:hover { transform: scale(1.04); box-shadow: var(--shadow-sm); }
 
 /* ---------- 创作中心：项目卡片（列表页；与工作台 wb-card / 微创作 work-card 同一卡片体系） ---------- */
-.proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+.proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 22px; }
 .proj-card {
-  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card);
+  border: none; border-radius: var(--r-md); background: transparent;
   overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
-  box-shadow: var(--shadow-sm);
-  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+  transition: background-color .16s ease, transform .16s ease;
 }
-.proj-card:hover { border-color: var(--el-color-primary-light-5); box-shadow: var(--shadow); transform: translateY(-3px); }
+.proj-card:hover { background: var(--surface-hover); transform: translateY(-3px); }
 .pc-thumb {
   aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
   background: var(--chat-bubble); display: flex; align-items: center; justify-content: center;
@@ -592,13 +609,13 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .pc-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 2px; }
 
 /* ---------- 配置管理：分区（无 tab，基础 / LLM / DrawThings 同页展示） ---------- */
-.cfg-sec { border-radius: var(--r-md); margin-bottom: 20px; overflow: hidden; box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge); }
+.cfg-sec { border-radius: var(--r-md); margin-bottom: 34px; overflow: hidden; box-shadow: none; }
 .cfg-sec:last-of-type { margin-bottom: 0; }
 .maint-box { padding: 18px 20px; }
 .cfg-sec-head {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  padding: 13px 18px; border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--chat-bubble), transparent);
+  padding: 13px 18px;
+  background: transparent;
 }
 .cfg-sec-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .cfg-sec-title h3 { margin: 0; font-size: 15px; font-weight: 700; white-space: nowrap; letter-spacing: -.2px; }
@@ -622,16 +639,15 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
   .cfg-sec-sub { display: none; }
 }
 
-/* ---------- 配置管理：配置卡片（与项目/作品卡片同体系：实心卡 + 分层阴影） ---------- */
-.cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+/* ---------- 配置管理：配置卡片（无界：无容器，靠留白 + 悬停淡底） ---------- */
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px 20px; }
 .cfg-card {
-  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
-  padding: 16px 18px;
+  background: transparent; border: none; border-radius: var(--r-md);
+  padding: 14px 16px;
   display: flex; flex-direction: column; gap: 8px;
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge);
-  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+  transition: background-color .16s ease, transform .16s ease;
 }
-.cfg-card:hover { border-color: var(--el-color-primary-light-5); box-shadow: var(--shadow); transform: translateY(-2px); }
+.cfg-card:hover { background: var(--surface-hover); transform: translateY(-2px); }
 .cfg-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; word-break: break-all; }
 .cfg-meta { font-size: 12px; }
 .cfg-url {
@@ -672,12 +688,12 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .works-sec-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .works-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 16px; }
 .work-piece {
-  border-radius: var(--r-md); border: 1px solid var(--line); overflow: hidden;
-  background: var(--chat-bubble);
+  border-radius: var(--r-md); border: none; overflow: hidden;
+  background: transparent;
   display: flex; flex-direction: column;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-.work-piece.sel { border-color: var(--el-color-primary); box-shadow: 0 0 0 2px var(--el-color-primary-light-7); }
+.work-piece.sel { box-shadow: 0 0 0 2px var(--el-color-primary-light-7); }
 .wp-media { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; overflow: hidden; }
 .wp-media img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block; }
 .wp-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -702,10 +718,10 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 .mc-sess-list { flex: 1; overflow-y: auto; padding: 10px; }
 .mc-sess {
   padding: 10px 12px; border-radius: 12px; cursor: pointer;
-  border: 1px solid transparent; margin-bottom: 6px; background: var(--chat-bubble);
-  transition: border-color .15s ease, background-color .15s ease;
+  border: none; margin-bottom: 4px; background: transparent;
+  transition: background-color .15s ease;
 }
-.mc-sess:hover { border-color: var(--line); }
+.mc-sess:hover { background: var(--surface-hover); }
 .mc-sess.active {
   background: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-7);
@@ -777,7 +793,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .code-wrap {
   position: relative; margin: 0 0 8px; background: var(--code-bg);
-  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto;
+  border: none; border-radius: 10px; padding: 10px 12px; overflow-x: auto;
 }
 .code-wrap pre { margin: 0; }
 .code-wrap code { background: none; padding: 0; }
@@ -809,7 +825,7 @@ html.dark .el-button--primary.is-plain { color: var(--el-color-primary-dark-2); 
 }
 .tool-chip {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: fit-content; max-width: 100%;
-  background: var(--chat-bubble); border: 1px solid var(--line); border-radius: 10px;
+  background: var(--chat-bubble); border: none; border-radius: 10px;
   padding: 6px 12px; margin: 0 0 8px; font-size: 13px; color: var(--muted);
 }
 .tool-chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
