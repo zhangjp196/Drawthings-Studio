@@ -4,7 +4,15 @@
 这些是纯函数，值得锁死。
 """
 
-from services.drawthings import _norm_model, _norm_variants, infer_preset, norm_ref_flag
+from services.drawthings import (
+    _family_fixups,
+    _native_size,
+    _norm_model,
+    _norm_variants,
+    _rgba_alpha_first_to_rgba,
+    infer_preset,
+    norm_ref_flag,
+)
 
 
 class TestNormModel:
@@ -47,6 +55,49 @@ class TestInferPreset:
 
     def test_unknown_returns_empty(self):
         assert infer_preset("no_such_model_xyz") == ""
+
+
+class TestQwen21Family:
+    """Qwen-Image 2.1：满血版走官方配方，蒸馏版保持少步，且绝不挂 2512 的 lightning LoRA。"""
+
+    def test_full_21_gets_official_recipe(self):
+        for m in ("qwen_image_2.1_q6p.ckpt", "qwen-image-2.1", "qwen image 2.1"):
+            assert _family_fixups(m) == {"steps": 40, "guidance": 1.0}
+
+    def test_distilled_21_keeps_few_steps(self):
+        # 满血 40 步套到 4 步蒸馏模型上是错的：应保持族内少步，仅统一 CFG=1.0
+        f = _family_fixups("qwen_image_2.1_lightning")
+        assert f["guidance"] == 1.0
+        assert f["steps"] <= 8
+
+    def test_earlier_qwen_models_untouched(self):
+        assert _family_fixups("qwen_image_2512_q6p.ckpt") == {}
+        assert _family_fixups("qwen_image_edit_2511_q8p.ckpt") == {}
+
+    def test_21_never_resolves_to_2512_lightning_preset(self):
+        # 2.1 蒸馏版绝不能回落到带 2512 专用 LoRA 的 lightning 预设
+        assert infer_preset("qwen_image_2.1_lightning") == "qwen_image_2512"
+        assert infer_preset("qwen_image_2.1_q6p.ckpt") == "qwen_image_2512"
+
+    def test_2512_lightning_still_uses_lightning_preset(self):
+        assert infer_preset("qwen_image_2512_lightning") == "qwen_image_2512_lightning"
+
+    def test_native_2k_matches_official_aspect_ratios(self):
+        # Qwen-Image 2.1 官方 2K 档：16:9 = 2752×1536、9:16 = 1536×2752
+        assert _native_size("qwen_image_2.1", 1920, 1080, 2048) == (2752, 1536)
+        assert _native_size("qwen_image_2.1", 1080, 1920, 2048) == (1536, 2752)
+
+
+class TestAlphaFirstChannelFix:
+    """Qwen-Image 2.1：Draw Things 下发的 4 通道是 (A,R,G,B)，须重排为 (R,G,B,A)。
+
+    否则蓝通道被当成 alpha —— 暖色图蓝通道低，整图被合成为「几乎全透明」。"""
+
+    def test_argb_rotated_to_rgba(self):
+        # 源按 (A,R,G,B)：像素0 = (A=255,R=10,G=20,B=30)、像素1 = (0,200,100,50)
+        src = bytes([255, 10, 20, 30, 0, 200, 100, 50])
+        out = _rgba_alpha_first_to_rgba(src, 2, 1)
+        assert out == bytes([10, 20, 30, 255, 200, 100, 50, 0])
 
 
 class TestNormRefFlag:

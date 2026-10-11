@@ -325,7 +325,7 @@ def _frames_to_video_cv2(result, out_path: Path, fps: int) -> bool:
         for i in range(len(result)):
             tmp = Path(out_path).parent / f"_f_{uuid.uuid4().hex[:8]}.png"
             try:
-                result[i].to_file(str(tmp))
+                _fix_alpha_first_channels(result[i]).to_file(str(tmp))
                 img = cv2.imread(str(tmp))
                 if img is None:
                     continue
@@ -602,6 +602,11 @@ def _preset_model_map() -> dict[str, str]:
         return m
 
 
+# Qwen-Image 2.1 的型号标识（`qwen_image_2.1` / `qwen_image_2_1` / `qwen image 2.1`…）：
+# 2 与 1 之间可带分隔符、且后面不接数字 —— 排除 `2512` / `2511` 这类型号号。
+_QWEN_21_RE = re.compile(r"(?:^|[^0-9])2[._\- ]?1(?![0-9])")
+
+
 def infer_preset(model: str) -> str:
     """按模型文件名推断 drawthings-py 预设（归一化匹配预设模型 + 关键词兜底）。
 
@@ -631,6 +636,12 @@ def infer_preset(model: str) -> str:
     if "hunyuan" in low and "video" in low:
         return "hunyuan_video"
     if "qwen" in low:
+        # 2.1 是 2512 之后的新架构（Qwen3-VL 编码器 + RGBA VAE，文生图 / 编辑统一），
+        # 上游没有 2.1 预设。**不能**回落到 2512 的 *lightning* 预设 —— 它带一个 2512
+        # 专用的 4-step LoRA，架构不同会直接出废图；故 2.1 一律走 base 预设，
+        # 步数 / guidance 由 _family_fixups 按族修正（满血 40 步、蒸馏 4 步，均 CFG=1.0）。
+        if _QWEN_21_RE.search(low):
+            return "qwen_image_2512"
         base = "qwen_image_edit_2511" if "edit" in low else "qwen_image_2512"
         return f"{base}_lightning" if fast else base
     if "z_image" in low or "z-image" in low:
@@ -803,7 +814,7 @@ def _check_preset_fit(model: str, preset: str, cfg) -> None:
         guidance = cfg["guidance"]
     except Exception:
         guidance = "?"
-    logger.debug("预设原始参数：模型 %s → 预设 %s（steps=%s guidance=%s）", model, preset, steps, guidance)
+    logger.debug("下发前参数：模型 %s → 预设 %s（steps=%s guidance=%s）", model, preset, steps, guidance)
 
 
 def _same_version_family(model_low: str, preset: str) -> bool:
@@ -829,7 +840,12 @@ def _native_size(model: str, w: int, h: int, max_side: int) -> tuple[int, int] |
 # 上游没有 2.1 预设。直接套 2512 会用错参数：2512 是 guidanceScale=4，而 2.1 官方配方是
 # **steps=40、CFG=1.0（关闭 guidance）、negative 留空**（2.1 底模已做 guidance 蒸馏）。
 # CFG 拉太高正是「出图发灰 / 半透明 / 颜色不饱和」的典型成因，故在此按族修正。
-_QWEN_21_RE = re.compile(r"(?:^|[^0-9])2[._\- ]?1(?![0-9])")
+#
+# 蒸馏 / 少步变体（lightning / turbo / schnell / distill）例外：40 步是给满血底模的，
+# 套到 4 步蒸馏模型上等于让它跑 10 倍步数；且 qwen 的 *lightning* 预设带一个 2512 专用
+# 的 4-step LoRA（2.1 架构不同，已在 infer_preset 里挡掉不挂）。故蒸馏版保持族内标准
+# 少步数，仅统一 CFG=1.0。
+_QWEN_21_DISTILLED_STEPS = 4
 
 
 def _family_fixups(model: str) -> dict:
@@ -837,7 +853,37 @@ def _family_fixups(model: str) -> dict:
     low = (model or "").lower()
     if "qwen" not in low or not _QWEN_21_RE.search(low):
         return {}
-    return {"steps": 40, "guidance": 1.0}
+    fast = any(k in low for k in ("lightning", "turbo", "schnell", "distill"))
+    return {"steps": _QWEN_21_DISTILLED_STEPS if fast else 40, "guidance": 1.0}
+
+
+# Draw Things 对**带 alpha 的模型**（目前只有 Qwen-Image 2.1）下发的 4 通道数据是
+# **(A, R, G, B)** 交错排列，而 drawthings-py 0.4.0（以及它写出的 PNG）一律按
+# **(R, G, B, A)** 解释 —— 于是「蓝通道」被当成了不透明度：暖色图蓝通道本来就低，
+# 整张图在浏览器 / 导出的 PDF 里就被合成成「几乎全透明、发灰发白」的废图。
+# 实测确认：把通道重排为 (R,G,B,A) 后就是完全正常、**不透明**的成图。
+# 真因不是 guidance、步数或分辨率，故在此按真实布局重排。3 通道（普通模型）原样返回。
+def _rgba_alpha_first_to_rgba(data: bytes, width: int, height: int) -> bytes:
+    """把 Draw Things 的 (A,R,G,B) 交错字节日重排为 (R,G,B,A)（纯 PIL，便于单测）。"""
+    img = Image.frombytes("RGBA", (width, height), data)
+    r, g, b, a = img.split()  # 变量名按 PIL 假设；实际 r=A、g=R、b=G、a=B
+    return Image.merge("RGBA", (g, b, a, r)).tobytes()
+
+
+def _fix_alpha_first_channels(buf):
+    """把 4 通道结果缓冲重排为正确的 (R,G,B,A)；3 通道原样返回。"""
+    if getattr(buf, "channels", 0) != 4:
+        return buf
+    from drawthings_py.image.image_buffer import ImageBuffer
+
+    fixed = _rgba_alpha_first_to_rgba(bytes(buf.data), buf.width, buf.height)
+    return ImageBuffer(
+        data=fixed,
+        width=buf.width,
+        height=buf.height,
+        channels=4,
+        metadata=getattr(buf, "metadata", None),
+    )
 
 
 class DrawThingsClient:
@@ -1000,15 +1046,17 @@ class DrawThingsClient:
             cfg = Configs.from_preset(preset)
         except Exception as e:
             raise RuntimeError(f"无法加载 Draw Things 预设 {preset}：{e} / Cannot load preset {preset}: {e}")
-        _check_preset_fit(model, preset, cfg)
         if model:
             cfg["model"] = model
-        # 族修正（上游预设缺该型号 / 参数不匹配时兜底），先于用户步数覆盖生效
+        # 族修正（上游预设缺该型号 / 参数不匹配时兜底），先于用户步数覆盖生效；
+        # 放在 _check_preset_fit 之前，让护栏看到的是**修正后**的步数，否则蒸馏版会被
+        # 误报「匹配到多步预设」。
         for key, val in _family_fixups(model).items():
             try:
                 cfg[key] = val
             except Exception:
                 pass
+        _check_preset_fit(model, preset, cfg)
         # 步数：按图像 / 视频取对应的功能级 max_steps，> 0 时覆盖预设自带步数；0 = 跟随预设。
         steps = self.max_steps_video if video else self.max_steps_image
         if steps > 0:
@@ -1434,7 +1482,7 @@ class DrawThingsClient:
         if not len(result):
             raise RuntimeError("Draw Things 未返回任何图像 / Draw Things returned no image")
         out = self.media_dir / f"gen_{uuid.uuid4().hex[:8]}.png"
-        result[0].to_file(str(out))
+        _fix_alpha_first_channels(result[0]).to_file(str(out))
         return str(out)
 
 

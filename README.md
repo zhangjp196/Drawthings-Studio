@@ -217,6 +217,8 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
   > - **Qwen-Image 2.1 (newer than 2512)**: the base model is already guidance-distilled, so the official recipe is **40 steps with
   >   CFG = 1.0 (guidance disabled)**. Applying the 2512 preset (CFG = 4) over-guides it, which is what makes it look grey / translucent /
   >   desaturated. This project corrects the family automatically to 40 steps / CFG 1.0 — **nothing to tune by hand**.
+  >   Distilled (lightning / turbo) 2.1 variants keep few steps (4) with the same CFG 1.0, and never load 2512's lightning LoRA (incompatible architecture).
+  > - **Qwen-Image 2.1 images come out "fully translucent / washed out"**: 2.1 returns a 4-channel image with alpha, and Draw Things delivers it as **(A,R,G,B)** while drawthings-py reads it as (R,G,B,A) — the blue channel gets mistaken for opacity, so warm images (low blue) render almost fully transparent. This project reorders the channels before saving (`_fix_alpha_first_channels`) — **nothing to tune**; genuine transparent cutouts keep their alpha.
   > - **Too few steps** leaves denoising unfinished, so noise and a colour cast survive; raise the *image* step count for that.
   > - The cost is roughly linear (double the steps ~ double the time) and more VRAM at large sizes.
   > **Video is the opposite**: common video models are distilled (the LTX preset ships just 8 steps) and want *fewer* steps —
