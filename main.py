@@ -33,7 +33,7 @@ from config_store import ConfigStore
 from db import engine, get_db, init_db
 from i18n import L
 from paths import APP_NAME, env_int, resource_root
-from services import api_comic, api_drama, api_maintenance, api_micro
+from services import api_comic, api_drama, api_maintenance, api_micro, port_util
 from services.agent import make_httpx_client
 from services.api_common import (
     MEDIA_DIR,
@@ -485,8 +485,18 @@ async def settings_update(request: Request, db: Session = Depends(get_db)):
 # ---------------- 应用健康检查（CS 桌面客户端探测用） ----------------
 @app.get("/api/health")
 def health():
-    """健康检查：桌面客户端（CS）启动时轮询此端点判断本地服务是否就绪；亦可用于存活监控。"""
-    return {"ok": True, "app": "drawthings-studio"}
+    """健康检查：桌面客户端（CS）启动时轮询此端点判断本地服务是否就绪；亦可用于存活监控。
+
+    `app` 是**身份标记**（与 services/port_util.APP_MARKER 一致）：只回 200 的本地服务
+    （别的程序占着同一端口）不会被误当成本应用；`data` 是数据目录，同一台机器上
+    跑着别的 checkout（`DATA_DIR` 不同）时也不会被误连；`port` 是实际监听端口。
+    """
+    return {
+        "ok": True,
+        "app": port_util.APP_MARKER,
+        "port": env_int("PORT", port_util.DEFAULT_PORT),
+        "data": os.path.realpath(str(data_dir)),
+    }
 
 
 # ---------------- SPA 外壳 ----------------
@@ -505,13 +515,13 @@ def spa_shell(full_path: str):
 if __name__ == "__main__":
     import os as _os
 
-    import uvicorn
-
     # CS 桌面客户端以 RELOAD=0 拉起本进程（生产模式）；开发时可用 RELOAD=1 python main.py。
     # 默认只绑 127.0.0.1（本地单用户，不对外；如需局域网访问可显式设 HOST=0.0.0.0）。
-    uvicorn.run(
-        "main:app",
+    # 端口自适应（先复用已运行实例，再顺延）见 services/port_util.py；实际端口写入 data/.server.port。
+    _reload = _os.getenv("RELOAD", "0") == "1"
+    port_util.serve(
+        "main:app" if _reload else app,
         host=_os.getenv("HOST", "127.0.0.1"),
-        port=env_int("PORT", 8010),
-        reload=_os.getenv("RELOAD", "0") == "1",
+        preferred=env_int("PORT", port_util.DEFAULT_PORT),
+        reload=_reload,
     )

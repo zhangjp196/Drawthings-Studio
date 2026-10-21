@@ -349,7 +349,7 @@ A local single-user app, small data (hundreds of rows for configs/projects/chapt
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # only adjust the data directory if needed
-python main.py                # visit http://127.0.0.1:8010
+python main.py                # visit http://127.0.0.1:8010 (shifts to the next free port if busy)
 python client.py              # (optional) CS desktop client: auto-start server + native window, no browser
 ```
 
@@ -367,14 +367,15 @@ python client.py             # auto-starts the local server + opens a native win
 
 What the client does:
 
-- **One-click launch**: probes `/api/health`; if the server isn't running it auto-starts it (subprocess, production mode, no reload); if already running it just connects (no duplicate server);
+- **One-click launch**: probes `/api/health` (which carries an `app` identity marker); if the server isn't running it auto-starts it (subprocess, production mode, no reload); if already running it just connects (no duplicate server);
+- **Port auto-shift**: `PORT` is only the *preferred* port. If it's taken by something else, the server picks the next free port (up to 20) and writes it to `data/.server.port`; the client discovers it from that file (falling back to a scan) and loads the right URL — no manual `PORT` juggling. If an existing instance of this app is already running, it is reused instead of starting a second server (two processes writing the same SQLite would be worse than a port clash);
 - **Native window**: loads the same SPA (features / bilingual / theme fully consistent with the browser version);
 - **Native OS features**:
   - ZIP/PDF export goes through the **system "Save As" dialog** (the frontend detects `window.pywebview` and switches automatically; in a browser it stays a regular download);
   - system notifications, external links open in the system browser;
 - **Single instance**: a PID lock prevents duplicate windows (cleaned up on exit).
 
-Env vars: `HOST` (default `127.0.0.1` — local only, not exposed) / `PORT` (default `8010`) / `RELOAD` (default `0`; use `RELOAD=1` for dev hot-reload) / `LOG_LEVEL` (default `INFO`). A `.env` file is loaded automatically (see "Environment variables").
+Env vars: `HOST` (default `127.0.0.1` — local only, not exposed) / `PORT` (preferred port, default `8010`; auto-shifts when busy) / `RELOAD` (default `0`; use `RELOAD=1` for dev hot-reload) / `LOG_LEVEL` (default `INFO`). A `.env` file is loaded automatically (see "Environment variables").
 
 > This shape is **local single-user only** (no multi-user accounts, no remote access); API keys and data stay on this machine.
 > Packaging: `./build_app.sh` builds `dist/Drawthings Studio.app` in one step (see below).
@@ -428,7 +429,7 @@ Build a **directly distributable** DMG on top of the `.app` (contains the `.app`
 |----------|-------------|---------|
 | `DATA_DIR` | Directory for the database and media files | `./data` |
 | `HOST` | Listen address (loopback only by default; `0.0.0.0` for LAN) | `127.0.0.1` |
-| `PORT` | Listen port (non-numeric values fall back to the default with a warning) | `8010` |
+| `PORT` | Preferred listen port; if it is taken by another program the server shifts to the next free one (up to 20) and records it in `data/.server.port` (non-numeric values fall back to the default with a warning) | `8010` |
 | `RELOAD` | Dev hot-reload (`1` = on; the desktop client always uses `0`) | `0` |
 | `LOG_LEVEL` | Log level: `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
 

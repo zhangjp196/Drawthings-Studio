@@ -1,8 +1,9 @@
 """Drawthings Studio —— CS 桌面客户端（pywebview 原生窗口）。
 
 职责：
-1. 启动时探测本地 FastAPI 服务（GET /api/health）；未运行则自动拉起（子进程，RELOAD=0），
-   已运行则直接复用（不重复起服务）。
+1. 启动时探测本地 FastAPI 服务（GET /api/health，校验 `app` 身份标记）；未运行则自动拉起（子进程，RELOAD=0），
+   已运行则直接复用（不重复起服务）。端口只用 `PORT` 作首选：被别的程序占用时服务端自动顺延，
+   实际端口由服务写入 `data/.server.port`，客户端据此发现（找不到再扫一遍候选端口）。
 2. 服务就绪后打开**原生窗口**（macOS = 系统 WKWebView）加载 SPA —— 无需浏览器。
 3. 通过 js_api 向前端暴露原生 OS 能力（前端检测 window.pywebview.api 自动切换）：
    - saveBlob(filename, base64) → 系统「另存为」对话框（导出 ZIP/PDF 走系统保存路径）
@@ -22,18 +23,16 @@ import os
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 from paths import APP_NAME, data_dir, env_int, frozen, resource_root
+from services import port_util
 from services.logging_setup import setup_logging
 
 setup_logging()
 
 HOST = os.getenv("HOST", "127.0.0.1")
-PORT = env_int("PORT", 8010)
-BASE_URL = f"http://{HOST}:{PORT}"
-HEALTH_URL = f"{BASE_URL}/api/health"
+PREFERRED_PORT = env_int("PORT", port_util.DEFAULT_PORT)  # 首选端口；被占用时服务端会顺延
 APP_TITLE = APP_NAME
 
 # 单实例锁：记录 PID，供二次启动检测（放数据目录，源码/打包模式位置一致）
@@ -167,7 +166,7 @@ class NativeApi:
     def serverStatus(self) -> dict:
         return {
             "running": self._c.server_healthy(),
-            "base_url": BASE_URL,
+            "base_url": self._c.base_url,
             "started_by_client": self._c.we_started_server,
         }
 
@@ -177,20 +176,38 @@ class DesktopClient:
     def __init__(self):
         self.server_proc: subprocess.Popen | None = None
         self.we_started_server = False
+        # 实际端口：发现到已有实例，或自己拉起的服务就绪后更新（首选端口可能被占用而顺延）
+        self.port = PREFERRED_PORT
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{HOST}:{self.port}"
 
     # ---- 服务探测 / 生命周期 ----
+    def discover(self) -> int | None:
+        """找正在运行的**自家**实例（端口文件优先，其次顺延扫描）；找到即记录实际端口。
+
+        除 `app` 标记外还比对数据目录：同一台机器上别的 checkout / 别的 `DATA_DIR`
+        的实例不算「已经就绪」，否则窗口会连到另一套数据上。
+        """
+        port = port_util.find_own_port(HOST, PREFERRED_PORT, port_util.PORT_SPAN, own_data_dir=data_dir())
+        if port is not None:
+            self.port = port
+        return port
+
     def server_healthy(self) -> bool:
-        try:
-            with urllib.request.urlopen(HEALTH_URL, timeout=1) as r:
-                return r.status == 200
-        except Exception:
-            return False
+        return port_util.probe_own(HOST, self.port, own_data_dir=data_dir())
 
     def start_server(self) -> None:
         """拉起本地服务：打包模式复用本 .app 的 --server 服务模式；源码模式 python main.py。"""
         env = dict(os.environ)
         env.update(
-            {"RELOAD": "0", "HOST": HOST, "PORT": str(PORT), "PARENT_PID": str(os.getpid())}
+            {
+                "RELOAD": "0",
+                "HOST": HOST,
+                "PORT": str(PREFERRED_PORT),
+                "PARENT_PID": str(os.getpid()),
+            }
         )  # 服务端据此监视本客户端存活
         if frozen():
             cmd, cwd = [sys.executable, "--server"], str(Path.home())
@@ -212,12 +229,14 @@ class DesktopClient:
         self.we_started_server = True
 
     def wait_ready(self, timeout: float = 30.0) -> bool:
+        """轮询等待**自家**服务就绪；端口可能不是首选（服务端会顺延），以发现结果为准。"""
         t0 = time.monotonic()
         while time.monotonic() - t0 < timeout:
-            if self.server_healthy():
+            if self.discover() is not None:
                 return True
             if self.we_started_server and self.server_proc and self.server_proc.poll() is not None:
-                return False  # 刚拉起的服务进程已退出（启动失败）
+                # 刚拉起的服务进程已退出（启动失败；若它因复用已有实例而退出，上面的 discover 已先命中）
+                return False
             time.sleep(0.3)
         return False
 
@@ -276,11 +295,13 @@ def main() -> int:
 
     client = DesktopClient()
     _install_exit_hooks(client)  # SIGTERM/atexit 兜底：防孤儿 --server 子进程
-    if not client.server_healthy():
+    if client.discover() is None:
         client.start_server()
         if not client.wait_ready():
+            last = PREFERRED_PORT + port_util.PORT_SPAN - 1
             _log(
-                f"Failed to start local service ({HEALTH_URL} not ready). You can try manually first: python main.py"
+                f"Failed to start local service (no instance on {HOST}:{PREFERRED_PORT}-{last}). "
+                "You can try manually first: python main.py"
             )
             if sys.platform == "darwin":
                 _macos_osascript(
@@ -288,9 +309,10 @@ def main() -> int:
                 )
             release_lock()
             return 1
+    _log(f"local service ready at {client.base_url}")
 
     webview.create_window(
-        APP_TITLE, BASE_URL, js_api=NativeApi(client), width=1280, height=860, min_size=(960, 640)
+        APP_TITLE, client.base_url, js_api=NativeApi(client), width=1280, height=860, min_size=(960, 640)
     )
 
     webview.start()  # Blocks until the window is closed

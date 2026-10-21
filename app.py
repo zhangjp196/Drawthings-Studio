@@ -57,23 +57,27 @@ def _watch_parent() -> None:
     threading.Thread(target=_loop, daemon=True, name="parent-watch").start()
 
 
-def run_server() -> None:
-    """服务模式：进程内直接跑 uvicorn（生产模式，无热重载）。"""
+def run_server() -> int:
+    """服务模式：进程内直接跑 uvicorn（生产模式，无热重载）。
+
+    端口由 services/port_util 自适应：先复用已运行的自家实例（避免两个进程写同一 SQLite），
+    否则从 PORT 起顺延找空端口，并把实际端口写进 data/.server.port 供客户端发现。
+    """
     _redirect_logs()
     try:
-        import os
-
         from paths import env_int
+        from services import port_util
         from services.logging_setup import setup_logging
 
         setup_logging()
         _watch_parent()
-        import uvicorn
 
         from main import app as fastapi_app
 
-        uvicorn.run(
-            fastapi_app, host=os.getenv("HOST", "127.0.0.1"), port=env_int("PORT", 8010), reload=False
+        return port_util.serve(
+            fastapi_app,
+            host=os.getenv("HOST", "127.0.0.1"),
+            preferred=env_int("PORT", port_util.DEFAULT_PORT),
         )
     except BaseException:
         import traceback
@@ -84,8 +88,7 @@ def run_server() -> None:
 
 def main() -> int:
     if "--server" in sys.argv:
-        run_server()
-        return 0
+        return run_server()
     from client import main as client_main
 
     return client_main()
