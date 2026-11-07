@@ -10,14 +10,21 @@ Views.projectComic = {
   components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog, 'import-dialog': Views.comicImportDialog },
   template: `
     <div class="page" v-if="data">
-      <div class="proj-head">
-        <div>
-          <el-tag size="small" type="primary" effect="light">{{ I18N.t('proj.comic') }}</el-tag>
+      <div class="proj-hero">
+        <div class="proj-cover" v-if="data.project.first_image_url" @click="openLb([data.project.first_image_url], 0)">
+          <img :src="data.project.first_image_url" :alt="data.project.title || ''">
+        </div>
+        <div class="proj-hero-main">
+          <div class="proj-kicker">
+            <el-tag size="small" type="primary" effect="light">{{ I18N.t('proj.comic') }}</el-tag>
+            <span class="muted small">{{ doneChapters }}/{{ totalChapters }} · {{ donePct }}%</span>
+          </div>
           <h1 class="ptitle">{{ data.project.title || data.project.origin }}</h1>
           <p class="meta muted">{{ I18N.t('p.metaIdea', data.project.origin) }}
             · {{ I18N.t('p.metaLength', data.chapters.length) }}
             · {{ I18N.t('p.metaLlm', data.project.llm_name) }}<template v-if="!data.project.llm_vision"> · {{ I18N.t('p.metaNoVision') }}</template>
             · {{ I18N.t('p.metaDt', data.project.dt_name) }}</p>
+          <div class="proj-progress"><i :style="{ width: donePct + '%' }"></i></div>
         </div>
         <div class="proj-head-actions">
           <el-button  @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
@@ -227,6 +234,9 @@ Views.projectComic = {
     // 返回/删除/404 一律回到「漫画创作」列表（带 ?kind=comic，保持侧边栏高亮）
     const backTo = () => '/projects?kind=comic';
 
+    const totalChapters = computed(() => (data.value?.chapters || []).length);
+    const doneChapters = computed(() => (data.value?.chapters || []).filter(c => c.status === 'done').length);
+    const donePct = computed(() => (totalChapters.value ? Math.round(doneChapters.value / totalChapters.value * 100) : 0));
     const actBusy = ref(false);
     const importOpen = ref(false);
     const busySave = ref(false);
@@ -1025,6 +1035,7 @@ Views.projectComic = {
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
       oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, modelChoices, lb, genDlg, genDlgTitle, genDlgExtra,
+      totalChapters, doneChapters, donePct,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect, importOpen, openImportDoc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded, onChapterUpdate, onChapterScore, onChapterClear,
       openCfg, saveCfg, openLb, load, backTo, router,

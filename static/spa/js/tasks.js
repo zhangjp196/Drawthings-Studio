@@ -4,6 +4,7 @@
 // - 组件只关心「事件回调 + 最终状态」，不再持有连接，也不再因卸载而中断任务。
 window.Tasks = (function () {
   const store = Vue.reactive({ jobs: {}, order: [] }); // job_id → snapshot；order 按 created_at 倒序（Vue 全局在此已加载）
+  const ui = Vue.reactive({ centerOpen: false }); // 任务中心抽屉开关（工具栏 / 侧栏 / dock 共用）
   const pending = new Map(); // job_id → 等待中的 run（回调 + resolve/reject）
   let inited = false;
 
@@ -110,6 +111,7 @@ window.Tasks = (function () {
 
   return {
     store,
+    ui,
     run,
     runForm,
     cancel,

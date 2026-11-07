@@ -11,8 +11,6 @@ Views.micro = {
         <el-button type="primary" @click="openNew">{{ I18N.t('mc.new') }}</el-button>
       </div>
 
-      <el-tabs v-model="tab" class="mc-tabs">
-      <el-tab-pane :label="I18N.t('mc.tabWorks')" name="works">
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
           <el-input v-model="flt.q" :placeholder="I18N.t('mc.fQPh')" clearable style="width: 220px"
@@ -34,26 +32,29 @@ Views.micro = {
       </el-card>
 
       <div class="work-grid" v-if="works.length">
-        <div class="work-card" v-for="w in works" :key="w.id">
-          <div class="wc-top">
-            <el-tag v-if="w.drawthings_config_id" size="small" type="primary" effect="light">{{ I18N.t('mc.tagGen') }}</el-tag>
-            <el-tag v-else size="small" type="info" effect="light">{{ I18N.t('mc.tagChat') }}</el-tag>
-            <el-link :underline="false" type="primary" style="flex: 1; min-width: 0;" @click="enter(w)">
-              {{ w.title || I18N.t('common.unnamed') }}
-            </el-link>
+        <div class="work-card" v-for="w in works" :key="w.id" @click="enter(w)">
+          <div class="wc-cover">
+            <div class="wc-prev" v-if="w.media_preview && w.media_preview.length">
+              <template v-for="(u, i) in w.media_preview.slice(0, 3)" :key="'pv' + i">
+                <video v-if="isMediaVideo(u)" :src="u" class="wc-prev-item" preload="metadata" muted></video>
+                <img v-else :src="u" class="wc-prev-item" loading="lazy" decoding="async" alt="">
+              </template>
+            </div>
+            <div v-else class="wc-prev-empty">✨</div>
+            <span class="wc-badge">
+              <el-tag v-if="w.drawthings_config_id" size="small" type="primary" effect="dark">{{ I18N.t('mc.tagGen') }}</el-tag>
+              <el-tag v-else size="small" type="info" effect="dark">{{ I18N.t('mc.tagChat') }}</el-tag>
+            </span>
           </div>
-          <div class="wc-prev" v-if="w.media_preview && w.media_preview.length">
-            <template v-for="(u, i) in w.media_preview" :key="'pv' + i">
-              <video v-if="isMediaVideo(u)" :src="u" class="wc-prev-item" preload="metadata" muted></video>
-              <img v-else :src="u" class="wc-prev-item" loading="lazy" decoding="async" alt="">
-            </template>
-          </div>
-          <div class="wc-meta muted">{{ I18N.t('mc.sessions', w.session_count) }} · {{ (w.updated_at || '').slice(0, 10) }}</div>
-          <div class="wc-actions">
-            <el-button size="small" type="primary" plain @click="enter(w)">{{ I18N.t('mc.enter') }}</el-button>
-            <el-popconfirm :title="I18N.t('mc.delConfirm')" @confirm="del(w)">
-              <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
-            </el-popconfirm>
+          <div class="wc-body">
+            <div class="wc-title" :title="w.title">{{ w.title || I18N.t('common.unnamed') }}</div>
+            <div class="wc-meta muted">{{ I18N.t('mc.sessions', w.session_count) }} · {{ (w.updated_at || '').slice(0, 10) }}</div>
+            <div class="wc-actions" @click.stop>
+              <el-button size="small" type="primary" plain @click="enter(w)">{{ I18N.t('mc.enter') }}</el-button>
+              <el-popconfirm :title="I18N.t('mc.delConfirm')" @confirm="del(w)">
+                <template #reference><el-button size="small" type="danger" plain>{{ I18N.t('proj.delete') }}</el-button></template>
+              </el-popconfirm>
+            </div>
           </div>
         </div>
       </div>
@@ -61,8 +62,6 @@ Views.micro = {
 
       <el-pagination v-if="totalPages > 1" class="pager" background layout="prev, pager, next"
                      :total="total" :page-size="flt.size" :current-page="page" @current-change="p => { page = p; load(); }" />
-      </el-tab-pane>
-      </el-tabs>
 
       <el-dialog v-model="dlg" :title="I18N.t('mc.dlg')" width="540px">
         <el-form label-position="top">

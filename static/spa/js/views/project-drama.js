@@ -10,14 +10,21 @@ Views.projectDrama = {
   components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'plan-dialog': Views.dramaPlanDialog, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'cfg-dialog': Views.dramaCfgDialog, 'video-dialog': Views.dramaVideoDialog, 'import-dialog': Views.dramaImportDialog },
   template: `
     <div class="page" v-if="data">
-      <div class="proj-head">
-        <div>
-          <el-tag size="small" type="success" effect="light">{{ I18N.t('proj.drama') }}</el-tag>
+      <div class="proj-hero">
+        <div class="proj-cover" v-if="data.project.first_image_url" @click="openLb([data.project.first_image_url], 0)">
+          <img :src="data.project.first_image_url" :alt="data.project.title || ''">
+        </div>
+        <div class="proj-hero-main">
+          <div class="proj-kicker">
+            <el-tag size="small" type="success" effect="light">{{ I18N.t('proj.drama') }}</el-tag>
+            <span class="muted small">{{ doneChapters }}/{{ totalChapters }} · {{ donePct }}%</span>
+          </div>
           <h1 class="ptitle">{{ data.project.title || data.project.origin }}</h1>
           <p class="meta muted">{{ I18N.t('p.metaIdea', data.project.origin) }}
             · {{ I18N.t('d.metaLength', data.chapters.length) }}
             · {{ I18N.t('p.metaLlm', data.project.llm_name) }}<template v-if="!data.project.llm_vision"> · {{ I18N.t('p.metaNoVision') }}</template>
             · {{ I18N.t('p.metaDt', data.project.dt_name) }}</p>
+          <div class="proj-progress"><i :style="{ width: donePct + '%' }"></i></div>
         </div>
         <div class="proj-head-actions">
           <el-button  @click="openCfg">{{ I18N.t('p.settings') }}</el-button>
@@ -232,6 +239,9 @@ Views.projectDrama = {
     // 返回/删除/404 一律回到「视频创作」列表（带 ?kind=drama，保持侧边栏高亮）
     const backTo = () => '/projects?kind=drama';
 
+    const totalChapters = computed(() => (data.value?.chapters || []).length);
+    const doneChapters = computed(() => (data.value?.chapters || []).filter(c => c.status === 'done').length);
+    const donePct = computed(() => (totalChapters.value ? Math.round(doneChapters.value / totalChapters.value * 100) : 0));
     const actBusy = ref(false);
     const importOpen = ref(false);
     const busySave = ref(false);
@@ -1087,6 +1097,7 @@ Views.projectDrama = {
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
       oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, imgChoices, vidChoices, lb, genDlg, genDlgTitle, genDlgExtra,
+      totalChapters, doneChapters, donePct,
       openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect, importOpen, openImportDoc,
       exportZip, exportVideo, previewVideo, videoDlg, videoUrl, delChapter, onChapterReloaded, onChapterUpdate, onChapterScore, onChapterClear,
       openCfg, saveCfg, openLb, load, backTo, router,

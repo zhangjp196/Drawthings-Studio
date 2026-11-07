@@ -14,19 +14,37 @@
             </router-link>
           </div>
           <nav class="sb-nav">
-            <router-link v-for="n in navs" :key="n.to" :to="n.to" class="sb-item" :class="{ active: n.match() }" :title="I18N.t(n.key)">
-              <span class="sb-ico">{{ n.ico }}</span>
-              <span class="sb-txt">{{ I18N.t(n.key) }}</span>
-            </router-link>
+            <template v-for="g in navGroups" :key="g.key">
+              <div class="sb-group" v-show="!sbCollapsed">{{ I18N.t(g.key) }}</div>
+              <router-link v-for="n in g.items" :key="n.to" :to="n.to" class="sb-item" :class="{ active: n.match() }" :title="I18N.t(n.key)">
+                <span class="sb-ico">{{ n.ico }}</span>
+                <span class="sb-txt">{{ I18N.t(n.key) }}</span>
+              </router-link>
+            </template>
           </nav>
           <div class="sb-foot">
+            <button type="button" class="sb-task" :title="I18N.t('nav.tasks')" @click="openTasks">
+              <span class="sb-ico">◷</span>
+              <span class="sb-txt">{{ I18N.t('nav.tasks') }}</span>
+              <span class="sb-task-badge" v-if="running">{{ running }}</span>
+            </button>
             <button type="button" class="sb-collapse" :title="I18N.t('nav.collapse')" @click="toggleSidebar">{{ sbCollapsed ? '»' : '«' }}</button>
           </div>
         </aside>
         <div class="app-main">
           <header class="toolbar">
-            <div class="tb-title">{{ pageTitle }}</div>
+            <div class="tb-crumb">
+              <template v-if="crumbRoot && crumbRoot !== pageTitle">
+                <span class="tb-crumb-root">{{ crumbRoot }}</span>
+                <span class="tb-crumb-sep">›</span>
+              </template>
+              <span class="tb-title">{{ pageTitle }}</span>
+            </div>
             <div class="tb-actions">
+              <button type="button" class="tbtn task-btn" :title="I18N.t('nav.tasks')" @click="openTasks">
+                <span>{{ I18N.t('nav.tasksShort') }}</span><span class="tb-task-count" v-if="running">{{ running }}</span>
+              </button>
+              <span class="tsep"></span>
               <button v-for="l in langs" :key="l.v" type="button" class="tbtn icon" :title="l.label" :class="{ on: I18N.current() === l.v }" @click="I18N.set(l.v)">{{ l.flag }}</button>
               <span class="tsep"></span>
               <button v-for="t in themes" :key="t.v" type="button" class="tbtn icon" :title="I18N.t(t.key)" :class="{ on: theme === t.v }" @click="Theme.set(t.v)">{{ t.sym }}</button>
@@ -70,6 +88,18 @@
         { to: '/micro',    ico: '✨', key: 'nav.quick',     match: () => path().startsWith('/micro') },
         { to: '/configs',  ico: '⚙', key: 'nav.settings',  match: () => path().startsWith('/configs') },
       ];
+      const navGroups = [
+        { key: 'nav.groupCreate', items: navs.slice(0, 4) },
+        { key: 'nav.groupSystem', items: navs.slice(4) },
+      ];
+      const running = computed(() => (window.Tasks ? Tasks.activeCount() : 0));
+      function openTasks() { Tasks.ui.centerOpen = true; }
+      const crumbRoot = computed(() => {
+        const p = path();
+        if (p.startsWith('/configs')) return I18N.t('nav.groupSystem');
+        if (p === '/') return I18N.t('nav.workspace');
+        return I18N.t('nav.groupCreate');
+      });
       const pageTitle = computed(() => {
         const p = path();
         if (p === '/') return I18N.t('nav.workspace');
@@ -99,6 +129,10 @@
         sbCollapsed,
         toggleSidebar,
         navs,
+        navGroups,
+        running,
+        openTasks,
+        crumbRoot,
         pageTitle,
         elLocale: computed(() => (lang.value === 'en'
           ? window.ElementPlusLocaleEn : window.ElementPlusLocaleZhCn)),

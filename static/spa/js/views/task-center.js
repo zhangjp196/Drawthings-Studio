@@ -3,13 +3,6 @@
 window.Views = window.Views || {};
 Views.taskCenter = {
   template: `
-    <div class="tc-wrap">
-      <button type="button" class="tc-fab" :class="{ on: running > 0 }"
-              :title="I18N.t('tc.title')" @click="open = true">
-        <span class="tc-fab-ico">◷</span>
-        <span class="tc-badge" v-if="running">{{ running }}</span>
-      </button>
-    </div>
     <el-drawer v-model="open" :title="I18N.t('tc.title')" size="420px" append-to-body class="tc-drawer">
       <div class="tc-hint muted small">{{ I18N.t('tc.hint') }}</div>
       <div class="tc-list">
@@ -31,7 +24,7 @@ Views.taskCenter = {
     </el-drawer>
   `,
   setup() {
-    const open = ref(false);
+    const open = computed({ get: () => Tasks.ui.centerOpen, set: (v) => { Tasks.ui.centerOpen = v; } });
     const jobs = computed(() =>
       Tasks.store.order
         .map((id) => Tasks.store.jobs[id])

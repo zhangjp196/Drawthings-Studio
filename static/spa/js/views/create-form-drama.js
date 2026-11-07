@@ -17,7 +17,6 @@ Views.createFormDrama = {
       </el-form-item>
       <el-form-item :label="I18N.t('cf.pName')" required>
         <el-input v-model="f.name" maxlength="100" :placeholder="I18N.t('cf.pNamePh')" />
-        <div class="hint">{{ I18N.t('cf.pNamePh') }}</div>
       </el-form-item>
       <el-button type="primary" :loading="saving" @click="submit">{{ I18N.t('cf.start') }}</el-button>
     </el-form>

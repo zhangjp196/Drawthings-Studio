@@ -12,6 +12,10 @@ Views.comicChapterList = {
   emits: ['select', 'toggle'],
   template: `
     <div class="md-left">
+      <div class="md-rail-head">
+        <b>{{ I18N.t('p.tabChapters') }}</b>
+        <span class="muted small">{{ chapters.length }}</span>
+      </div>
       <div class="md-list" v-if="chapters.length">
         <div v-for="c in chapters" :key="'md' + c.index" class="md-item"
              :class="{ active: c.index === current }" @click="$emit('select', c.index)">
