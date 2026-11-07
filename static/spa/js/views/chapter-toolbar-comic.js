@@ -21,7 +21,7 @@ Views.comicChapterToolbar = {
     llmVision: { type: Boolean, default: true },    // 所选 LLM 未勾选视觉时禁用批量评分
   },
   emits: ['plan', 'save-plan', 'update:scoreFilter', 'toggle-all', 'gen-all', 'score-all', 'clear-all',
-          'plan-selected', 'delete-selected', 'stop'],
+          'plan-selected', 'delete-selected', 'import-doc', 'stop'],
   template: `
     <div class="ch-toolbar">
       <div class="ch-tb-row">
@@ -32,6 +32,7 @@ Views.comicChapterToolbar = {
         <el-popconfirm :title="I18N.t('p.planSaveConfirm')" @confirm="$emit('save-plan')">
           <template #reference><el-button size="small" :loading="busySave" >{{ I18N.t('p.planSave') }}</el-button></template>
         </el-popconfirm>
+        <el-button size="small" @click="$emit('import-doc')">{{ I18N.t('p.impBtn') }}</el-button>
         <span class="ch-tb-sep"></span>
         <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}</span>
         <span class="muted small" v-if="actBusy || busySave">{{ progressText || I18N.t('p.busy') }}</span>

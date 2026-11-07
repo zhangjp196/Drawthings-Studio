@@ -15,4 +15,5 @@ window.EVENTS = {
   PROGRESS: 'progress',
   CHAPTER: 'chapter',
   SCORE: 'score',
+  IMPORT_ITEM: 'import_item',
 };

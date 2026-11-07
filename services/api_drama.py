@@ -4,10 +4,11 @@
 - 与另一类型完全独立：services/api_comic.py
 - 设计约定：漫画 / 短剧刻意分成两条重复的独立线（便于分开开发维护），请勿合并 / 勿抽共享基座（见 AGENTS.md）"""
 
+import json as _json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -34,6 +35,7 @@ from services.api_common import (
     _project_view,
 )
 from services.api_tasks import project_job_snapshot
+from services.doc_text import ALLOWED_EXTS, MAX_DOC_BYTES, imports_dir
 from services.drawthings import MAX_SIDE_LIMIT, MAX_VIDEO_SECONDS
 from services.jobs import JobCancelled
 from services.pipeline import _now, chars_from_raw
@@ -693,6 +695,156 @@ def project_job_cancel(request: Request, project_id: str, job_id: str, db: Sessi
         db.commit()
         return {"ok": True, "status": "cancelled"}
     return {"ok": True, "status": "cancelling"}
+
+
+@router.post("/{project_id}/import-doc")
+async def project_import_doc(
+    request: Request,
+    project_id: str,
+    file: UploadFile = File(...),
+    season_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """上传文档（txt / md / pdf / docx）→ 后台解析拆章，立即返回 `{job_id}`。
+
+    每解析出一段经 `import_item` 事件推送（预览不落库）；任务结束后预览 JSON 存在 `ProjectJob.result`。
+    用户在预览里确认（可编辑标题 / 剔除章节）后再调 `/import-apply` 写入。
+    """
+    lang = _lang(request)
+    project = _drama_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline.drama._get_episode(db, project, season_id) if season_id else None
+    if season is None:
+        raise HTTPException(
+            status_code=400, detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id")
+        )
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=L(
+                lang,
+                f"不支持的文件类型：{ext or '未知'}（支持 txt / md / pdf / docx）",
+                f"Unsupported file type: {ext or 'unknown'} (txt / md / pdf / docx)",
+            ),
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail=L(lang, "文件为空", "The file is empty"))
+    if len(data) > MAX_DOC_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=L(
+                lang,
+                f"文件超过 {MAX_DOC_BYTES // (1024 * 1024)}MB 上限",
+                f"The file exceeds the {MAX_DOC_BYTES // (1024 * 1024)}MB limit",
+            ),
+        )
+    dest = imports_dir() / f"{uuid.uuid4().hex}{ext}"
+    dest.write_bytes(data)
+    filename = file.filename or dest.name
+    job = ProjectJob(
+        id=uuid.uuid4().hex[:12],
+        project_id=project.id,
+        kind="import",
+        status="running",
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    db.add(job)
+    db.commit()
+    jobs.register(job.id)
+    task_manager.spawn(job.id, _run_import(job.id, project.id, season.id, str(dest), filename, lang))
+    return {"job_id": job.id, "filename": filename}
+
+
+async def _run_import(
+    job_id: str, project_id: str, season_id: str, path: str, filename: str, lang: str
+) -> None:
+    """后台解析文档：逐块调 LLM 拆片段，逐段广播 import_item，结果写入 job.result。"""
+    db = SessionLocal()
+    control = jobs.get(job_id)
+    job = db.get(ProjectJob, job_id)
+    project = db.get(Project, project_id)
+    season = db.get(Season, season_id)
+    if job is None or control is None or project is None or season is None:
+        if job is not None:
+            _finish_project_job(db, job, "error", "任务上下文已失效")
+            task_manager.publish_job(project_job_snapshot(job, project))
+        jobs.pop(job_id)
+        db.close()
+        return
+    _job = _make_job_updater(db, job, project)
+
+    async def progress_cb(current: int, total: int, title: str):
+        _job(note=f"{current}/{total} {title or ''}".strip())
+        task_manager.publish(
+            job_id, E.PROGRESS, {"current": current, "total": total, "title": title or ""}
+        )
+
+    async def item_cb(item: dict, index: int):
+        task_manager.publish(
+            job_id,
+            E.IMPORT_ITEM,
+            {"index": index, "title": item.get("title", ""), "summary": item.get("summary", "")},
+        )
+
+    try:
+        data = Path(path).read_bytes()
+        items = await pipeline.drama.import_chapters_preview(
+            db,
+            project,
+            season,
+            filename,
+            data,
+            lang=lang,
+            progress_cb=progress_cb,
+            item_cb=item_cb,
+            cancel_event=control.event,
+        )
+        job.result = _json.dumps({"filename": filename, "chapters": items}, ensure_ascii=False)
+        _job(status="done", note=f"{len(items)} 段", finished=True)
+        task_manager.publish(job_id, E.DONE, {"count": len(items)})
+    except JobCancelled:
+        _job(status="cancelled", note="已取消", finished=True)
+        task_manager.publish(job_id, E.DONE, {"status": "", "cancelled": True})
+    except Exception as e:
+        _job(status="error", error=str(e), finished=True)
+        task_manager.publish(
+            job_id, E.ERROR, {"message": L(lang, f"解析文档失败：{e}", f"Failed to parse the document: {e}")}
+        )
+    finally:
+        jobs.pop(job_id)
+        db.close()
+
+
+@router.post("/{project_id}/import-apply")
+async def project_import_apply(request: Request, project_id: str, db: Session = Depends(get_db)):
+    """把预览中确认的片段写入所选季末尾：body `{job_id?, season_id, chapters:[{title,summary}]}`。"""
+    lang = _lang(request)
+    body = await _json_body(request)
+    project = _drama_project(db, project_id, lang)
+    if project is None:
+        raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
+    season = pipeline.drama._get_episode(db, project, str(body.get("season_id") or "")) if body.get("season_id") else None
+    if season is None:
+        raise HTTPException(
+            status_code=400, detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id")
+        )
+    chapters = body.get("chapters")
+    if not isinstance(chapters, list) or not chapters:
+        raise HTTPException(status_code=400, detail=L(lang, "没有可导入的片段", "No clips to import"))
+    job_id = str(body.get("job_id") or "")
+    if job_id:
+        job = db.get(ProjectJob, job_id)
+        if not job or job.project_id != project.id:
+            raise HTTPException(status_code=404, detail=L(lang, "任务不存在", "Task not found"))
+    try:
+        count = pipeline.drama.apply_imported_chapters(db, project, season, chapters, lang)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
+    return {"ok": True, "count": count}
 
 
 @router.post("/{project_id}/gen/{index}")

@@ -41,6 +41,7 @@ from .agent import (
     ChapterOut,
     CharDescOut,
     CharsOut,
+    ImportOut,
     ScoreOut,
     ScriptOut,
     SeasonArcOut,
@@ -1016,6 +1017,105 @@ class ComicPipeline:
                 await chapter_done_cb(ch)
         # 章号可能与后续季旧序号冲突，末尾统一重排扁平序号（同 _replan_season）
         self._reindex_flat(db, project)
+
+    # ---------------- 阶段 3+：文档导入（txt / md / pdf / docx） ----------------
+    def _import_system(self) -> str:
+        """文档拆章提示词：只做结构化拆分，不改写剧情。"""
+        return (
+            "你是资深漫画编剧。用户会给出一段小说 / 剧本正文，请按剧情自然转折拆成若干「章」："
+            "每章给出不超过 20 字的标题与 2–3 句剧情摘要（不超过 150 字）。"
+            "必须按原文顺序、不遗漏情节、不自行创作；只输出结构化结果。"
+        )
+
+    async def _parse_import_chunk(
+        self, db, project: Project, season: Season, lang: str, chunk: str, prior: list[tuple[str, str]], model
+    ) -> list[dict]:
+        """解析一块正文 → 若干章（带前文标题衔接上下文）。"""
+        ctx = "\n".join(f"- {t}：{(s or '')[:60]}" for t, s in prior[-12:]) or "（无，这是开头部分）"
+        user = (
+            f"【已有章节（按顺序，供承接上下文）】\n{ctx}\n\n"
+            f"【待拆分正文】\n{chunk}\n\n"
+            "请按顺序输出这段正文对应的章节列表（标题 + 摘要）。"
+        )
+        agent = make_agent(model, self._import_system(), output_type=ImportOut)
+        async with agent:
+            data = (await agent.run(user)).output
+        out: list[dict] = []
+        for item in data.chapters:
+            title = (item.title or "").strip()[:200]
+            summary = (item.summary or "").strip()[:1000]
+            if not title and not summary:
+                continue
+            out.append({"title": title or f"第{len(prior) + len(out) + 1}章", "summary": summary})
+        if not out:
+            # 模型没按结构输出：整段兜底为一章，标题取首个非空行
+            first = next((ln.strip() for ln in chunk.splitlines() if ln.strip()), "")
+            out = [{"title": first[:40] or "导入章节", "summary": chunk.strip()[:300]}]
+        return out
+
+    async def import_chapters_preview(
+        self,
+        db,
+        project: Project,
+        season: Season,
+        filename: str,
+        data: bytes,
+        lang: str = "zh",
+        progress_cb=None,
+        item_cb=None,
+        cancel_event=None,
+    ) -> list[dict]:
+        """文档 → 拆章预览（**不落库**）：返回 [{title, summary}]；每解析出一章经 item_cb 实时回调。"""
+        from .doc_text import extract_text, split_chunks
+
+        text = extract_text(filename, data, lang)
+        chunks = split_chunks(text)
+        llm_cfg = self._llm_cfg(db, project, lang)
+        model = build_model(llm_cfg)
+        prior: list[tuple[str, str]] = [(c.title, c.summary) for c in self._season_chapters(db, project, season)]
+        items: list[dict] = []
+        for i, chunk in enumerate(chunks, start=1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelled()
+            if progress_cb:
+                await progress_cb(i, len(chunks), L(lang, f"第{i}段", f"part {i}"))
+            for item in await self._parse_import_chunk(db, project, season, lang, chunk, prior, model):
+                items.append(item)
+                prior.append((item["title"], item["summary"]))
+                if item_cb:
+                    await item_cb(item, len(items))
+        return items
+
+    def apply_imported_chapters(self, db, project: Project, season: Season, chapters, lang: str = "zh") -> int:
+        """把用户确认后的章节追加到所选季末尾（保留已有章节与媒体），返回写入数量。"""
+        items: list[tuple[str, str]] = []
+        for raw in chapters or []:
+            if not isinstance(raw, dict):
+                continue
+            title = str(raw.get("title") or "").strip()[:200]
+            summary = str(raw.get("summary") or "").strip()
+            if not title and not summary:
+                continue
+            items.append((title or L(lang, "导入章节", "Imported chapter"), summary))
+        if not items:
+            raise ValueError(L(lang, "没有可导入的章节", "No chapters to import"))
+        existing = len(self._season_chapters(db, project, season))
+        base = self._season_base_index(db, project, season)
+        for k, (title, summary) in enumerate(items, start=1):
+            db.add(
+                Chapter(
+                    project_id=project.id,
+                    season_id=season.id,
+                    index=base + existing + k - 1,
+                    title=title,
+                    summary=summary,
+                )
+            )
+        db.commit()
+        self._reindex_flat(db, project)
+        project.status = "chaptered"
+        self._save(db, project)
+        return len(items)
 
     def _load_chapters(self, db, project: Project) -> list[Chapter]:
         return db.query(Chapter).filter(Chapter.project_id == project.id).order_by(Chapter.index).all()

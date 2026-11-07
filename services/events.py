@@ -23,6 +23,7 @@ DONE = "done"  # 结束 {}
 PROGRESS = "progress"  # {current,total,title}
 CHAPTER = "chapter"  # 单章进度
 SCORE = "score"  # 评分进度
+IMPORT_ITEM = "import_item"  # 文档导入：解析出一章 {index,title,summary}
 
 # ---- 传输层内部标记（不出现在线路上）----
 EOF = "__eof__"
@@ -40,5 +41,6 @@ __all__ = [
     "PROGRESS",
     "CHAPTER",
     "SCORE",
+    "IMPORT_ITEM",
     "EOF",
 ]

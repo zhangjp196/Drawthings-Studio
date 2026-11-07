@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectComic = {
   props: ['id'],
-  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog },
+  components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog, 'import-dialog': Views.comicImportDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -168,7 +168,7 @@ Views.projectComic = {
           <chapter-toolbar :act-busy="actBusy" :busy-save="busySave" :busy-gen-all="busyGenAll" :busy-score-all="busyScoreAll" :selected-count="selected.length" :score-filter="scoreFilter" :score-filter-options="scoreFilterOptions" :o-w="oW" :o-h="oH" :has-chapters="!!seasonChapters.length" :total="seasonChapters.length" :done-count="seasonDoneCount" :progress-text="progress.text" :all-selected="allSelected"
                            :llm-vision="!!data.project.llm_vision" @plan="openPlanDlg" @save-plan="savePlan" @update:score-filter="setScoreFilter"
                            @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll" @clear-all="clearAll"
-                           @plan-selected="planSelected" @delete-selected="deleteSelected" @stop="stopGen" />
+                           @plan-selected="planSelected" @delete-selected="deleteSelected" @import-doc="openImportDoc" @stop="stopGen" />
 
           <div class="md-layout ch-work">
             <!-- 左：章节列表（专属子组件） -->
@@ -213,6 +213,9 @@ Views.projectComic = {
       <!-- PDF 预览：iframe 直接渲染导出端点返回的 inline PDF（关闭弹框即销毁） -->
       <pdf-dialog v-model="pdfDlg" :url="pdfUrl" @closed="pdfUrl = ''" />
 
+      <!-- 文档导入：上传 → 后台解析拆章 → 预览确认后写入本季 -->
+      <import-dialog v-model="importOpen" :project-id="data.project.id" :season-id="seasonId" @reloaded="load" />
+
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>
     <div v-else class="page loading"><el-skeleton :rows="6" animated /></div>
@@ -225,6 +228,7 @@ Views.projectComic = {
     const backTo = () => '/projects?kind=comic';
 
     const actBusy = ref(false);
+    const importOpen = ref(false);
     const busySave = ref(false);
     const busyGenAll = ref(false);
     const busyScoreAll = ref(false);
@@ -709,6 +713,14 @@ Views.projectComic = {
       if (!seasonId.value || !selected.value.length) return;
       await planChapters({ mode: 'replan', indices: selected.value });
     }
+    // 文档导入：必须选定季（章节写入所选季末尾）
+    function openImportDoc() {
+      if (!seasonId.value) {
+        ElementPlus.ElMessage.warning(I18N.t('p.seasonAdd'));
+        return;
+      }
+      importOpen.value = true;
+    }
     // 批量删除所选章节（连同媒体文件，其余章节重新编号）
     async function deleteSelected() {
       if (!seasonId.value || !selected.value.length) return;
@@ -1013,7 +1025,7 @@ Views.projectComic = {
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
       oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, modelChoices, lb, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect, importOpen, openImportDoc,
       exportZip, exportPdf, previewPdf, pdfDlg, pdfUrl, delChapter, onChapterReloaded, onChapterUpdate, onChapterScore, onChapterClear,
       openCfg, saveCfg, openLb, load, backTo, router,
     };

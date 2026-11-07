@@ -1053,3 +1053,12 @@ button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-
 .tc-meta { margin-top: 4px; }
 .tc-err { margin-top: 6px; font-size: 12px; color: var(--err); }
 .tc-actions { margin-top: 8px; }
+
+
+/* ---------- 文档导入对话框 ---------- */
+.imp-drop { padding: 14px 10px; text-align: center; }
+.imp-drop-ico { font-size: 26px; margin-bottom: 4px; }
+.imp-status { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; }
+.imp-file { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.imp-table { margin-top: 10px; }
+.imp-foot { float: left; line-height: 30px; }

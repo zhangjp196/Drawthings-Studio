@@ -7,7 +7,7 @@
 window.Views = window.Views || {};
 Views.projectDrama = {
   props: ['id'],
-  components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'plan-dialog': Views.dramaPlanDialog, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'cfg-dialog': Views.dramaCfgDialog, 'video-dialog': Views.dramaVideoDialog },
+  components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'plan-dialog': Views.dramaPlanDialog, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'cfg-dialog': Views.dramaCfgDialog, 'video-dialog': Views.dramaVideoDialog, 'import-dialog': Views.dramaImportDialog },
   template: `
     <div class="page" v-if="data">
       <div class="proj-head">
@@ -171,7 +171,7 @@ Views.projectDrama = {
                            :llm-vision="!!data.project.llm_vision" @plan="openPlanDlg" @save-plan="savePlan" @update:score-filter="setScoreFilter"
                            @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll"
                            @clear-all="clearAll" @plan-selected="planSelected" @delete-selected="deleteSelected"
-                           @set-seconds="setBatchSeconds" @stop="stopGen" />
+                           @set-seconds="setBatchSeconds" @import-doc="openImportDoc" @stop="stopGen" />
 
           <!-- 上：片段列表（横向，短剧专属子组件） -->
           <div class="ch-strip-wrap">
@@ -218,6 +218,9 @@ Views.projectDrama = {
       <!-- 合成视频预览：inline mp4 直接播放 -->
       <video-dialog v-model="videoDlg" :url="videoUrl" @closed="videoUrl = ''" />
 
+      <!-- 文档导入：上传 → 后台解析拆片段 → 预览确认后写入本集 -->
+      <import-dialog v-model="importOpen" :project-id="data.project.id" :season-id="seasonId" @reloaded="load" />
+
       <el-image-viewer v-if="lb.show" :url-list="lb.list" :initial-index="lb.idx" @close="lb.show = false" />
     </div>
     <div v-else class="page loading"><el-skeleton :rows="6" animated /></div>
@@ -230,6 +233,7 @@ Views.projectDrama = {
     const backTo = () => '/projects?kind=drama';
 
     const actBusy = ref(false);
+    const importOpen = ref(false);
     const busySave = ref(false);
     const busyGenAll = ref(false);
     const busyScoreAll = ref(false);
@@ -758,6 +762,14 @@ Views.projectDrama = {
       if (!seasonId.value || !selected.value.length) return;
       await planChapters({ mode: 'replan', indices: selected.value });
     }
+    // 文档导入：必须选定集（片段写入所选集末尾）
+    function openImportDoc() {
+      if (!seasonId.value) {
+        ElementPlus.ElMessage.warning(I18N.t('d.epAdd'));
+        return;
+      }
+      importOpen.value = true;
+    }
     // 批量删除所选片段（连同视频文件，其余片段重新编号）
     async function deleteSelected() {
       if (!seasonId.value || !selected.value.length) return;
@@ -1075,7 +1087,7 @@ Views.projectDrama = {
       coverGenDlg, ovlDlg, ovlBusy, pvItems, pvUrls, gotoChapter, pickChapter,
       oGlobal, oW, oH, oTitle, saveTitle, planCount, planMode, planDlg, planDlgTitle, planModeHint, openPlanDlg, confirmPlan, planSelected, deleteSelected,
       cfgDlg, cfgBusy, cfg, imgChoices, vidChoices, lb, genDlg, genDlgTitle, genDlgExtra,
-      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect,
+      openGenDlg, confirmGen, genFirst, genSeasonFirst, openCoverGenDlg, confirmCoverGen, openOvlDlg, applyOvl, planChapters, saveStory, saveSeasonArc, saveSeasonChars, savePlan, doAction, genAll, scoreAll, clearAll, stopGen, isSel, toggleSelect, toggleAllSelect, importOpen, openImportDoc,
       exportZip, exportVideo, previewVideo, videoDlg, videoUrl, delChapter, onChapterReloaded, onChapterUpdate, onChapterScore, onChapterClear,
       openCfg, saveCfg, openLb, load, backTo, router,
     };

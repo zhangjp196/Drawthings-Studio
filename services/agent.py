@@ -250,6 +250,19 @@ class ChapterCount(BaseModel):
     count: int = 0
 
 
+class ImportChapterOut(BaseModel):
+    """文档导入拆章：单章标题 + 剧情摘要（正文内容保留在原文中，不重复生成）。"""
+
+    title: str = ""
+    summary: str = ""
+
+
+class ImportOut(BaseModel):
+    """文档导入拆章结果（一次解析可能产出多章）。"""
+
+    chapters: list[ImportChapterOut] = []
+
+
 class ScriptOut(BaseModel):
     """阶段 4：单章剧本 + 提示词（分辨率统一按总体设定，不由智能体决定）。
     seconds：预留字段（当前不使用；时长由用户在界面手动设置，0=跟随配置/预设上限）。漫画忽略。"""

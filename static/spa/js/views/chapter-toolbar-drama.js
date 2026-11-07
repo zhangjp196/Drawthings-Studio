@@ -33,6 +33,7 @@ Views.dramaChapterToolbar = {
         <el-popconfirm :title="I18N.t('d.planSaveConfirmDrama')" @confirm="$emit('save-plan')">
           <template #reference><el-button size="small" :loading="busySave" >{{ I18N.t('d.planSaveDrama') }}</el-button></template>
         </el-popconfirm>
+        <el-button size="small" @click="$emit('import-doc')">{{ I18N.t('d.impBtn') }}</el-button>
         <span class="ch-tb-sep"></span>
         <span class="muted small">{{ I18N.t('p.outRes') }} {{ oW }}×{{ oH }}</span>
         <span class="muted small" v-if="actBusy || busySave">{{ progressText || I18N.t('p.busy') }}</span>

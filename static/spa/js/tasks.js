@@ -53,9 +53,7 @@ window.Tasks = (function () {
     }
   }
 
-  async function run(url, body, opts = {}) {
-    ensure();
-    const res = await API.post(url, body);
+  function start(res, opts) {
     const id = res && (res.job_id || res.id);
     if (!id) throw new Error('任务提交失败：缺少 job_id');
     if (opts.onJobId) { try { opts.onJobId(id, res); } catch (e) { console.error(e); } }
@@ -69,6 +67,17 @@ window.Tasks = (function () {
       const snap = store.jobs[id];
       if (snap && snap.status && snap.status !== 'running') settle(p, snap); // 极快任务的兜底
     });
+  }
+
+  async function run(url, body, opts = {}) {
+    ensure();
+    return start(await API.post(url, body), opts);
+  }
+
+  // 表单提交（文档导入等 multipart）：POST 后同样走 WS 订阅与事件分发
+  async function runForm(url, formData, opts = {}) {
+    ensure();
+    return start(await API.postForm(url, formData), opts);
   }
 
   async function cancel(id) {
@@ -102,6 +111,7 @@ window.Tasks = (function () {
   return {
     store,
     run,
+    runForm,
     cancel,
     refresh,
     activeCount,
