@@ -271,8 +271,8 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
             if config_type == "llm":
                 msg = L(
                     lang,
-                    f"VLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
-                    f"VLM config limit reached ({limit} max) — delete an unused one first",
+                    f"LLM 配置已达上限（最多 {limit} 个），请先删除不再使用的配置",
+                    f"LLM config limit reached ({limit} max) — delete an unused one first",
                 )
             else:
                 msg = L(
@@ -286,13 +286,14 @@ async def config_create(request: Request, db: Session = Depends(get_db)):
             model = str(body.get("model") or "").strip()
             if not model:
                 raise HTTPException(
-                    status_code=400, detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name")
+                    status_code=400, detail=L(lang, "LLM 配置需要模型名", "LLM config requires a model name")
                 )
             cs.create_llm(
                 name,
                 base_url,
                 str(body.get("api_key") or ""),
                 model,
+                supports_vision="yes" if body.get("supports_vision") else "no",
                 thinking=thinking,
                 thinking_param=thinking_param,
             )
@@ -325,7 +326,7 @@ async def config_update(request: Request, config_type: str, config_id: str, db: 
             model = str(body.get("model") or "").strip()
             if not model:
                 raise HTTPException(
-                    status_code=400, detail=L(lang, "VLM 配置需要模型名", "VLM config requires a model name")
+                    status_code=400, detail=L(lang, "LLM 配置需要模型名", "LLM config requires a model name")
                 )
             thinking = str(body.get("thinking") or "default").lower()
             if thinking not in ("default", "yes", "no"):
@@ -344,6 +345,7 @@ async def config_update(request: Request, config_type: str, config_id: str, db: 
                 base_url=base_url,
                 api_key=None if raw_key in (None, "") else str(raw_key),
                 model=model,
+                supports_vision="yes" if body.get("supports_vision") else "no",
                 thinking=thinking,
                 thinking_param=thinking_param,
             )
@@ -467,7 +469,7 @@ async def settings_update(request: Request, db: Session = Depends(get_db)):
     dt_id = str(body.get("default_dt_config_id") or "").strip()
     if llm_id and not cs.get_llm(llm_id):
         raise HTTPException(
-            status_code=400, detail=L(lang, "默认 VLM 配置不存在", "Default VLM config not found")
+            status_code=400, detail=L(lang, "默认 LLM 配置不存在", "Default LLM config not found")
         )
     if dt_id and not cs.get_drawthing(dt_id):
         raise HTTPException(

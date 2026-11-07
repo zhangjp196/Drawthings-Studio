@@ -118,7 +118,7 @@ Views.microChat = {
     function applyQuote() { quoted.value = { url: ctx.url, kind: ctx.kind }; ctx.show = false; }
     function closeCtx() { if (ctx.show) ctx.show = false; }
 
-    // VLM 手动评分：写回 b.score / b.score_note（服务端持久化）
+    // LLM 手动评分：写回 b.score / b.score_note（服务端持久化；未勾选视觉时后端按纯文本评估）
     async function doScore(b) {
       b.scoring = true;
       try {

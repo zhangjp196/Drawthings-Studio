@@ -26,7 +26,15 @@ from config import data_dir
 from i18n import L
 from models import Asset, MicroMessage
 from services import events as E
-from services.agent import ScoreOut, build_model, image_data_uri, make_agent, to_message_history, user_prompt
+from services.agent import (
+    ScoreOut,
+    build_model,
+    image_data_uri,
+    make_agent,
+    supports_vision,
+    to_message_history,
+    user_prompt,
+)
 from services.api_common import _media_url
 from services.capabilities import caps, dt_client, prompt_language
 from services.drawthings import MAX_VIDEO_SECONDS, MODEL_NONE, extract_last_frame
@@ -231,13 +239,13 @@ def norm_score_mode(v) -> str:
     return "prompt" if str(v or "").strip().lower() == "prompt" else "image"
 
 
-async def vlm_score_media(
+async def llm_score_media(
     llm_cfg, image_path: str, lang: str = "zh", mode: str = "image", prompt: str = ""
 ) -> tuple[int, str]:
-    """用作品所选 VLM 评分：返回 (score, note)。
+    """用作品所选 LLM 评分：返回 (score, note)。
 
     mode='image'（默认）：仅评画面本身（忽略生成提示词）；mode='prompt'：结合提示词评相符度。
-    视频请先取末帧再传入。
+    视频请先取末帧再传入。LLM 未勾选视觉时退化为纯文本评估（按提示词/说明打分）。
     """
     use_prompt = norm_score_mode(mode) == "prompt"
     model = build_model(llm_cfg)
@@ -258,7 +266,14 @@ async def vlm_score_media(
             if lang == "en"
             else "请仅根据画面本身评价质量并给出评分与一句话评语。"
         )
-    content = [ImageUrl(url=await run_sync(image_data_uri, image_path)), text]
+    content: str | list = [ImageUrl(url=await run_sync(image_data_uri, image_path)), text]
+    if not supports_vision(llm_cfg):
+        # 未勾选视觉：退化为纯文本评估（按提示词/内容说明打分），不带图
+        content = (
+            f"（当前模型不支持看图，请仅按提示词与内容描述评估）\n{text}"
+            if use_prompt
+            else "（当前模型不支持看图，请按 0–100 给出一个中性评分并注明「未看图」。）"
+        )
     data = (await agent.run(content)).output
     s = int(getattr(data, "score", 0) or 0)
     s = max(0, min(100, s))  # 收敛到 0–100
@@ -443,7 +458,7 @@ async def _do_generation(
     """执行一次生成（图/视频），把 tool/tool_status/media/tool_error 事件写入 out。
 
     - 生成参数快照写入内容块；
-    - 成功且提供了 llm_cfg 时**自动用该 VLM 评分**（图/视频；视频取末帧），评分依据由 `score_mode` 决定
+    - 成功且提供了 llm_cfg 时**自动用该 LLM 评分**（图/视频；视频取末帧），评分依据由 `score_mode` 决定
       （'image'=仅画面忽略提示词；'prompt'=结合提示词相符度），评分写入内容块并经 `media_score` 事件下发
       （失败静默忽略，不影响生成）。
     返回给 LLM 的结果文本（成功/失败），与提示词内容无关。
@@ -535,7 +550,7 @@ async def run_micro_chat(
     persister = _MsgPersister(db, session, parts, last_media, t0, assistant_idx, assistant_id)
 
     if not llm_cfg:
-        msg = L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config")
+        msg = L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config")
         parts.append({"type": "error", "message": msg})
         persister.save("interrupted")
         persister.final = True
@@ -800,5 +815,5 @@ __all__ = [
     "latest_session_media_path",
     "run_micro_chat",
     "run_regenerate",
-    "vlm_score_media",
+    "llm_score_media",
 ]

@@ -15,6 +15,7 @@ Views.chapterCardComic = {
     defW: { type: Number, default: 0 },             // 总体默认分辨率（仅显示，不可在此修改）
     defH: { type: Number, default: 0 },
     scoreMin: { type: Number, default: 60 },        // 评分阈值（分值标签配色用）
+    llmVision: { type: Boolean, default: true },    // 所选 LLM 是否支持看图；否则评分按钮禁用
   },
   emits: ['preview', 'reloaded', 'toggle', 'saveplan', 'update:chapter', 'update:score', 'update:clear'],
   template: `
@@ -68,7 +69,9 @@ Views.chapterCardComic = {
           </div>
           <div class="res-row">
             <span class="muted small">{{ I18N.t('p.chScore') }}</span>
-            <el-button size="small" :loading="busy === 'score'"  @click="doScore">{{ I18N.t('p.vlmScore') }}</el-button>
+            <span :title="llmVision ? '' : I18N.t('p.visionOffTip')">
+              <el-button size="small" :loading="busy === 'score'" :disabled="!llmVision" @click="doScore">{{ I18N.t('p.llmScore') }}</el-button>
+            </span>
             <span v-if="chapter.score_note" class="muted small" style="margin-left:6px;">{{ chapter.score_note }}</span>
           </div>
           <div class="actions">
@@ -156,7 +159,7 @@ Views.chapterCardComic = {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
     }
-    // VLM 手动评分：调用 VLM 给本章评分，成功后刷新分值/评语
+    // LLM 手动评分：调用所选 LLM 给本章评分（未勾选视觉时禁用），成功后刷新分值/评语
     async function doScore() {
       busy.value = 'score';
       try {

@@ -155,10 +155,10 @@ class Pipeline:
             return self.comic.save_chapter_fields(db, project, season, index, prompt)
         return self.drama.save_clip_fields(db, project, season, index, prompt)
 
-    async def vlm_score_chapter(self, db, project, season, index: int, lang: str = "zh"):
+    async def llm_score_chapter(self, db, project, season, index: int, lang: str = "zh"):
         if self._is_comic(project):
-            return await self.comic.vlm_score_chapter(db, project, season, index, lang)
-        return await self.drama.vlm_score_clip(db, project, season, index, lang)
+            return await self.comic.llm_score_chapter(db, project, season, index, lang)
+        return await self.drama.llm_score_clip(db, project, season, index, lang)
 
     def add_chapter(self, db, project, season):
         if self._is_comic(project):

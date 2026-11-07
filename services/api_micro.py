@@ -45,10 +45,10 @@ from services.media_files import (
 )
 from services.micro_agent import (
     is_video_path,
+    llm_score_media,
     norm_score_mode,
     run_micro_chat,
     run_regenerate,
-    vlm_score_media,
 )
 from services.micro_parts import dump_parts, load_parts
 from services.pipeline import _now
@@ -153,7 +153,7 @@ def _micro_work_view(db: Session, work: MicroWork) -> dict:
             "created_at": work.created_at,
             "llm_name": llm_cfg.name if llm_cfg else "",
             "dt_name": dt_cfg.name if dt_cfg else "",
-            "vision": bool(llm_cfg),
+            "vision": bool(llm_cfg) and str(getattr(llm_cfg, "supports_vision", "") or "").lower() == "yes",
         },
         "sessions": [
             {
@@ -242,7 +242,7 @@ async def micro_create(request: Request, db: Session = Depends(get_db)):
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
         raise HTTPException(
-            status_code=400, detail=L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config")
+            status_code=400, detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config")
         )
     w = MicroWork(
         id=uuid.uuid4().hex[:12],
@@ -535,7 +535,7 @@ async def micro_work_settings(request: Request, work_id: str, db: Session = Depe
     llm_config_id = str(body.get("llm_config_id") or "")
     if not cs.get_llm(llm_config_id):
         raise HTTPException(
-            status_code=400, detail=L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config")
+            status_code=400, detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config")
         )
     work.title = str(body.get("title") or "").strip()[:200]
     work.llm_config_id = llm_config_id
@@ -678,10 +678,19 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     llm_cfg = cs.get_llm(work.llm_config_id or "")
     dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
 
-    # 用户附图：VLM 一律支持图片输入（存 MEDIA_DIR，随消息落库）
+    # 用户附图：需作品所选 LLM 勾选「支持视觉」（存 MEDIA_DIR，随消息落库；未勾选则拒绝）
     image_urls = []
     image_paths: list[str] = []
     raw_images = body.get("images") or []
+    if raw_images and llm_cfg and str(getattr(llm_cfg, "supports_vision", "") or "").lower() != "yes":
+        raise HTTPException(
+            status_code=400,
+            detail=L(
+                lang,
+                "当前 LLM 配置未勾选「支持视觉」，无法附带图片",
+                "The selected LLM config has no vision support — image attachments are disabled",
+            ),
+        )
     if raw_images:
         image_urls = save_data_uri_images(raw_images)
         image_paths = [str(MEDIA_DIR / u.rsplit("/", 1)[-1].split("?")[0]) for u in image_urls]
@@ -869,7 +878,7 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str, db: 
 
 @router.post("/{work_id}/{session_id}/score")
 async def micro_score(request: Request, work_id: str, session_id: str, db: Session = Depends(get_db)):
-    """VLM 评分：对某条生成媒体（图/视频）按 0–100 评分（视频取末帧），返回 {score, note}，
+    """LLM 评分：对某条生成媒体（图/视频）按 0–100 评分（视频取末帧），返回 {score, note}，
     并把分值/评语写回该会话内对应内容块（持久化，刷新后仍显示）。"""
     lang = _lang(request)
     session = db.get(MicroSession, session_id)
@@ -887,7 +896,7 @@ async def micro_score(request: Request, work_id: str, session_id: str, db: Sessi
     llm_cfg = ConfigStore(db).get_llm(work.llm_config_id or "")
     if not llm_cfg:
         raise HTTPException(
-            status_code=400, detail=L(lang, "请选择有效的 VLM 配置", "Please select a valid VLM config")
+            status_code=400, detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config")
         )
     p = media_path_from_url(url)
     if p is None:
@@ -908,7 +917,7 @@ async def micro_score(request: Request, work_id: str, session_id: str, db: Sessi
             )
         img = frame
     try:
-        score, note = await vlm_score_media(
+        score, note = await llm_score_media(
             llm_cfg,
             img,
             lang,

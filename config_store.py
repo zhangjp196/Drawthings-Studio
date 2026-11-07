@@ -27,7 +27,7 @@ class ConfigStore:
 
     # ---------------- LLM 配置 ----------------
     def create_llm(
-        self, name, base_url, api_key, model, supports_vision="yes", thinking="default", thinking_param="auto"
+        self, name, base_url, api_key, model, supports_vision="no", thinking="default", thinking_param="auto"
     ) -> LLMConfig:
         cfg = LLMConfig(
             id=uuid.uuid4().hex[:12],
@@ -35,7 +35,7 @@ class ConfigStore:
             base_url=base_url,
             api_key=api_key or "",
             model=model,
-            supports_vision=(supports_vision or "yes").lower(),
+            supports_vision=(supports_vision or "no").lower(),
             thinking=(thinking or "default").lower(),
             thinking_param=(thinking_param or "auto").lower(),
             created_at=_now(),

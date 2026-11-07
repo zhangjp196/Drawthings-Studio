@@ -100,7 +100,8 @@ Views.configs = {
             <div class="cfg-card" v-for="row in llmItems" :key="row.id">
               <div class="wc-top"><span class="cfg-name">{{ row.name }}</span></div>
               <div class="cfg-meta muted">
-                {{ I18N.t('cfg.modelName', row.model) }} · {{ I18N.t('cfg.vision') }}<template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
+                {{ I18N.t('cfg.modelName', row.model) }} ·
+                <span class="cfg-vision" :class="row.supports_vision === 'yes' ? 'on' : 'off'">{{ row.supports_vision === 'yes' ? I18N.t('cfg.visionOn') : I18N.t('cfg.visionOff') }}</span><template v-if="row.thinking && row.thinking !== 'default'"> · {{ row.thinking === 'yes' ? I18N.t('cfg.thinkingYes') : I18N.t('cfg.thinkingNo') }}</template>
               </div>
               <div class="cfg-url" :title="row.base_url">{{ row.base_url }}</div>
               <div class="wc-meta muted">{{ I18N.t('cfg.created', fmt(row.created_at)) }}</div>
@@ -112,7 +113,7 @@ Views.configs = {
               </div>
             </div>
           </div>
-          <el-empty v-else :image-size="56" :description="I18N.t('cfg.empty', 'VLM')" />
+          <el-empty v-else :image-size="56" :description="I18N.t('cfg.empty', 'LLM')" />
         </div>
       </section>
 
@@ -179,6 +180,10 @@ Views.configs = {
                 </el-select>
                 <el-button :loading="loadingModels" @click="fetchModels">{{ I18N.t('cfg.fetchModels') }}</el-button>
               </div>
+            </el-form-item>
+            <el-form-item :label="I18N.t('cfg.visionLabel')">
+              <el-switch v-model="f.supports_vision" />
+              <div class="hint">{{ I18N.t('cfg.visionHint') }}</div>
             </el-form-item>
             <el-form-item :label="I18N.t('cfg.thinking')">
               <el-select v-model="f.thinking" style="width: 100%">
@@ -283,6 +288,7 @@ Views.configs = {
     const loadingModels = ref(false);
     const f = reactive({
       config_type: 'llm', name: '', base_url: '', api_key: '', model: '',
+      supports_vision: true,
       thinking: 'default', thinking_param: 'auto',
       model_image: '', model_video: '',
       ref_image: false, ref_video: false,   // 勾选后才图生图 / 图生视频（默认不勾选 = 文生图 / 文生视频）
@@ -404,6 +410,7 @@ Views.configs = {
       editId.value = '';
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '',
+        supports_vision: true,
         thinking: 'default', thinking_param: 'auto',
         model_image: '', model_video: '',
         ref_image: false, ref_video: false,
@@ -419,6 +426,7 @@ Views.configs = {
       // save() 把整个 f POST 出去时，会把 LLM 的 api_key 写进 DrawThings 配置行。
       Object.assign(f, {
         config_type: type, name: '', base_url: '', api_key: '', model: '',
+        supports_vision: false,
         thinking: 'default', thinking_param: 'auto',
         model_image: '', model_video: '',
         ref_image: false, ref_video: false,
@@ -436,6 +444,7 @@ Views.configs = {
         Object.assign(f, {
           name: row.name, base_url: row.base_url,
           api_key: '', model: row.model,
+          supports_vision: row.supports_vision === 'yes',
           thinking: row.thinking || 'default',
           thinking_param: row.thinking_param || 'auto',
         });

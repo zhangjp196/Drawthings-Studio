@@ -18,6 +18,7 @@ Views.chapterCardDrama = {
     beats: { type: Array, default: () => [] },      // 本集关键剧情节点（按比例落位到本段）
     clipCount: { type: Number, default: 0 },        // 本集片段总数（用于节点按比例落位）
     refKind: { type: String, default: '' },         // 本段参考来源：prev|epcover|prevep|next|none
+    llmVision: { type: Boolean, default: true },    // 所选 LLM 是否支持看图；否则评分按钮禁用
   },
   emits: ['preview', 'reloaded', 'toggle', 'saveplan', 'update:chapter', 'update:score', 'update:clear'],
   template: `
@@ -90,7 +91,9 @@ Views.chapterCardDrama = {
           </div>
           <div class="res-row">
             <span class="muted small">{{ I18N.t('d.clipScore') }}</span>
-            <el-button size="small" :loading="busy === 'score'"  @click="doScore">{{ I18N.t('p.vlmScore') }}</el-button>
+            <span :title="llmVision ? '' : I18N.t('p.visionOffTip')">
+              <el-button size="small" :loading="busy === 'score'" :disabled="!llmVision" @click="doScore">{{ I18N.t('p.llmScore') }}</el-button>
+            </span>
             <span v-if="chapter.score_note" class="muted small" style="margin-left:6px;">{{ chapter.score_note }}</span>
           </div>
           <div class="actions">
@@ -214,7 +217,7 @@ Views.chapterCardDrama = {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
     }
-    // VLM 手动评分：调用 VLM 给本段评分，成功后刷新分值/评语
+    // LLM 手动评分：调用所选 LLM 给本段评分（未勾选视觉时禁用），成功后刷新分值/评语
     async function doScore() {
       busy.value = 'score';
       try {

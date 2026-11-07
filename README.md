@@ -164,11 +164,11 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   "Use as reference"; it becomes the reference for the next generation (video → last frame for image-to-image; image →
   first frame for image-to-video). Works per message and across sessions; the reference is cleared after that generation.
 - **Attachment de-duplication**: adding the same image twice is skipped (no duplicate upload).
-- **Manual VLM scoring + Redo (Quick Create)**: click **Score** on a generated image/video (the work's VLM rates it 0–100
+- **Manual LLM scoring + Redo (Quick Create)**: click **Score** on a generated image/video (the work's LLM rates it 0–100
   with a one-line comment; videos use the last frame); right-click → **Redo (improve by score)** rewrites the prompt using
   that score & comment and regenerates as a **new message** (the original is kept). The scoring basis is per work
   (image only / image + prompt).
-- **Project-side scoring + retry/stop**: each chapter card has a manual **VLM score** button; **auto scoring is configured
+- **Project-side scoring + retry/stop**: each chapter card has a manual **LLM score** button; **auto scoring is configured
   in the project's "⚙ Project settings" dialog** (it used to be a dedicated **Auto scoring** sub-tab under *Overall*, which
   has been removed), where you can turn on **auto scoring** with a **threshold**, plus two independent
   switches — **low-score auto-retry** (regenerate below threshold, max 2×) and **stop when below threshold** (halt the

@@ -45,7 +45,7 @@ class ToolBlock(BaseModel):
     height: int = 0
     seconds: int = 0  # 视频时长（秒；0=用上限）
     ref_url: str = ""  # 实际参考图（/media/xxx；空=无参考）
-    # ---- VLM 评分（右键「VLM 评分」）----
+    # ---- LLM 评分（右键「LLM 评分」）----
     score: int = 0  # 0=未评分；1–100 评分
     score_note: str = ""  # 一句话评语
 

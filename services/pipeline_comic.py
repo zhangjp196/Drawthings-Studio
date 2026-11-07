@@ -47,6 +47,7 @@ from .agent import (
     build_model,
     image_data_uri,
     make_agent,
+    supports_vision,
 )
 from .capabilities import dt_client, prompt_language, ref_image_enabled
 from .drawthings import extract_last_frame
@@ -604,10 +605,10 @@ class ComicPipeline:
         if arc:
             user_text += f"\n本季大纲：\n{arc}"
         user_text += "\n请写出这个角色的形象 / 性格 / 核心动机。"
-        # 参考图：角色有图即附带（VLM 一律支持图片输入，多模态入图）
+        # 参考图：角色有图且 LLM 勾选了视觉时才附带（多模态入图）
         img = (char.get("image") or "").strip()
         prompt: str | list = user_text
-        if img and Path(img).is_file():
+        if img and supports_vision(llm_cfg) and Path(img).is_file():
             prompt = [ImageUrl(url=await run_sync(image_data_uri, img)), user_text]
         async with agent:
             data = (await agent.run(prompt)).output
@@ -1117,6 +1118,9 @@ class ComicPipeline:
         # 避免从头完整描述导致重绘覆盖参考画面（功能级开关优先，配置兜底）
         # 冗余防错：先把参考图读成 data URI（文件丢失 / 损坏 → 退化为纯文本续写，不中断本章）
         ref_uri = None
+        if ref_img and not supports_vision(llm_cfg):
+            # LLM 未勾选视觉：不带参考图（提示词纯文本续写），DrawThings 侧参考仍由 ref_image_enabled 决定
+            ref_img = None
         if ref_img:
             # 读图 + base64 放线程池（大图编码耗时可观）
             try:
@@ -1139,7 +1143,7 @@ class ComicPipeline:
         return ch
 
     def _ref_score_line(self, ch: Chapter) -> str:
-        """参考章节评分内容：参考章已评分时，把 VLM 分值+评语附进参考上下文，
+        """参考章节评分内容：参考章已评分时，把 LLM 分值+评语附进参考上下文，
         让 LLM 知晓参考基准的评分水平（未评分则不附）。"""
         if ch is None or (ch.score or 0) <= 0:
             return ""
@@ -1147,7 +1151,7 @@ class ComicPipeline:
         return f"（参考评分 {ch.score} 分" + (f"：{note}" if note else "") + "）"
 
     # ---------------- 阶段 5：逐章生成画面（出图提示词 + 生图，两步连贯） ----------------
-    # ---------------- 自动评分 / VLM 评分 ----------------
+    # ---------------- 自动评分 / LLM 评分 ----------------
     def _score_system(self, project: Project) -> str:
         """自动评分系统提示词（漫画）：对单章生成图按百分制打分。"""
         return (
@@ -1160,9 +1164,10 @@ class ComicPipeline:
         )
 
     async def _score_chapter(
-        self, db, project: Project, season: Season, ch: Chapter, model
+        self, db, project: Project, season: Season, ch: Chapter, model, vision: bool = True
     ) -> tuple[int, str]:
-        """自动评分：对本章已生成的媒体打 0-100 分，返回 (分数, 评语)。"""
+        """自动评分：对本章已生成的媒体打 0-100 分，返回 (分数, 评语)。
+        vision=False（LLM 未勾选视觉）时退化为纯文本评估（按场景描述与提示词打分）。"""
         gprompt = (project.global_prompt or "").strip()
         user = (
             f"章节标题：{ch.title}\n"
@@ -1173,33 +1178,42 @@ class ComicPipeline:
         media = (ch.media_path or "").strip()
         prompt: str | list = user + "\n生成图缺失，请打 0 分并在 note 说明原因。"
         if media and Path(media).is_file():
-            prompt = [
-                ImageUrl(url=await run_sync(image_data_uri, media)),
-                user
-                + "\n请对附带的生成图评分（标准见系统提示词）。输出 JSON：score（0-100 整数）与 note（一句话评语）。",
-            ]
+            if vision:
+                prompt = [
+                    ImageUrl(url=await run_sync(image_data_uri, media)),
+                    user
+                    + "\n请对附带的生成图评分（标准见系统提示词）。输出 JSON：score（0-100 整数）与 note（一句话评语）。",
+                ]
+            else:
+                prompt = user + (
+                    "\n当前模型不支持看图，请仅按场景描述与出图提示词评估内容质量与一致性，"
+                    "输出 JSON：score（0-100 整数）与 note（一句话评语，注明「未看图，按文本评估」）。"
+                )
         agent = make_agent(model, self._score_system(project), output_type=ScoreOut)
         async with agent:
             data = (await agent.run(prompt)).output
         score = max(0, min(100, int(data.score or 0)))
         return score, (data.note or "").strip()[:300]
 
-    async def vlm_score_chapter(
+    async def llm_score_chapter(
         self, db, project: Project, season: Season, index: int, lang: str = "zh"
     ) -> tuple[int, str]:
-        """VLM 自动评分：对季内第 index 章调用 VLM 重新评分（与流水线自动评分同款），
-        落库分值 + 评语。无生成图 / VLM 评分失败 → ValueError（前端提示）。"""
+        """LLM 自动评分：对季内第 index 章调用 LLM 重新评分（与流水线自动评分同款），
+        落库分值 + 评语。无生成图 / 评分失败 → ValueError（前端提示）。"""
         ch = self._season_chapters(db, project, season)[index]
         media = (ch.media_path or "").strip()
         if not (media and Path(media).is_file()):
-            raise ValueError("本章还没有生成图，无法 VLM 评分")
+            raise ValueError("本章还没有生成图，无法评分")
         try:
-            model = build_model(self._llm_cfg(db, project, lang))
-            score, note = await self._score_chapter(db, project, season, ch, model)
+            llm_cfg = self._llm_cfg(db, project, lang)
+            model = build_model(llm_cfg)
+            score, note = await self._score_chapter(
+                db, project, season, ch, model, vision=supports_vision(llm_cfg)
+            )
         except ValueError:
             raise
         except Exception as e:
-            raise ValueError(f"VLM 评分失败：{e}") from e
+            raise ValueError(f"评分失败：{e}") from e
         ch.score, ch.score_note = score, note
         db.commit()
         self._save(db, project)
@@ -1226,7 +1240,8 @@ class ComicPipeline:
         dt = self._clients(db, project, lang)
         if cancel_event is not None:
             dt.cancel_event = cancel_event  # 协作式取消：正在跑的生图/生视频尽快停止
-        model = build_model(self._llm_cfg(db, project, lang))  # 复用同一模型（连接池），避免逐章重建
+        llm_cfg = self._llm_cfg(db, project, lang)
+        model = build_model(llm_cfg)  # 复用同一模型（连接池），避免逐章重建
         chapters = self._season_chapters(db, project, season)
         if indices is None:
             targets = list(enumerate(chapters))
@@ -1302,7 +1317,9 @@ class ComicPipeline:
                     if score_cb:
                         await score_cb(ch, None, "scoring", rd)
                     try:
-                        score, note = await self._score_chapter(db, project, season, ch, model)
+                        score, note = await self._score_chapter(
+                            db, project, season, ch, model, vision=supports_vision(llm_cfg)
+                        )
                         ch.score, ch.score_note = score, note
                         scored_ok = True
                     except Exception:

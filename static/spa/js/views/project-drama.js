@@ -16,7 +16,7 @@ Views.projectDrama = {
           <h1 class="ptitle">{{ data.project.title || data.project.origin }}</h1>
           <p class="meta muted">{{ I18N.t('p.metaIdea', data.project.origin) }}
             · {{ I18N.t('d.metaLength', data.chapters.length) }}
-            · {{ I18N.t('p.metaLlm', data.project.llm_name) }}
+            · {{ I18N.t('p.metaLlm', data.project.llm_name) }}<template v-if="!data.project.llm_vision"> · {{ I18N.t('p.metaNoVision') }}</template>
             · {{ I18N.t('p.metaDt', data.project.dt_name) }}</p>
         </div>
         <div class="proj-head-actions">
@@ -127,7 +127,9 @@ Views.projectDrama = {
                       <el-form-item :label="I18N.t('p.charDesc')">
                         <div class="row" style="gap:6px;">
                           <el-input v-model="c.description" type="textarea" :rows="3" :placeholder="I18N.t('p.charDescPh')" />
-                          <el-button size="small" :loading="genDescBusy === (c.id || '')" @click="genSeasonCharDesc(i)">{{ I18N.t('p.charDescGen') }}</el-button>
+                          <span :title="!data.project.llm_vision && c.image_url ? I18N.t('p.visionOffTip') : ''">
+                            <el-button size="small" :loading="genDescBusy === (c.id || '')" :disabled="!data.project.llm_vision && !!c.image_url" @click="genSeasonCharDesc(i)">{{ I18N.t('p.charDescGen') }}</el-button>
+                          </span>
                         </div>
                       </el-form-item>
                       <el-form-item :label="I18N.t('p.charRef')">
@@ -166,7 +168,7 @@ Views.projectDrama = {
         <!-- ============ 片段：片段规划 / 片段详情 / 预览 一体（集作用域，一屏内完成）============ -->
         <el-tab-pane :label="I18N.t('d.tabClips')" name="chapters">
           <chapter-toolbar :act-busy="actBusy" :busy-save="busySave" :busy-gen-all="busyGenAll" :busy-score-all="busyScoreAll" :selected-count="selected.length" :score-filter="scoreFilter" :score-filter-options="scoreFilterOptions" :o-w="oW" :o-h="oH" :has-chapters="!!seasonChapters.length" :total="seasonChapters.length" :done-count="seasonDoneCount" :progress-text="progress.text" :all-selected="allSelected"
-                           @plan="openPlanDlg" @save-plan="savePlan" @update:score-filter="setScoreFilter"
+                           :llm-vision="!!data.project.llm_vision" @plan="openPlanDlg" @save-plan="savePlan" @update:score-filter="setScoreFilter"
                            @toggle-all="toggleAllSelect" @gen-all="genAll" @score-all="scoreAll"
                            @clear-all="clearAll" @plan-selected="planSelected" @delete-selected="deleteSelected"
                            @set-seconds="setBatchSeconds" @stop="stopGen" />
@@ -181,7 +183,7 @@ Views.projectDrama = {
             <!-- 中：选中片段详情（标题 + 摘要/剧本/提示词 三个子页签，一次「保存」提交） -->
             <div class="md-detail">
               <chapter-card :key="curCh.index" v-if="curCh" :chapter="curCh" :project-id="data.project.id" :season-id="seasonId" :season-index="cur" :def-w="oW" :def-h="oH" :score-min="(data.project.score_min || 60)" :beats="epBeats" :clip-count="seasonChapters.length" :ref-kind="curRefKind(cur)" :expanded="true" :no-toggle="true" :is-first="cur === 0" :is-last="cur === seasonChapters.length - 1"
-                            @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
+                            :llm-vision="!!data.project.llm_vision" @preview="openLb([$event], 0)" @reloaded="onChapterReloaded"
                             @saveplan="savePlan" @update:chapter="onChapterUpdate"
                             @update:score="onChapterScore" @update:clear="onChapterClear" />
               <el-empty v-else :description="I18N.t('d.clipPlanEmpty')" :image-size="54" />
@@ -930,7 +932,7 @@ Views.projectDrama = {
       finally { busyRef.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
     }
     async function genAll() { return runBatchAction('generate', busyGenAll, 'd.genProgress'); }
-    // VLM 批量评分：勾选章节则只评它们，未勾选则评全部（逐章进行；单章失败不阻塞后续）
+    // LLM 批量评分：勾选章节则只评它们，未勾选则评全部（逐章进行；单章失败不阻塞后续）
     async function scoreAll() { return runBatchAction('score', busyScoreAll, 'd.scoreProgress'); }
 
     // 批量清空章节产物：勾选章节则只清它们，未勾选则清全部（清理产物/出视频提示词/评分，保留标题/摘要/剧本）

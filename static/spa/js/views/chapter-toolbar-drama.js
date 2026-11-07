@@ -18,6 +18,7 @@ Views.dramaChapterToolbar = {
     doneCount: { type: Number, default: 0 },
     progressText: { type: String, default: '' },
     allSelected: { type: Boolean, default: false },
+    llmVision: { type: Boolean, default: true },    // 所选 LLM 未勾选视觉时禁用批量评分
   },
   emits: ['plan', 'save-plan', 'update:scoreFilter', 'toggle-all', 'gen-all', 'score-all',
           'clear-all', 'plan-selected', 'delete-selected', 'set-seconds', 'stop'],
@@ -50,13 +51,15 @@ Views.dramaChapterToolbar = {
             </el-button>
           </template>
         </el-popconfirm>
-        <el-popconfirm :title="I18N.t('p.scoreAllConfirm')" @confirm="$emit('score-all')">
-          <template #reference>
-            <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!hasChapters">
-              {{ selectedCount ? I18N.t('d.scoreAllSelDrama', selectedCount) : I18N.t('d.scoreAllDrama') }}
-            </el-button>
-          </template>
-        </el-popconfirm>
+        <span :title="llmVision ? '' : I18N.t('p.visionOffTip')">
+          <el-popconfirm :title="I18N.t('p.scoreAllConfirm')" @confirm="$emit('score-all')">
+            <template #reference>
+              <el-button size="small" type="primary" plain :loading="busyScoreAll" :disabled="!hasChapters || !llmVision">
+                {{ selectedCount ? I18N.t('d.scoreAllSelDrama', selectedCount) : I18N.t('d.scoreAllDrama') }}
+              </el-button>
+            </template>
+          </el-popconfirm>
+        </span>
         <el-button v-if="busyGenAll || busyScoreAll" size="small" type="danger" plain @click="$emit('stop')">
           {{ busyScoreAll ? I18N.t('p.scoreStop') : I18N.t('d.genStopped') }}
         </el-button>

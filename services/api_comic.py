@@ -196,6 +196,9 @@ def project_view(request: Request, project_id: str, db: Session = Depends(get_db
             "dt_ref_image": project.dt_ref_image or "",
             "dt_ref_video": project.dt_ref_video or "",
             "llm_name": llm_cfg.name if llm_cfg else unknown,
+            "llm_vision": bool(
+                llm_cfg and str(getattr(llm_cfg, "supports_vision", "") or "").lower() == "yes"
+            ),
             "dt_name": dt_cfg.name if dt_cfg else unknown,
         },
         "seasons": [
@@ -241,7 +244,7 @@ async def project_config_update(request: Request, project_id: str, db: Session =
         raise HTTPException(
             status_code=400,
             detail=L(
-                lang, "请选择有效的 VLM 与 DrawThings 配置", "Please select valid VLM and DrawThings configs"
+                lang, "请选择有效的 LLM 与 DrawThings 配置", "Please select valid LLM and DrawThings configs"
             ),
         )
     project.llm_config_id = llm_cfg.id
@@ -571,7 +574,7 @@ async def _project_action_stream(
                     cancel_event=cancel_event,
                 )
             elif step == "score":
-                # VLM 批量评分：逐章评分（季内），单章失败不阻塞后续章节（error 阶段事件单独提示）
+                # LLM 批量评分：逐章评分（季内），单章失败不阻塞后续章节（error 阶段事件单独提示）
                 raw = body.get("indices")
                 indices = [int(x) for x in raw] if raw else None  # 省略/空 = 全季
                 chapters = pipeline.comic._season_chapters(db, project, season)
@@ -585,7 +588,7 @@ async def _project_action_stream(
                     await progress_cb(pos, len(targets), ch.title)
                     await score_cb(ch, None, "scoring", 0)
                     try:
-                        score, note = await pipeline.comic.vlm_score_chapter(db, project, season, i, lang)
+                        score, note = await pipeline.comic.llm_score_chapter(db, project, season, i, lang)
                     except ValueError as e:
                         await queue.put(
                             (
@@ -755,7 +758,7 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
 
 @router.post("/{project_id}/chapters/{index}/score")
 async def project_chapter_score(request: Request, project_id: str, index: int, db: Session = Depends(get_db)):
-    """VLM 自动评分：调用 VLM 对指定章节（季内）重新评分（与流水线自动评分同款）；
+    """LLM 自动评分：调用 LLM 对指定章节（季内）重新评分（与流水线自动评分同款）；
     body 需 season_id（无需分值）。评分不涉及生成，可随时调用。"""
     lang = _lang(request)
     body = await _json_body(request)
@@ -772,7 +775,7 @@ async def project_chapter_score(request: Request, project_id: str, index: int, d
     if not (0 <= index < len(chapters)):
         raise HTTPException(status_code=404, detail=L(lang, "章节不存在", "Chapter not found"))
     try:
-        score, note = await pipeline.comic.vlm_score_chapter(db, project, season, index, lang)
+        score, note = await pipeline.comic.llm_score_chapter(db, project, season, index, lang)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=L(lang, str(e), str(e)))
     return {"ok": True, "score": score, "note": note}
@@ -1180,7 +1183,7 @@ def season_char_image_delete(
 async def season_char_gen_desc(
     request: Request, project_id: str, season_id: str, char_id: str, db: Session = Depends(get_db)
 ):
-    """AI 生成单个季角色的形象/性格描述（有参考图时以图为准，VLM 一律支持图片输入）。"""
+    """AI 生成单个季角色的形象/性格描述（有参考图且 LLM 勾选视觉时以图为准）。"""
     lang = _lang(request)
     project = _comic_project(db, project_id, lang)
     if project is None:

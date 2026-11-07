@@ -67,7 +67,7 @@ def _llm_view(c) -> dict:
         "name": c.name,
         "base_url": c.base_url,
         "model": c.model,
-        "supports_vision": "yes",
+        "supports_vision": (getattr(c, "supports_vision", None) or "no"),
         "thinking": getattr(c, "thinking", None) or "default",
         "thinking_param": getattr(c, "thinking_param", None) or "auto",
         "created_at": c.created_at,
