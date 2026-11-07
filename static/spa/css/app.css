@@ -1022,7 +1022,7 @@ button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-
 }
 
 /* LLM 视觉能力标签（配置卡片） */
-.cfg-vision { font-weight: 600; }
+.cfg-vision { font-weight: 600; white-space: nowrap; }
 .cfg-vision.on { color: var(--ok); }
 .cfg-vision.off { color: var(--muted); font-weight: 400; }
 
@@ -1062,3 +1062,109 @@ button:focus-visible, a:focus-visible, .sb-item:focus-visible, .wb-action:focus-
 .imp-file { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .imp-table { margin-top: 10px; }
 .imp-foot { float: left; line-height: 30px; }
+
+/* ================= Phase 4：动效与质感 ================= */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pulse-soft {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 91, 214, 0); }
+  50% { box-shadow: 0 0 0 7px rgba(91, 91, 214, .10); }
+}
+
+/* 路由过渡（淡入 + 4px 上移） */
+.page-enter-active, .page-leave-active { transition: opacity .14s ease, transform .14s ease; }
+.page-enter-from { opacity: 0; transform: translateY(4px); }
+.page-leave-to { opacity: 0; transform: translateY(-2px); }
+
+/* 内容区顶部光晕（暗色自动适配） */
+.app-content {
+  background-image: radial-gradient(1100px 320px at 15% -8%, rgba(91, 91, 214, .055), transparent 65%);
+  background-repeat: no-repeat;
+}
+[data-theme="dark"] .app-content {
+  background-image: radial-gradient(1100px 320px at 15% -8%, rgba(124, 108, 240, .10), transparent 65%);
+}
+
+/* 卡片入场（轻量 stagger）+ 悬浮 */
+.wb-card, .work-card, .chapter, .cfg-card { animation: fade-up .26s ease both; }
+.wb-card:nth-child(2), .work-card:nth-child(2) { animation-delay: .03s; }
+.wb-card:nth-child(3), .work-card:nth-child(3) { animation-delay: .06s; }
+.wb-card:nth-child(4), .work-card:nth-child(4) { animation-delay: .09s; }
+.wb-card:nth-child(5), .work-card:nth-child(5) { animation-delay: .12s; }
+.wb-card:nth-child(n+6), .work-card:nth-child(n+6) { animation-delay: .15s; }
+.wb-card, .work-card { transition: transform .16s ease, box-shadow .16s ease; }
+.wb-card:hover, .work-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+
+/* 对话框微弹 + 任务中心呼吸 */
+.el-dialog { animation: pop-in .18s ease both; }
+.tc-fab.on { animation: pulse-soft 2.4s ease-in-out infinite; }
+
+/* 按钮微交互 */
+.el-button { transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease, border-color .15s ease; }
+.el-button:not(.is-disabled):not(.is-text):not(.is-link):hover { transform: translateY(-1px); }
+
+/* 精致滚动条（内容区 / 章节 rail / 抽屉） */
+.app-content::-webkit-scrollbar, .md-list::-webkit-scrollbar, .el-drawer__body::-webkit-scrollbar { width: 10px; height: 10px; }
+.app-content::-webkit-scrollbar-thumb, .md-list::-webkit-scrollbar-thumb, .el-drawer__body::-webkit-scrollbar-thumb {
+  background: rgba(23, 26, 42, .16); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box;
+}
+[data-theme="dark"] .app-content::-webkit-scrollbar-thumb,
+[data-theme="dark"] .md-list::-webkit-scrollbar-thumb,
+[data-theme="dark"] .el-drawer__body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); background-clip: padding-box; }
+
+/* 键盘焦点环 */
+:focus-visible { outline: 2px solid rgba(91, 91, 214, .55); outline-offset: 2px; border-radius: 6px; }
+
+/* 首页统计条 */
+.wb-stats { display: flex; gap: 12px; margin: 16px 0 4px; flex-wrap: wrap; }
+.wb-stat {
+  min-width: 128px; padding: 12px 16px; border-radius: var(--r-md); background: var(--card);
+  box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 2px;
+}
+.wb-stat b { font-size: 22px; line-height: 1.2; letter-spacing: -.4px; }
+.wb-stat span { font-size: 12px; color: var(--muted); }
+.wb-stat.accent b {
+  background: linear-gradient(135deg, var(--primary), var(--primary2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* 配置页快捷导航（吸顶） */
+.cfg-nav {
+  position: sticky; top: 0; z-index: 8; display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 8px 0 10px; margin-bottom: 4px;
+  background: linear-gradient(var(--bg) 72%, transparent);
+}
+.cfg-nav a {
+  font-size: 12.5px; padding: 4px 12px; border-radius: 999px; color: var(--muted);
+  text-decoration: none; background: var(--surface-hover);
+  transition: color .15s ease, background .15s ease;
+}
+.cfg-nav a:hover { color: var(--ink); background: rgba(91, 91, 214, .12); }
+
+/* 章节工作区：窄屏（<=1680）把媒体图从「左栏 300px」改为顶部通栏，
+   避免详情正文被压到 200px 以内（编辑体验极差） */
+@media (max-width: 1680px) {
+  .ch-work .ch-detail { flex-direction: column; gap: 12px; }
+  .ch-work .ch-media { width: 100%; }
+  .ch-work .ch-media img, .ch-work .ch-media video { max-height: 340px; object-fit: contain; object-position: left center; }
+}
+
+/* 项目页：季 / 集选择栏吸顶；详情卡片分区用虚线分隔 */
+.season-bar { position: sticky; top: 0; z-index: 7; background: var(--bg); padding: 6px 0 8px; }
+.ch-detail .res-row { padding-top: 8px; border-top: 1px dashed var(--line); }
+.ch-detail .res-row:first-of-type { border-top: none; padding-top: 0; }
+.ch-detail .res-row > .muted { white-space: nowrap; flex-shrink: 0; }
+
+/* 无障碍：尊重「减少动效」系统设置 */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active, .page-leave-active, .el-button { transition: none !important; }
+  .wb-card, .work-card, .chapter, .cfg-card, .el-dialog, .tc-fab.on { animation: none !important; }
+  .wb-card:hover, .work-card:hover,
+  .el-button:not(.is-disabled):not(.is-text):not(.is-link):hover { transform: none; }
+}

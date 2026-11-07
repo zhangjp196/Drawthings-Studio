@@ -8,6 +8,12 @@ Views.home = {
         <p class="muted small">{{ I18N.t('wb.sub') }}</p>
       </div>
 
+      <div class="wb-stats">
+        <div class="wb-stat"><b>{{ stat.comic }}</b><span>{{ I18N.t('wb.statComic') }}</span></div>
+        <div class="wb-stat"><b>{{ stat.drama }}</b><span>{{ I18N.t('wb.statDrama') }}</span></div>
+        <div class="wb-stat accent"><b>{{ running }}</b><span>{{ I18N.t('wb.statTasks') }}</span></div>
+      </div>
+
       <div class="wb-actions">
         <span class="wb-action primary" @click="goNew">{{ I18N.t('wb.newProject') }}</span>
         <el-radio-group v-model="newKind" size="small">
@@ -57,6 +63,8 @@ Views.home = {
     // 新建创作类型：按钮旁切换（选哪个就是哪个）
     const newKind = ref('comic');
     const loadErr = ref('');
+    const stat = reactive({ comic: 0, drama: 0 });
+    const running = computed(() => Tasks.activeCount());  // 后台任务（跨页面，实时）
     function goNew() { router.push('/new/' + newKind.value); }
     async function load() {
       loading.value = true;
@@ -68,6 +76,8 @@ Views.home = {
           API.get('/api/comics?' + qs),
           API.get('/api/dramas?' + qs),
         ]);
+        stat.comic = c.total || 0;
+        stat.drama = d.total || 0;
         const all = [...(c.projects || []), ...(d.projects || [])];
         all.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
         projects.value = all.slice(0, 6);
@@ -82,6 +92,6 @@ Views.home = {
     function retry() { load(); }
     function open(p) { router.push(p.kind === 'comic' ? '/comic/' + p.id : '/drama/' + p.id); }
     onMounted(load);
-    return { projects, loading, loadErr, retry, open, newKind, goNew };
+    return { projects, loading, loadErr, newKind, goNew, open, retry, stat, running};
   },
 };

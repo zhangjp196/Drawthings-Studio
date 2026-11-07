@@ -10,6 +10,13 @@ Views.configs = {
         <h1 style="margin: 0; font-size: 22px;">{{ I18N.t('cfg.title') }}</h1>
       </div>
 
+      <nav class="cfg-nav">
+        <a href="#sec-basic" @click.prevent="scrollSection('sec-basic')">{{ I18N.t('cfg.secBasic') }}</a>
+        <a href="#sec-llm" @click.prevent="scrollSection('sec-llm')">{{ I18N.t('cfg.secLlm') }}</a>
+        <a href="#sec-dt" @click.prevent="scrollSection('sec-dt')">{{ I18N.t('cfg.secDt') }}</a>
+        <a href="#sec-maint" @click.prevent="scrollSection('sec-maint')">{{ I18N.t('mt.title') }}</a>
+      </nav>
+
       <section class="cfg-sec" id="sec-basic">
         <div class="cfg-sec-head">
           <div class="cfg-sec-title">
@@ -63,25 +70,6 @@ Views.configs = {
         </div>
       </section>
 
-      <section class="cfg-sec" id="sec-maint">
-        <div class="cfg-sec-head">
-          <div class="cfg-sec-title">
-            <span class="cfg-ico">🔧</span>
-            {{ I18N.t('mt.title') }}
-          </div>
-        </div>
-        <div class="maint-box">
-          <p class="hint">{{ I18N.t('mt.hint') }}</p>
-          <div class="actions">
-            <el-button plain :loading="mtBusy === 'scan'" @click="scanOrphans">{{ I18N.t('mt.scan') }}</el-button>
-            <el-button plain type="danger" :loading="mtBusy === 'purge'" :disabled="!orphanReport"
-                       @click="purgeOrphans">{{ I18N.t('mt.purge') }}</el-button>
-            <el-button plain :loading="mtBusy === 'backup'" @click="backupDb">{{ I18N.t('mt.backup') }}</el-button>
-            <el-button plain :loading="mtBusy === 'exports'" @click="cleanExports">{{ I18N.t('mt.cleanExports') }}</el-button>
-          </div>
-          <p v-if="orphanReport" class="hint">{{ orphanReport }}</p>
-        </div>
-      </section>
 
       <section class="cfg-sec" id="sec-llm">
         <div class="cfg-sec-head">
@@ -225,6 +213,26 @@ Views.configs = {
           <el-button type="primary" :loading="saving" @click="save">{{ I18N.t('common.save') }}</el-button>
         </template>
       </el-dialog>
+
+      <section class="cfg-sec" id="sec-maint">
+        <div class="cfg-sec-head">
+          <div class="cfg-sec-title">
+            <span class="cfg-ico">🔧</span>
+            {{ I18N.t('mt.title') }}
+          </div>
+        </div>
+        <div class="maint-box">
+          <p class="hint">{{ I18N.t('mt.hint') }}</p>
+          <div class="actions">
+            <el-button plain :loading="mtBusy === 'scan'" @click="scanOrphans">{{ I18N.t('mt.scan') }}</el-button>
+            <el-button plain type="danger" :loading="mtBusy === 'purge'" :disabled="!orphanReport"
+                       @click="purgeOrphans">{{ I18N.t('mt.purge') }}</el-button>
+            <el-button plain :loading="mtBusy === 'backup'" @click="backupDb">{{ I18N.t('mt.backup') }}</el-button>
+            <el-button plain :loading="mtBusy === 'exports'" @click="cleanExports">{{ I18N.t('mt.cleanExports') }}</el-button>
+          </div>
+          <p v-if="orphanReport" class="hint">{{ orphanReport }}</p>
+        </div>
+      </section>
     </div>
   `,
   setup() {
@@ -389,6 +397,10 @@ Views.configs = {
     }
 
     // 深链 /configs?ctype=drawthings（来自项目/新建页）→ 滚动到 DrawThings 分区
+    function scrollSection(id) {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     function scrollByQuery() {
       if (route.value.query.ctype === 'drawthings') {
         const el = document.getElementById('sec-dt');
@@ -516,7 +528,7 @@ Views.configs = {
     return {
       llmItems, dtItems, llmCount, dtCount, llmMax, dtMax, dlg, saving, f, editId, modelOpts, loadingModels,
       lang, theme, s, savingBasic, setLang, setTheme, saveBasic,
-      urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt,
+      urlPh, urlHint, load, openNew, openEdit, fetchModels, save, del, fmt, scrollSection,
       checkingStatus, checkAllStatus, checkStatusOne, statusText, statusClass, statusTip,
       mtBusy, orphanReport, scanOrphans, purgeOrphans, backupDb, cleanExports,
     };
