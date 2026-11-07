@@ -73,8 +73,7 @@ def reap_stale(db, model, *, cutoff_minutes: int = 30) -> int:
     """把「running，但进程内已无取消句柄、且超时未更新」的任务标记为 interrupted。
 
     正常情况下任务结束都会落库。只有两条路径会留下幽灵 running：
-    1. SSE 流还没产出第一个 chunk 客户端就断开——StreamingResponse 从不迭代生成器，
-       生成器 finally（jobs.pop + 转 interrupted）根本不会执行；
+    1. 旧版 SSE 流还没产出第一个 chunk 客户端就断开（历史路径，现改为后台任务后不再出现）；
     2. 进程被强杀（这个只能等重启时的 _mark_interrupted_streams 兜底）。
     因此任务列表接口每次顺带收割（updated_at 超时 + 进程内无句柄 → 必死任务），
     避免 UI 出现永远转圈的 running，也不用等重启。

@@ -39,6 +39,7 @@
           </main>
         </div>
       </div>
+        <task-center />
       </el-config-provider>
     `,
     setup() {
@@ -137,6 +138,8 @@
     app = Vue.createApp(root);
     app.config.globalProperties.I18N = I18N;  // 各视图模板统一可访问 I18N / router（无需在每个 setup 里重复返回）
     app.config.globalProperties.router = router;
+    app.component('task-center', Views.taskCenter);  // 全局任务中心（右下角 dock，跨路由常驻）
+    Tasks.ensure();  // 启动 WS 连接 + 任务 store
     app.use(ElementPlus, {
       locale: I18N.isEn() ? window.ElementPlusLocaleEn : window.ElementPlusLocaleZhCn,
     });

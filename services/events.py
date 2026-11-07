@@ -1,10 +1,10 @@
-"""SSE 事件契约（后端单一来源）。
+"""任务事件契约（后台任务 + WebSocket；后端单一来源）。
 
 前端镜像：`static/spa/js/events.js`（`window.EVENTS`）。两边必须保持一致；
 新增/改名事件时同时改这两处与消费方，避免「后端改名、前端漏改」。
 
 事件分两类：
-- 传输/引擎事件：token / tool / tool_status / media / tool_error / error / done
+- 传输/引擎事件：token / tool / tool_status / media / media_score / tool_error / error / done
 - 流水线进度事件：progress / chapter / score
 """
 

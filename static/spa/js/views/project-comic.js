@@ -201,7 +201,7 @@ Views.projectComic = {
 
       <gen-dialog v-model="genDlg" v-model:extra="genDlgExtra" :title="genDlgTitle" :busy="actBusy" @confirm="confirmGen" />
 
-      <!-- 章节规划：数量 + 方式（新增 / 重做），确认后执行 SSE 逐章规划 -->
+      <!-- 章节规划：数量 + 方式（新增 / 重做），确认后执行后台任务逐章规划（WS 推进度） -->
       <plan-dialog v-model="planDlg" v-model:count="planCount" v-model:mode="planMode" :title="planDlgTitle" :hint="planModeHint" :busy="actBusy" @confirm="confirmPlan" />
 
       <!-- 生成封面：勾选「包含标题」= 生成后自动叠加作品标题 / 季名 -->
@@ -242,7 +242,7 @@ Views.projectComic = {
     const coverPrompt = ref('');   // 封面生成提示词（first-image 子组件持有输入，顶部「生成封面」按钮使用）
     const seasonCoverPrompt = ref('');   // 季封面生成提示词（season-cover 子组件持有输入，季封面子页「生成季封面」按钮使用）
     const progress = reactive({ text: '' });
-    let sseCtrl = null;            // 当前流式任务（规划/生成）：离开页面或重开时中断，服务端随之清理
+    let activeJobId = null;        // 当前后台任务 id（停止按钮 / 取消用；任务本身不随页面销毁）
 
     // 企划子页签（仅季作用域）：arc（本季大纲）/ chars（季角色）/ cover（季封面）；总体已合并为单页
     const oSub = ref('arc');
@@ -655,7 +655,7 @@ Views.projectComic = {
       }
     }
     async function planChapters(opts = {}) {
-      // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），SSE 实时逐个补入。
+      // 章节规划（逐章）：先定总章数再逐章规划（每章参考前章承接剧情），WS 实时逐个补入。
       // 方式：append（新增）= 不清空，现有章节之后续加；replan（重做）= 未勾选=全季覆盖重规划，勾选=仅重写所选。
       // opts.mode 覆盖弹框方式；opts.indices 非空则只规划这些已有章节（批量重新规划，不清空其它/不新增）。
       if (!seasonId.value) {
@@ -672,33 +672,34 @@ Views.projectComic = {
       const isAppend = mode === 'append';
       actBusy.value = true; progress.text = '';
       if (!isAppend && !subset) {
-        // 全季重做：先清空本季旧章节（媒体保留，预览重新生成），SSE 逐个补入
+        // 全季重做：先清空本季旧章节（媒体保留，预览重新生成），任务逐个补入
         data.value.chapters = data.value.chapters.filter(c => c.season_id !== seasonId.value);
         cur.value = 0;
       }
-      const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
-        await API.sse(`/api/comics/${props.id}/action-stream`, {
+        const r = await Tasks.run(`/api/comics/${props.id}/tasks`, {
           step: 'chapters',
           season_id: seasonId.value,
           count_min: planCount.value,
           count_max: planCount.value,
           mode: isAppend ? 'append' : 'replan',
           ...(isAppend ? {} : (subset ? { indices: sel } : {})),
-        }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
-          else if (ev === EVENTS.CHAPTER) applyChapterPlan(d);
-          else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
-          else if (ev === EVENTS.ERROR) throw new Error(d.message);
-        }, ctrl.signal);
+        }, {
+          onJobId: (id) => { activeJobId = id; },
+          onEvent: (ev, d) => {
+            if (ev === EVENTS.PROGRESS) progress.text = I18N.t('p.planProgress', d.current, d.total, d.title);
+            else if (ev === EVENTS.CHAPTER) applyChapterPlan(d);
+          },
+        });
+        if (r.status === 'cancelled') { selected.value = []; await load(); return; }   // 停止：静默
         ElementPlus.ElMessage.success(I18N.t('p.planSaved'));
         selected.value = [];
         await load();
       } catch (e) {
-        if (e.cancelled) { selected.value = []; await load(); }               // 用户/服务端停止：静默
-        else if (!ctrl.signal.aborted) { ElementPlus.ElMessage.error(e.message); await load(); }
+        ElementPlus.ElMessage.error(e.message);
+        await load();
       }
-      finally { actBusy.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+      finally { actBusy.value = false; progress.text = ''; activeJobId = null; }
     }
     // 工具条「章节规划 / 规划所选」：弹出规划弹框（数量 + 新增/重做 选择）
     function openPlanDlg() { planDlg.value = true; }
@@ -799,12 +800,7 @@ Views.projectComic = {
       finally { busySave.value = false; }
     }
 
-    // 批量（SSE 进度）
-    // 服务端「停止生成」会通过 DONE{cancelled:true} 结束流（非客户端 abort）；
-    // 用带 cancelled 标记的 Error 让各 SSE 消费端统一走「静默停止」分支，而不是弹「完成」或「失败」。
-    function cancelledErr() {
-      return Object.assign(new Error('cancelled'), { cancelled: true });
-    }
+    // 批量（后台任务 + WS 进度）：任务脱离页面运行；停止走 Tasks.cancel，取消时静默刷新。
     // 批量生成时单章两步完成：实时把该章提示词/媒体/状态写回本地并跟随定位，页面逐个刷新（后续章节仍会参考它）
     // 自动评分事件：刷新进度文案（评分中 / 低于阈值重做中 / 评分结果）
     function applyScoreLive(d) {
@@ -848,36 +844,37 @@ Views.projectComic = {
       }
       if (visibleChapters.value.some(c => c.index === d.index)) cur.value = d.index;
     }
-    // 停止批量生成：中断 SSE → 后端停止并提交已完成章节；页面同步刷新
+    // 停止批量任务：取消后台任务（协作式停止，已完成章节照常保留）；结果经 WS 回来后刷新
     function stopGen() {
-      if (sseCtrl) {
-        sseCtrl.abort();
+      if (activeJobId) {
+        Tasks.cancel(activeJobId);
         ElementPlus.ElMessage.info(I18N.t('p.genStopped'));
       }
     }
     // 生成画面：勾选章节则只生成它们，未勾选则生成全部（两步连贯、逐章进行、后章参考前章已生成图）
-    // 通用批量操作（生成/评分）：SSE 流式处理，支持取消、进度显示、完成后刷新
+    // 通用批量操作（生成/评分）：提交后台任务，WS 推事件，支持取消 / 进度 / 完成后刷新
     async function runBatchAction(step, busyRef, progressKey) {
       if (!seasonId.value) return;
       busyRef.value = true; progress.text = '';
       const indices = selected.value.length ? selected.value : null;
-      const ctrl = new AbortController(); sseCtrl = ctrl;
       try {
-        await API.sse(`/api/comics/${props.id}/action-stream`, { step, season_id: seasonId.value, indices }, (ev, d) => {
-          if (ev === EVENTS.PROGRESS) progress.text = I18N.t(progressKey, d.current, d.total, d.title);
-          else if (ev === EVENTS.SCORE) applyScoreLive(d);
-          else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
-          else if (ev === EVENTS.DONE && d.cancelled) throw cancelledErr();   // 服务端「停止生成」→ 取消
-          else if (ev === EVENTS.ERROR) throw new Error(d.message);
-        }, ctrl.signal);
+        const r = await Tasks.run(`/api/comics/${props.id}/tasks`, { step, season_id: seasonId.value, indices }, {
+          onJobId: (id) => { activeJobId = id; },
+          onEvent: (ev, d) => {
+            if (ev === EVENTS.PROGRESS) progress.text = I18N.t(progressKey, d.current, d.total, d.title);
+            else if (ev === EVENTS.SCORE) applyScoreLive(d);
+            else if (ev === EVENTS.CHAPTER) applyChapterLive(d);
+          },
+        });
+        if (r.status === 'cancelled') { selected.value = []; await load(); return; }   // 停止：静默
         ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
         selected.value = [];
         await load();
       } catch (e) {
-        if (e.cancelled || ctrl.signal.aborted) { selected.value = []; await load(); }   // 停止：静默
-        else { ElementPlus.ElMessage.error(e.message); await load(); }
+        ElementPlus.ElMessage.error(e.message);
+        await load();
       }
-      finally { busyRef.value = false; progress.text = ''; if (sseCtrl === ctrl) sseCtrl = null; }
+      finally { busyRef.value = false; progress.text = ''; activeJobId = null; }
     }
     async function genAll() { return runBatchAction('generate', busyGenAll, 'p.genProgress'); }
     // LLM 批量评分：勾选章节则只评它们，未勾选则评全部（逐章进行；单章失败不阻塞后续）
@@ -1008,7 +1005,6 @@ Views.projectComic = {
       tabInit.value = false;
       load();
     });
-    onBeforeUnmount(() => { if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; } });
     return {
       data, tab, oSub, isOverall, cur, curCh, selected, allSelected, scoreFilter, setScoreFilter, scoreFilterOptions, visibleChapters,
       seasons, seasonId, seasonArcText, seasonTitleText, seasonChars, seasonChapters, seasonDoneCount, seasonCompleted,

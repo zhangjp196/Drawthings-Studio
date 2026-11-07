@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """校验 AGENTS.md 的硬性契约（无需装 pytest 也能跑，CI / 打包前可调用）：
 
-1. SSE 事件契约：services/events.py（后端唯一来源）↔ static/spa/js/events.js（前端镜像）；
+1. 任务事件契约：services/events.py（后端唯一来源）↔ static/spa/js/events.js（前端镜像）；
 2. 漫画 / 短剧双线路由对称（除短剧独有的 /export/video）。
 
 返回非零退出码 = 有漂移。

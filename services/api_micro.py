@@ -7,21 +7,21 @@
 import asyncio
 import json
 import logging
-import threading
 import uuid
 from functools import partial
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config_store import ConfigStore
-from db import get_db
+from db import SessionLocal, get_db
 from i18n import L
 from models import Asset, GenerationJob, MicroMessage, MicroSession, MicroWork
 from services import events as E
+from services import jobs, task_manager
 from services.api_common import (
     MEDIA_DIR,
     _clamp_page,
@@ -32,8 +32,8 @@ from services.api_common import (
     _json_body,
     _lang,
     _llm_view,
-    _sse,
 )
+from services.api_tasks import micro_job_snapshot
 from services.drawthings import MAX_SIDE_LIMIT, MAX_VIDEO_SECONDS, extract_last_frame
 from services.media_files import (
     cleanup_message_media,
@@ -58,12 +58,6 @@ router = APIRouter(prefix="/api/micro", tags=["micro"])
 
 MC_PAGE_SIZE = 10  # 微创作作品列表每页条数
 
-# 运行中的生成任务：job_id → {"event": threading.Event, "cancelled": bool}
-# 供取消接口使用（单进程本地应用；进程重启后由启动清理把 running 标记为 interrupted）。
-_RUNNING_JOBS: dict = {}
-_JOBS_LOCK = threading.Lock()
-
-
 def _new_job(
     db: Session, *, micro_id: str, session_id: str, message_id, kind: str, prompt: str, media: str = ""
 ) -> GenerationJob:
@@ -82,8 +76,7 @@ def _new_job(
     )
     db.add(job)
     db.commit()
-    with _JOBS_LOCK:
-        _RUNNING_JOBS[job.id] = {"event": threading.Event(), "cancelled": False}
+    jobs.register(job.id)
     return job
 
 
@@ -414,19 +407,15 @@ def micro_job_cancel(request: Request, work_id: str, job_id: str, db: Session = 
         raise HTTPException(status_code=404, detail=L(lang, "任务不存在", "Job not found"))
     if job.status != "running":
         return {"ok": True, "status": job.status}
-    with _JOBS_LOCK:
-        rec = _RUNNING_JOBS.get(job_id)
-        if rec:
-            rec["cancelled"] = True
-            rec["event"].set()
-    if not rec:
-        # 无运行句柄（进程重启后的残留 running）：直接标记为已取消
-        job.status = "cancelled"
-        job.updated_at = _now()
-        job.finished_at = _now()
-        db.commit()
-        return {"ok": True, "status": "cancelled"}
-    return {"ok": True, "status": "cancelling"}
+    if jobs.cancel(job_id):
+        return {"ok": True, "status": "cancelling"}
+    # 无运行句柄（进程重启后的残留 running）：直接标记为已取消
+    job.status = "cancelled"
+    job.updated_at = _now()
+    job.finished_at = _now()
+    db.commit()
+    task_manager.publish_job(micro_job_snapshot(job, db.get(MicroWork, job.micro_id)))
+    return {"ok": True, "status": "cancelled"}
 
 
 @router.post("/{work_id}/works/delete")
@@ -656,13 +645,14 @@ def micro_session_delete(request: Request, work_id: str, session_id: str, db: Se
     return {"ok": True}
 
 
-# ---------------- 对话（SSE 流式） ----------------
+# ---------------- 对话 / 重跑 / 评分（后台任务 + WS 事件） ----------------
 @router.post("/{work_id}/{session_id}/chat")
 async def micro_chat(request: Request, work_id: str, session_id: str, db: Session = Depends(get_db)):
-    """微创作对话：SSE 流式回复（生成配置取自所属作品）。
+    """微创作对话 —— 提交后台任务，立即返回 {job_id}；文本/生成事件经 /ws 推送。
 
     用户消息（可附图，仅视觉模型）先落库；需要出图/出视频时由模型 function call
     自动调用 DrawThings；对话结束后助手消息（文本 + 生成媒体）落库。历史取自数据库（最近 20 条）。
+    任务脱离 HTTP 连接运行：切页 / 刷新 / 断网都不会中断本轮生成。
     """
     lang = _lang(request)
     session = db.get(MicroSession, session_id)
@@ -676,7 +666,6 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     message = str(body.get("message") or "").strip()
     cs = ConfigStore(db)
     llm_cfg = cs.get_llm(work.llm_config_id or "")
-    dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
 
     # 用户附图：需作品所选 LLM 勾选「支持视觉」（存 MEDIA_DIR，随消息落库；未勾选则拒绝）
     image_urls = []
@@ -735,15 +724,33 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
     work.updated_at = _now()
     db.commit()
     assistant_id = draft.id
-    job_id = _new_job(
+    job = _new_job(
         db, micro_id=work_id, session_id=session_id, message_id=assistant_id, kind="chat", prompt=message
-    ).id
+    )
+    task_manager.spawn(
+        job.id,
+        _run_micro_chat_job(
+            job.id,
+            work_id,
+            session_id,
+            assistant_id,
+            user_idx,
+            message,
+            image_paths,
+            quoted_ref,
+            lang,
+        ),
+    )
+    return {"job_id": job.id, "session_id": session_id, "assistant_id": assistant_id, "user_index": user_idx}
 
+
+def _history_for(db: Session, session_id: str, before_index: int, limit: int = 20) -> list[dict]:
+    """取某条消息之前最近 N 条历史（附图转回磁盘路径，供多模态入图）。"""
     rows = (
         db.query(MicroMessage)
-        .filter(MicroMessage.session_id == session_id, MicroMessage.index < user_idx)
+        .filter(MicroMessage.session_id == session_id, MicroMessage.index < before_index)
         .order_by(MicroMessage.index.desc())
-        .limit(20)
+        .limit(limit)
         .all()
     )
     history = []
@@ -758,10 +765,85 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
             except (ValueError, TypeError):
                 pass
         history.append({"role": r.role, "content": r.content, "images": imgs})
+    return history
 
-    def _runner(queue, cancel_event):
-        return run_micro_chat(
-            queue,
+
+def _make_job_updater(db: Session, job: GenerationJob, work: MicroWork):
+    """任务状态更新器：写库 + 广播快照（任务中心实时刷新）。"""
+
+    def _job(status=None, note=None, error=None, media=None, finished=False):
+        try:
+            if status:
+                job.status = status
+            if note is not None:
+                job.note = str(note)[:500]
+            if error is not None:
+                job.error = str(error)[:2000]
+            if media:
+                job.media = str(media)[:10]
+            job.updated_at = _now()
+            if finished:
+                job.finished_at = _now()
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        task_manager.publish_job(micro_job_snapshot(job, work))
+
+    return _job
+
+
+def _finish_job(_job, control, sink) -> None:
+    """结束任务：取消优先，其次错误，否则完成。"""
+    if control.cancelled:
+        _job(status="cancelled", note="已取消", finished=True)
+    elif sink is not None and sink.error:
+        _job(status="error", error=sink.error, finished=True)
+    else:
+        _job(status="done", note="完成", finished=True)
+
+
+async def _run_micro_chat_job(
+    job_id: str,
+    work_id: str,
+    session_id: str,
+    assistant_id: int,
+    user_idx: int,
+    message: str,
+    image_paths: list[str],
+    quoted_ref: str,
+    lang: str,
+) -> None:
+    """后台执行一轮微创作对话（独立会话；事件经 WS 广播）。"""
+    db = SessionLocal()
+    control = jobs.get(job_id)
+    job = db.get(GenerationJob, job_id)
+    session = db.get(MicroSession, session_id)
+    work = db.get(MicroWork, work_id)
+    if job is None or control is None or session is None or work is None:
+        jobs.pop(job_id)
+        db.close()
+        return
+    _job = _make_job_updater(db, job, work)
+    cs = ConfigStore(db)
+    llm_cfg = cs.get_llm(work.llm_config_id or "")
+    dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
+
+    def _on_event(event, data) -> None:
+        d = data or {}
+        if event == E.TOOL:
+            _job(note=d.get("label", ""), media=d.get("media", ""))
+        elif event == E.TOOL_STATUS:
+            _job(note=d.get("message", ""))
+        elif event == E.MEDIA:
+            _job(note="已生成", media=d.get("media", ""))
+
+    sink = task_manager.EventSink(job_id, on_event=_on_event)
+    try:
+        await run_micro_chat(
+            sink,
             db=db,
             session=session,
             work=work,
@@ -769,25 +851,30 @@ async def micro_chat(request: Request, work_id: str, session_id: str, db: Sessio
             dt_cfg=dt_cfg,
             img_paths=image_paths,
             user_message=message,
-            history=history,
+            history=_history_for(db, session_id, user_idx),
             assistant_idx=user_idx + 1,
             lang=lang,
-            cancel_event=cancel_event,
+            cancel_event=control.event,
             assistant_id=assistant_id,
             quoted_ref=quoted_ref,
         )
-
-    return StreamingResponse(
-        _sse_transport(_runner, db=db, job_id=job_id),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        _finish_job(_job, control, sink)
+        task_manager.publish(job_id, E.DONE, {"cancelled": control.cancelled})
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        _job(status="error", error=str(e), finished=True)
+        task_manager.publish(job_id, E.ERROR, {"message": L(lang, f"对话失败：{e}", f"Chat failed: {e}")})
+    finally:
+        jobs.pop(job_id)
+        db.close()
 
 
 @router.post("/{work_id}/{session_id}/regenerate")
 async def micro_regenerate(request: Request, work_id: str, session_id: str, db: Session = Depends(get_db)):
-    """一键重跑：跳过 LLM，按内容块保存的参数直接重生成（可复现）。
+    """一键重跑 —— 提交后台任务，立即返回 {job_id}。
 
+    跳过 LLM，按内容块保存的参数直接重生成（可复现）。
     body: {prompt, media, width, height, seconds, ref_url}（来自 tool 内容块的参数快照）。
     """
     lang = _lang(request)
@@ -819,9 +906,6 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str, db: 
     improve = bool(body.get("improve"))
     score = _int(body.get("score"))
     note = str(body.get("note") or "")
-    cs = ConfigStore(db)
-    dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
-    llm_cfg = cs.get_llm(work.llm_config_id or "")
 
     last = db.query(MicroMessage).filter_by(session_id=session_id).order_by(MicroMessage.index.desc()).first()
     draft = MicroMessage(
@@ -837,7 +921,7 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str, db: 
     work.updated_at = _now()
     db.commit()
     assistant_id = draft.id
-    job_id = _new_job(
+    job = _new_job(
         db,
         micro_id=work_id,
         session_id=session_id,
@@ -845,11 +929,73 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str, db: 
         kind="regenerate",
         prompt=prompt,
         media=kind,
-    ).id
+    )
+    task_manager.spawn(
+        job.id,
+        _run_micro_regenerate_job(
+            job.id,
+            work_id,
+            session_id,
+            assistant_id,
+            kind,
+            prompt,
+            width,
+            height,
+            seconds,
+            ref_url,
+            improve,
+            score,
+            note,
+            lang,
+        ),
+    )
+    return {"job_id": job.id, "session_id": session_id, "assistant_id": assistant_id}
 
-    def _runner(queue, cancel_event):
-        return run_regenerate(
-            queue,
+
+async def _run_micro_regenerate_job(
+    job_id: str,
+    work_id: str,
+    session_id: str,
+    assistant_id: int,
+    kind: str,
+    prompt: str,
+    width: int,
+    height: int,
+    seconds: int,
+    ref_url: str,
+    improve: bool,
+    score: int,
+    note: str,
+    lang: str,
+) -> None:
+    """后台执行一次重跑（跳过 LLM，按参数直接生成）。"""
+    db = SessionLocal()
+    control = jobs.get(job_id)
+    job = db.get(GenerationJob, job_id)
+    session = db.get(MicroSession, session_id)
+    work = db.get(MicroWork, work_id)
+    if job is None or control is None or session is None or work is None:
+        jobs.pop(job_id)
+        db.close()
+        return
+    _job = _make_job_updater(db, job, work)
+    cs = ConfigStore(db)
+    llm_cfg = cs.get_llm(work.llm_config_id or "")
+    dt_cfg = cs.get_drawthing(work.drawthings_config_id) if work.drawthings_config_id else None
+
+    def _on_event(event, data) -> None:
+        d = data or {}
+        if event == E.TOOL:
+            _job(note=d.get("label", ""), media=d.get("media", ""))
+        elif event == E.TOOL_STATUS:
+            _job(note=d.get("message", ""))
+        elif event == E.MEDIA:
+            _job(note="已生成", media=d.get("media", ""))
+
+    sink = task_manager.EventSink(job_id, on_event=_on_event)
+    try:
+        await run_regenerate(
+            sink,
             db=db,
             session=session,
             work=work,
@@ -862,24 +1008,27 @@ async def micro_regenerate(request: Request, work_id: str, session_id: str, db: 
             seconds=seconds,
             ref_url=ref_url,
             lang=lang,
-            cancel_event=cancel_event,
+            cancel_event=control.event,
             llm_cfg=llm_cfg,
             improve=improve,
             score=score,
             note=note,
         )
-
-    return StreamingResponse(
-        _sse_transport(_runner, db=db, job_id=job_id),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        _finish_job(_job, control, sink)
+        task_manager.publish(job_id, E.DONE, {"cancelled": control.cancelled})
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        _job(status="error", error=str(e), finished=True)
+        task_manager.publish(job_id, E.ERROR, {"message": L(lang, f"重跑失败：{e}", f"Re-generate failed: {e}")})
+    finally:
+        jobs.pop(job_id)
+        db.close()
 
 
 @router.post("/{work_id}/{session_id}/score")
 async def micro_score(request: Request, work_id: str, session_id: str, db: Session = Depends(get_db)):
-    """LLM 评分：对某条生成媒体（图/视频）按 0–100 评分（视频取末帧），返回 {score, note}，
-    并把分值/评语写回该会话内对应内容块（持久化，刷新后仍显示）。"""
+    """LLM 评分 —— 提交后台任务，立即返回 {job_id}；结果经 media_score 事件推送并写回内容块。"""
     lang = _lang(request)
     session = db.get(MicroSession, session_id)
     if not session or session.micro_id != work_id:
@@ -893,138 +1042,94 @@ async def micro_score(request: Request, work_id: str, session_id: str, db: Sessi
     if not url:
         raise HTTPException(status_code=400, detail=L(lang, "缺少媒体地址", "Missing media URL"))
     kind = str(body.get("media") or "image").strip().lower()
-    llm_cfg = ConfigStore(db).get_llm(work.llm_config_id or "")
-    if not llm_cfg:
+    if not ConfigStore(db).get_llm(work.llm_config_id or ""):
         raise HTTPException(
             status_code=400, detail=L(lang, "请选择有效的 LLM 配置", "Please select a valid LLM config")
         )
-    p = media_path_from_url(url)
-    if p is None:
+    if media_path_from_url(url) is None:
         raise HTTPException(status_code=400, detail=L(lang, "媒体不存在", "Media not found"))
-    img = str(p)
-    if kind == "video" or is_video_path(img):
-        # 抽帧要跑 OpenCV 解码 / ffmpeg（自身最长 60s 超时），放线程池，
-        # 否则整个事件循环被阻塞（/media、SSE 心跳全部停摆）。
-        frame = await run_sync(partial(extract_last_frame, img))
-        if not frame:
-            raise HTTPException(
-                status_code=400,
-                detail=L(
-                    lang,
-                    "无法提取视频末帧用于评分（需安装 ffmpeg）",
-                    "Cannot extract a video frame to score (ffmpeg required)",
-                ),
-            )
-        img = frame
+    job = _new_job(
+        db,
+        micro_id=work_id,
+        session_id=session_id,
+        message_id=None,
+        kind="score",
+        prompt=str(body.get("prompt") or "")[:2000],
+        media=kind,
+    )
+    task_manager.spawn(
+        job.id,
+        _run_micro_score_job(
+            job.id, work_id, session_id, url, kind, str(body.get("prompt") or ""), lang
+        ),
+    )
+    return {"job_id": job.id, "url": url}
+
+
+async def _run_micro_score_job(
+    job_id: str, work_id: str, session_id: str, url: str, kind: str, prompt: str, lang: str
+) -> None:
+    """后台评分：抽末帧（视频）→ LLM 打分 → 写回内容块 → 广播 media_score。"""
+    db = SessionLocal()
+    control = jobs.get(job_id)
+    job = db.get(GenerationJob, job_id)
+    work = db.get(MicroWork, work_id)
+    if job is None or control is None or work is None:
+        jobs.pop(job_id)
+        db.close()
+        return
+    _job = _make_job_updater(db, job, work)
     try:
+        llm_cfg = ConfigStore(db).get_llm(work.llm_config_id or "")
+        p = media_path_from_url(url)
+        if p is None or llm_cfg is None:
+            raise ValueError(L(lang, "媒体或 LLM 配置已失效", "Media or LLM config no longer available"))
+        img = str(p)
+        if kind == "video" or is_video_path(img):
+            # 抽帧要跑 OpenCV 解码 / ffmpeg（自身最长 60s 超时），放线程池，避免阻塞事件循环
+            frame = await run_sync(partial(extract_last_frame, img))
+            if not frame:
+                raise ValueError(
+                    L(
+                        lang,
+                        "无法提取视频末帧用于评分（需安装 ffmpeg）",
+                        "Cannot extract a video frame to score (ffmpeg required)",
+                    )
+                )
+            img = frame
         score, note = await llm_score_media(
-            llm_cfg,
-            img,
-            lang,
-            mode=getattr(work, "score_mode", "image"),
-            prompt=str(body.get("prompt") or ""),
+            llm_cfg, img, lang, mode=getattr(work, "score_mode", "image"), prompt=prompt
         )
+        # 写回该会话内对应内容块（按媒体 url 匹配）
+        changed = False
+        for m in db.query(MicroMessage).filter(MicroMessage.session_id == session_id).all():
+            if not m.parts:
+                continue
+            blocks = load_parts(m.parts)
+            hit = False
+            for b in blocks:
+                if b.get("type") == "tool" and b.get("url") == url:
+                    b["score"] = score
+                    b["score_note"] = note
+                    hit = True
+            if hit:
+                m.parts = dump_parts(blocks)
+                changed = True
+        if changed:
+            db.commit()
+        _job(status="done", note=f"{score}", finished=True)
+        task_manager.publish(
+            job_id, E.MEDIA_SCORE, {"url": url, "media": kind, "score": score, "note": note}
+        )
+        task_manager.publish(job_id, E.DONE, {"score": score, "note": note})
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         logging.getLogger("drawthings").warning("微创作评分失败：%s", e, exc_info=True)
-        raise HTTPException(status_code=400, detail=L(lang, f"评分失败：{e}", f"Scoring failed: {e}"))
-    # 写回该会话内对应内容块（按媒体 url 匹配）
-    changed = False
-    for m in db.query(MicroMessage).filter(MicroMessage.session_id == session_id).all():
-        if not m.parts:
-            continue
-        blocks = load_parts(m.parts)
-        hit = False
-        for b in blocks:
-            if b.get("type") == "tool" and b.get("url") == url:
-                b["score"] = score
-                b["score_note"] = note
-                hit = True
-        if hit:
-            m.parts = dump_parts(blocks)
-            changed = True
-    if changed:
-        db.commit()
-    return {"score": score, "note": note}
-
-
-async def _sse_transport(runner, db: Session | None = None, job_id: str | None = None):
-    """SSE 传输层：驱动引擎（runner 协程，事件写入队列）转成 SSE 帧（含心跳）。
-
-    runner(queue, cancel_event) 由调用方构造（对话 / 重跑）；事件语义见 `services/events.py`。
-    出图/出视频耗时长，15s 无事件发心跳保持连接；客户端断开时协作式取消生成。
-    传入 job_id 时同步更新生成任务（可观测/可取消）；运行中任务的 cancel_event 存在注册表，
-    取消接口可置位，从而在不依赖客户端连接的情况下停止生成。
-    """
-    queue: asyncio.Queue = asyncio.Queue()
-    with _JOBS_LOCK:
-        rec = _RUNNING_JOBS.get(job_id) if job_id else None
-    # 复用注册表里的取消句柄（取消接口置位同一个 event）；无任务时用一次性句柄
-    cancel_event = rec["event"] if rec else threading.Event()
-    job = db.get(GenerationJob, job_id) if (db is not None and job_id) else None
-
-    def _job_update(status=None, note=None, error=None, media=None, finished=False) -> None:
-        if job is None:
-            return
-        try:
-            if status:
-                job.status = status
-            if note is not None:
-                job.note = str(note)[:500]
-            if error is not None:
-                job.error = str(error)[:2000]
-            if media:
-                job.media = str(media)[:10]
-            job.updated_at = _now()
-            if finished:
-                job.finished_at = _now()
-            db.commit()
-        except Exception:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-
-    task = asyncio.create_task(runner(queue, cancel_event))
-    finished_normally = False
-    had_error = False
-    try:
-        while True:
-            try:
-                event, data = await asyncio.wait_for(queue.get(), timeout=15)
-            except TimeoutError:
-                yield ": ping\n\n"  # 心跳：出图/出视频耗时长，保持 SSE 连接不被空闲断开
-                continue
-            if event == E.EOF:
-                finished_normally = True
-                break
-            d = data or {}
-            if event in (E.TOOL_ERROR, E.ERROR):
-                had_error = True
-                _job_update(error=d.get("message", ""))
-            elif event == E.TOOL:
-                _job_update(note=d.get("label", ""), media=d.get("media", ""))
-            elif event == E.TOOL_STATUS:
-                _job_update(note=d.get("message", ""))
-            elif event == E.MEDIA:
-                _job_update(note="已生成", media=d.get("media", ""))
-            yield _sse(event, data)
+        _job(status="error", error=str(e), finished=True)
+        task_manager.publish(
+            job_id, E.ERROR, {"message": L(lang, f"评分失败：{e}", f"Scoring failed: {e}")}
+        )
     finally:
-        cancel_event.set()  # 先请求取消（线程内的 Draw Things 生成尽快停止）
-        with _JOBS_LOCK:
-            rec2 = _RUNNING_JOBS.pop(job_id, None) if job_id else None
-        cancelled_by_api = bool(rec2 and rec2.get("cancelled"))
-        if not task.done():
-            task.cancel()
-            try:
-                await task  # 等引擎清理（落库）完成再结束请求（数据库会话此时才关闭）
-            except asyncio.CancelledError:
-                pass
-        if cancelled_by_api:
-            final = "cancelled"
-        elif had_error:
-            final = "error"
-        elif finished_normally:
-            final = "done"
-        else:
-            final = "interrupted"
-        _job_update(status=final, finished=True)
+        jobs.pop(job_id)
+        db.close()

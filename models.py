@@ -299,9 +299,9 @@ class Asset(Base):
 class GenerationJob(Base):
     """生成任务（Job）：把「一次生成」建模为可观测、可取消的任务。
 
-    - 对话（chat）/ 重跑（regenerate）开始时建任务（running），事件推进时更新 note，
+    - 对话（chat）/ 重跑（regenerate）/ 评分（score）开始时建任务（running），事件推进时更新 note，
       结束时置 done / error / interrupted / cancelled；
-    - 进程内注册表（api_micro._RUNNING_JOBS）持有运行中任务的 cancel_event，供取消接口使用；
+    - 后台任务由 services/task_manager 脱离连接运行，取消句柄存 services/jobs（进程内注册表）；
     - 与可恢复流配合：任务中断时消息保留为 interrupted，任务本身记为 interrupted/cancelled。
     """
 
@@ -337,6 +337,7 @@ class ProjectJob(Base):
     status = Column(String(12), default="running")  # running | done | error | interrupted | cancelled
     note = Column(Text, default="")  # 最新状态文案（如进度）
     error = Column(Text, default="")
+    result = Column(Text, default="")  # 任务结果（JSON 文本；文档导入预览等场景使用）
     created_at = Column(String(40), default=_now)
     updated_at = Column(String(40), default=_now)
     finished_at = Column(String(40), default="")

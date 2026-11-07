@@ -344,6 +344,9 @@ def _migrate():
             "score_mode": "VARCHAR(10) DEFAULT 'image'",
             "auto_score": "INTEGER DEFAULT 0",
         },
+        "project_jobs": {
+            "result": "TEXT DEFAULT ''",
+        },
         "micro_messages": {
             "images": "TEXT",
             "created_at": "VARCHAR(40) DEFAULT ''",

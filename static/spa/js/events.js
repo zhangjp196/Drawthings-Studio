@@ -1,4 +1,4 @@
-// SSE 事件契约（前端镜像；后端单一来源见 services/events.py）
+// 任务事件契约（WebSocket；前端镜像；后端单一来源见 services/events.py）
 // 新增/改名事件时，同步改两处与消费方，避免「后端改名、前端漏改」。
 window.EVENTS = {
   // 微创作会话流

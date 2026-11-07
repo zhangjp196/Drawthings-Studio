@@ -1,7 +1,6 @@
-// 轻量 API 客户端：JSON 请求 + SSE 流（与后端 /api 约定一致）
+// 轻量 API 客户端：JSON 请求（与后端 /api 约定一致）
 // - 自动携带 Accept-Language：后端据此本地化错误文案，与界面语言保持一致
-// - 请求超时保护（默认 5 分钟，足够单章 LLM/出图，批量走 SSE 不受影响）
-// - SSE 支持 AbortSignal：组件卸载 / 重新请求时可主动断开（服务端随之清理后台任务）
+// - 请求超时保护（默认 5 分钟，足够单章 LLM/出图，批量任务走后台任务 + WS，不受超时影响）
 window.API = {
   TIMEOUT: 5 * 60 * 1000,
 
@@ -72,51 +71,6 @@ window.API = {
   patch: (u, body, timeout) => API.req('PATCH', u, body, false, timeout),
   del: (u, timeout) => API.req('DELETE', u, undefined, false, timeout),
   postForm: (u, fd, timeout) => API.req('POST', u, fd, true, timeout),
-
-  // SSE：POST JSON，按帧回调 onEvent(event, data)；非 2xx 抛 Error；signal 可中断
-  sse: async (url, body, onEvent, signal) => {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept-Language': API._lang() },
-      body: JSON.stringify(body),
-      signal,
-    });
-    if (!resp.ok || !resp.body) {
-      let detail = API._t('common.httpError', resp.status);
-      try {
-        const j = await resp.json();
-        if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
-      } catch (e) { /* 非 JSON 错误体 */ }
-      throw new Error(detail);
-    }
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
-          const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          let event = 'message', data = '';
-          for (const line of frame.split('\n')) {
-            if (line.startsWith('event:')) event = line.slice(6).trim();
-            else if (line.startsWith('data:')) data = line.slice(5).trim();
-          }
-          if (!data) continue;
-          let d = {};
-          try { d = JSON.parse(data); } catch (e) { d = { text: data }; }
-          onEvent(event, d);
-        }
-      }
-    } finally {
-      // 回调抛错（如 EVENTS.ERROR）时也要关掉连接：否则 reader 无人消费，HTTP 挂到超时
-      try { await reader.cancel(); } catch (e) { /* 已断 */ }
-    }
-  },
 
   // ---- CS 桌面客户端桥 ----
   // pywebview 注入 window.pywebview.api（浏览器里不存在）；桥方法名与 client.py 的 NativeApi 一致。

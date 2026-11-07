@@ -4,7 +4,6 @@
 本模块不含任何类型特有逻辑。
 """
 
-import json
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
@@ -193,10 +192,6 @@ def _clamp_page(page: int, size: int) -> tuple[int, int]:
     return max(page, 1), min(max(size, 1), 100)
 
 
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 MAX_IMAGE_UPLOAD = 20 * 1024 * 1024  # 单张上传图片上限 20MB（防超大文件占满内存）
 
 
@@ -238,5 +233,4 @@ __all__ = [
     "_project_view",
     "_config_lists",
     "_clamp_page",
-    "_sse",
 ]

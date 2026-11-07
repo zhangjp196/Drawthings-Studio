@@ -18,10 +18,11 @@ import os
 # 在 PyInstaller 冻结环境中取不到源码会抛 OSError 导致启动崩溃；本应用不使用 pydantic 插件。
 os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "__all__")
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,10 +31,10 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from config import data_dir
 from config_store import ConfigStore
-from db import engine, get_db, init_db
+from db import SessionLocal, engine, get_db, init_db
 from i18n import L
 from paths import APP_NAME, env_int, resource_root
-from services import api_comic, api_drama, api_maintenance, api_micro, port_util
+from services import api_comic, api_drama, api_maintenance, api_micro, api_tasks, port_util, task_manager
 from services.agent import make_httpx_client
 from services.api_common import (
     MEDIA_DIR,
@@ -65,6 +66,11 @@ async def _lifespan(app: FastAPI):
         yield
     finally:
         try:
+            await task_manager.shutdown()  # 取消后台任务（各自 finally 落库）
+        except Exception:
+            log = logging.getLogger("drawthings")
+            log.warning("后台任务关闭时出错", exc_info=True)
+        try:
             engine.dispose()
         except Exception:
             pass
@@ -77,6 +83,7 @@ app.include_router(api_comic.router)  # 漫画 API（/api/comics/*）
 app.include_router(api_drama.router)  # 短剧 API（/api/dramas/*）
 app.include_router(api_micro.router)  # 微创作 API（/api/micro/*）
 app.include_router(api_maintenance.router)  # 数据维护（/api/maintenance/*）
+app.include_router(api_tasks.router)  # 全局任务中心（/api/tasks/*）
 
 logger = logging.getLogger("drawthings")
 
@@ -499,6 +506,82 @@ def health():
         "port": env_int("PORT", port_util.DEFAULT_PORT),
         "data": os.path.realpath(str(data_dir)),
     }
+
+
+# ---------------- 任务事件总线（WebSocket） ----------------
+@app.websocket("/ws")
+async def ws_events(websocket: WebSocket):
+    """任务事件总线：订阅任务后接收 progress / chapter / score / token / tool 等事件。
+
+    协议（JSON）：
+      客户端 → {"type":"sub","jobs":["id1","*"]} / {"type":"unsub","jobs":[...]} / {"type":"ping"}
+      服务端 → {"type":"hello"|"ping"|"pong"} / {"type":"job","job":{...}} /
+               {"type":"event","job":id,"event":name,"data":{...}}
+    `"*"` 订阅全部任务状态（任务中心用）；普通任务事件只推给显式订阅的 id。
+    """
+    await websocket.accept()
+    queue = task_manager.subscribe()
+    subs: set[str] = set()
+    all_jobs = {"on": False}
+    send_lock = asyncio.Lock()
+
+    async def send(payload: dict) -> None:
+        async with send_lock:
+            await websocket.send_json(payload)
+
+    async def receiver() -> None:
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                typ = str(msg.get("type") or "")
+                ids = [str(x) for x in (msg.get("jobs") or [])]
+                if typ == "sub":
+                    if "*" in ids:
+                        all_jobs["on"] = True
+                    subs.update(x for x in ids if x != "*")
+                    db = SessionLocal()
+                    try:
+                        snaps = (
+                            api_tasks.active_snapshots(db, 100)
+                            if all_jobs["on"]
+                            else api_tasks.snapshots_for(db, subs)
+                        )
+                    finally:
+                        db.close()
+                    for s in snaps:
+                        await send({"type": "job", "job": s})
+                elif typ == "unsub":
+                    if "*" in ids:
+                        all_jobs["on"] = False
+                    subs.difference_update(x for x in ids if x != "*")
+                elif typ == "ping":
+                    await send({"type": "pong"})
+        except Exception:
+            pass  # 连接关闭：主循环会感知并清理
+
+    recv_task = asyncio.create_task(receiver())
+    try:
+        await send({"type": "hello"})
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=15)
+            except TimeoutError:
+                await send({"type": "ping"})  # 心跳：保持连接不被中间层断开
+                continue
+            if msg.get("type") == "event":
+                if msg.get("job") in subs:
+                    await send(msg)
+            elif msg.get("type") == "job":
+                job = msg.get("job") or {}
+                if all_jobs["on"] or job.get("id") in subs:
+                    await send(msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        recv_task.cancel()
+        task_manager.unsubscribe(queue)
 
 
 # ---------------- SPA 外壳 ----------------

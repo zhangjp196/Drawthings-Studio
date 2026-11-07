@@ -138,13 +138,13 @@ Views.chapterCardComic = {
     async function doGen() {
       busy.value = 'gen';
       try {
-        await API.post(`/api/comics/${props.projectId}/gen/${props.seasonIndex}`,
-                       { season_id: props.seasonId, extra_prompt: genExtra.value || '' }, 0);
-        emit('reloaded', props.seasonIndex);
+        // 提交后台任务：切页/刷新也继续生成；完成后父级重新拉取本章最新状态
+        const r = await Tasks.run(`/api/comics/${props.projectId}/gen/${props.seasonIndex}`,
+                                 { season_id: props.seasonId, extra_prompt: genExtra.value || '' });
+        if (r.status !== 'cancelled') ElementPlus.ElMessage.success(I18N.t('p.msgDone'));
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
-        emit('reloaded');
-      } finally { busy.value = ''; }
+      } finally { busy.value = ''; emit('reloaded', props.seasonIndex); }
     }
     // 一次「保存」提交本章全字段：提示词走章节编辑接口；标题/摘要写回季列表并交给父级保存规划（saveplan）
     async function doSave() {
@@ -159,17 +159,23 @@ Views.chapterCardComic = {
         ElementPlus.ElMessage.error(e.message);
       } finally { busy.value = ''; }
     }
-    // LLM 手动评分：调用所选 LLM 给本章评分（未勾选视觉时禁用），成功后刷新分值/评语
+    // LLM 手动评分：提交后台任务（未勾选视觉时禁用），结果经 score 事件回来后再刷新分值/评语
     async function doScore() {
       busy.value = 'score';
+      let result = null;
       try {
-        const r = await API.post(`/api/comics/${props.projectId}/chapters/${props.seasonIndex}/score`,
-                                 { season_id: props.seasonId });
-        // 通过 emit 通知父组件更新，避免直接修改 props
-        emit('update:score', { score: (r && r.score) || 0, score_note: (r && r.note) || '' });
-        ElementPlus.ElMessage.success(I18N.t('p.scoreResult', props.chapter.title, (r && r.score) || 0));
+        const r = await Tasks.run(`/api/comics/${props.projectId}/chapters/${props.seasonIndex}/score`,
+                                 { season_id: props.seasonId }, {
+          onEvent: (ev, d) => { if (ev === EVENTS.SCORE && d.phase === 'result') result = d; },
+        });
+        if (r.status === 'cancelled') return;
+        if (result) {
+          // 通过 emit 通知父组件更新，避免直接修改 props
+          emit('update:score', { score: result.score || 0, score_note: result.note || '' });
+          ElementPlus.ElMessage.success(I18N.t('p.scoreResult', props.chapter.title, result.score || 0));
+        }
         emit('reloaded');
-      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      } catch (e) { ElementPlus.ElMessage.error(e.message); emit('reloaded'); }
       finally { busy.value = ''; }
     }
     async function doMove(dir) {

@@ -1,6 +1,6 @@
 """AGENTS.md 硬性约定的自动校验：
 
-1. SSE 事件契约：services/events.py（后端单一来源）↔ static/spa/js/events.js（前端镜像）
+1. 任务事件契约：services/events.py（后端单一来源）↔ static/spa/js/events.js（前端镜像）
    必须一致 —— 历史上全靠注释提醒，这里锁死。
 2. 漫画 / 短剧双线刻意保持重复：路由集合必须对称（除短剧独有的 video 导出）。
    一眼看出某条线漏改了。

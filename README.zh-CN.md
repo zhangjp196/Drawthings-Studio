@@ -6,7 +6,7 @@
 
 ## 简介
 
-本地一体化应用：**FastAPI（JSON API + SSE）后端 + Vue 3 / Element Plus 单页前端（SPA）**。
+本地一体化应用：**FastAPI（JSON API + WebSocket）后端 + Vue 3 / Element Plus 单页前端（SPA）**。
 支持两种形态：**BS**（浏览器直接访问）与 **CS**（`python client.py` 原生桌面客户端：自动拉起服务 + 原生窗口，免浏览器，见下文「桌面客户端」）。
 前端为**本地 vendor、免构建**（Vue / vue-router / Element Plus 均下载至 `static/vendor/` 以 UMD 引入），
 离线可用；FastAPI 兜底返回 SPA 外壳，支持任意路径刷新（history 路由）。
@@ -73,7 +73,7 @@
   > 每章提示词里的角色 = **截至本季**的全部角色（不含后续季，避免剧透）。
   > **季角色不得为空**：模型未返回角色即报错；**分章前**也会校验，本季没角色直接拦下（避免各章凭空生成人物）。
   > 每个季角色可上传**参考图**（保持跨章/跨季形象一致）与 **AI 生成**形象/性格描述。
-- **② 章节**：对大纲规划出的各章做生产。**一键生成**「全部生成剧本 / 全部生成画面 / 重新生成全部画面」（SSE 逐章进度）；
+- **② 章节**：对大纲规划出的各章做生产。**一键生成**「全部生成剧本 / 全部生成画面 / 重新生成全部画面」（逐章进度经 WebSocket 实时推送，批量为后台任务）；
   每章手风琴卡片（默认**只显照片**，点击展开，一次只展开一章，生成后自动展开）内**按章多步**：
   「生成剧本」（写剧本/提示词/分辨率，沿用大纲风格+角色+该章摘要）→「生成画面」，
   还有 **重新生成画面 / 保存提示词 / 调整分辨率 / 上移 / 下移 / 删除**。
@@ -87,13 +87,14 @@
 - **标题 / 全局要求直接改**：**标题**在「总体」页顶部放大输入（失焦即保存），也可随「生成本季大纲」
   由 AI 一并生成；**全局要求**（风格 + 每次生成都要遵循的要点）与**默认分辨率**就在同一页，改完点「保存」。
   **「总体」是单页、没有二级页签**：作品标题 / 全局要求 / 默认分辨率 与 封面 合在一张卡片里。
-- **长步骤逐章进度（SSE）**：「全部生成剧本 / 全部生成画面 / 重新生成全部画面」均为较长步骤
-  （LLM 逐章撰写 / 逐章出图出视频，阻塞调用放入线程池、不卡事件循环），
-  走 SSE 流式下发逐章进度（第 x/y 章《标题》），完成后自动刷新；单章仍可用卡片内按钮单独生成剧本/生成画面/重生成。
+- **长步骤逐章进度（后台任务 + WebSocket）**：「全部生成剧本 / 全部生成画面 / 重新生成全部画面」均为较长步骤
+  （LLM 逐章撰写 / 逐章出图出视频，阻塞调用放入线程池、不卡事件循环），以**脱离请求的后台任务**运行：
+  逐章进度（第 x/y 章《标题》）经 `/ws` 实时推送，**切页 / 刷新不会中断**，完成后自动刷新；
+  单章仍可用卡片内按钮单独生成剧本/生成画面/重生成。
 - **生成任务（Job，可观测 / 可取消）**：每个长步骤（章节规划 / 生成画面 / 单章生成）是一个任务
   （`running → done | error | interrupted | cancelled`，带进度 note）；`GET /api/comics|dramas/{id}/jobs` 查询、
-  `POST .../jobs/{id}/cancel` 取消，**不依赖客户端连接**。页面已有「停止」按钮中断 SSE，现在同时会**真正停止**
-  正在跑的 Draw Things 生成（协作式取消）。漫画 / 短剧各自实现。
+  `POST .../jobs/{id}/cancel` 取消，**不依赖客户端连接**。页面「停止」按钮取消后台任务，并**真正停止**
+  正在跑的 Draw Things 生成（协作式取消）；右下角**任务中心**汇总所有任务并可直接取消。漫画 / 短剧各自实现。
 
 ## 微创作（/micro，作品 → 独立会话）
 
@@ -113,7 +114,7 @@
   助手回复按**有序内容块**（`micro_messages.parts`：文本 / 生成 / 错误）落库，
   文本与生成结果严格保持发生顺序，一次回复可含多张图/视频；刷新后与流式过程完全一致。
   空标题的会话/作品自动取首条用户消息命名；旧库（配置随会话的旧结构）启动时自动迁移。
-- **统一对话 + 流式输出（SSE）**：与所选 LLM 多轮对话（构思/编剧/提示词），回复逐字流式显示。
+- **统一对话 + 流式输出（WebSocket）**：与所选 LLM 多轮对话（构思/编剧/提示词），回复逐字流式显示。
   生成块按事件 id 从「生成中（转圈）」收束为「✓ 已生成 / ⚠ 生成失败」，提示词默认折叠（点「提示词」展开），不再重复展示。
 - **对话区交互**：消息区高度自适应视口（不再写死偏移）；打开会话 / 图片陆续加载时自动贴底，
   用户上翻后停止跟随并出现「↓ 回到底部」；会话侧栏可折叠（按作品记忆），切换会话即中断进行中的生成。
@@ -223,15 +224,17 @@
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 统一 Agent 层（模型构造 / 结构化输出 / 消息历史）
-│   ├── api_common.py    # API 共享基础设施（本地化 / 媒体 URL / 序列化视图 / SSE 帧 / 分页）
+│   ├── api_common.py    # API 共享基础设施（本地化 / 媒体 URL / 序列化视图 / 分页）
 │   ├── api_comic.py     # 漫画项目路由（/api/comics/*）
 │   ├── api_drama.py     # 短剧项目路由（/api/dramas/*）
-│   ├── api_micro.py     # 微创作路由（/api/micro/*）+ SSE 传输层（驱动引擎队列 + 心跳）
+│   ├── api_micro.py     # 微创作路由（/api/micro/*）+ 对话 / 重跑 / 评分后台任务
+│   ├── task_manager.py  # 后台任务运行器 + WS 事件广播（与业务类型无关）
+│   ├── api_tasks.py     # 全局任务中心 API（/api/tasks/*：列表 / 详情 / 取消）
 │   ├── micro_agent.py   # 微创作会话引擎（系统提示词 / generate_image + generate_video 工具 / 内容块 / 增量落库 / 重跑）
 │   ├── micro_parts.py   # 助手「有序内容块」schema + 版本化读写
 │   ├── capabilities.py  # 生效生成能力解析（功能级模型 / 参考图开关覆盖；项目与微创作共用）
 │   ├── media_files.py   # 媒体清理 / 路径解析 / 用户附图落盘 / ZIP·PDF 导出（共用）
-│   ├── events.py        # SSE 事件契约（单一来源；前端镜像 = static/spa/js/events.js）
+│   ├── events.py        # 任务事件契约（单一来源；前端镜像 = static/spa/js/events.js）
 │   ├── drawthings.py    # Draw Things gRPC 客户端（出图 + 出视频，drawthings-py）+ 工具/工厂 + 协作式取消
 │   ├── pipeline.py      # 流水线门面（按类型分发 → comic / drama）
 │   ├── pipeline_common.py / pipeline_comic.py / pipeline_drama.py  # 共用工具 + 两条独立流水线
@@ -241,7 +244,7 @@
 │   └── spa/             # 单页前端（UMD 引入，无打包）
 │       ├── index.html   #   外壳：左栏侧边导航 + 工具栏 + <router-view> + 主题/语言预渲染
 │       ├── css/app.css  #   应用样式（Element Plus 主题变量映射 + 布局 + 对话区）
-│       └── js/          #   app.js（入口/路由）api.js（fetch+SSE）events.js（事件常量）theme.js i18n.js（中英词典）md.js（Markdown）
+│       └── js/          #   app.js（入口/路由）api.js（fetch）ws.js（WS 总线）tasks.js（任务 store/运行器）events.js（事件常量）theme.js i18n.js（中英词典）md.js（Markdown）
 │                        #   views/（路由视图 + 子组件：micro-block / micro-session-list / micro-chat / micro-works-gallery；漫画/短剧各自：chapter-card-*、create-form-*、chapter-list-*、chapter-toolbar-*、season-preview-*、season-export-*、gen-dialog-*、pdf-dialog-comic）
 └── data/                # app.db（SQLite） media/（图片/视频）
 ```
@@ -257,8 +260,8 @@
 - **路由**：`/` 首页 · `/projects` 列表 · `/new` 新建 · `/project/:id` 详情 · `/configs` 配置 ·
   `/micro` 作品列表 · `/micro/:id(/:sid)` 作品对话。未知路径由 FastAPI 兜底返回 SPA 外壳，
   任意深链刷新可用（前端路由再匹配；未匹配重定向首页）。
-- **数据**：所有页面经 `static/spa/js/api.js`（fetch 封装 + SSE 解析）调 `/api/*`；
-  对话页用 fetch 流读 SSE（`POST /api/micro/{id}/{sid}/chat`），按事件 id 更新有序内容块（文本/生成/媒体）。
+- **数据**：所有页面经 `static/spa/js/api.js`（fetch 封装）调 `/api/*`；长任务经 `Tasks.run`（`js/tasks.js`）提交，
+  返回 `job_id` 后由 `ws.js`（`/ws`）接收事件，按事件 id 更新有序内容块（文本/生成/媒体）。任务与页面解耦，切页不会取消。
 - **组件**：列表用 `el-table`+筛选+`el-pagination`，弹窗用 `el-dialog`，删除用 `el-popconfirm`，
   步骤用 `el-steps`，首图/章节图用 `el-image`（teleported 预览），图片放大用 `el-image-viewer`，
   表单用 `el-form`/`el-select`/`el-radio-group`；提示统一 `ElMessage`。

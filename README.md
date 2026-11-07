@@ -6,7 +6,7 @@
 
 ## Overview
 
-A local, all-in-one app: **FastAPI (JSON API + SSE) backend + a Vue 3 / Element Plus single-page frontend (SPA)**.
+A local, all-in-one app: **FastAPI (JSON API + WebSocket) backend + a Vue 3 / Element Plus single-page frontend (SPA)**.
 Two shapes: **BS** (open it in a browser) and **CS** (`python client.py` native desktop client: auto-starts the server + a native window, no browser — see "Desktop client (CS)" below).
 The frontend uses **local, build-free vendor files** (Vue / vue-router / Element Plus are all downloaded into `static/vendor/` and loaded as UMD),
 so it runs fully offline; FastAPI falls back to serving the SPA shell, so refreshing on any route works (history routing).
@@ -82,7 +82,7 @@ The project page is organized into **three tabs — Outline / Chapters / Complet
   The season outline, season characters and the chapter plan (title / summary / count) are all **manually editable**;
   you can also "Regenerate season outline" or "Rebuild chapters from outline" (re-plans the chapters only).
   The character sheet keeps the cast consistent across chapters (fed into each chapter's prompt).
-- **② Chapters**: produce the content for the planned chapters. **One-click generate** — "Generate all scripts / Generate all media / Regenerate all frames" (SSE per-chapter progress);
+- **② Chapters**: produce the content for the planned chapters. **One-click generate** — "Generate all scripts / Generate all media / Regenerate all frames" (per-chapter progress pushed over WebSocket; the batch runs as a background job);
   each chapter's accordion card (**shows only its photo** by default; click to expand, one open at a time, auto-expands when generated) supports **per-chapter steps**:
   "Generate script" (writes script/prompt/resolution, using the global requirements + characters + that chapter's summary) → "Generate media",
   plus **Regenerate media / Save prompt / adjust resolution / Move up / Move down / Delete**.
@@ -105,13 +105,15 @@ The project page is organized into **three tabs — Outline / Chapters / Complet
   > **Season characters must not be empty**: an empty model result is rejected, and **chapter planning fails fast** when the
   > season has no characters (otherwise every chapter would invent its own cast). Each season character can take a
   > **reference image** (keeps the look consistent across chapters and seasons) and an **AI-generated** look/personality description.
-- **Per-chapter progress for long steps (SSE)**: "Generate all scripts / Generate all media / Regenerate all frames" are long steps
-  (the LLM writes chapter by chapter / media renders chapter by chapter; blocking calls run in a thread pool so the event loop stays responsive),
-  streamed over SSE with per-chapter progress (chapter x/y "title"), then auto-refreshes; a single chapter can still generate its script/media or regenerate from its own card buttons.
+- **Per-chapter progress for long steps (background tasks + WebSocket)**: "Generate all scripts / Generate all media / Regenerate all frames" are long steps
+  (the LLM writes chapter by chapter / media renders chapter by chapter; blocking calls run in a thread pool so the event loop stays responsive).
+  They run as **background jobs detached from the HTTP request**: progress (chapter x/y "title") is pushed over `/ws`, so switching pages or
+  refreshing no longer stops them, and the result auto-refreshes; a single chapter can still generate its script/media or regenerate from its own card buttons.
 - **Generation jobs (observable / cancellable)**: each long step (chapter planning / generation / single-chapter generation)
   runs as a **job** (`running → done | error | interrupted | cancelled`) with a progress note; `GET /api/comics|dramas/{id}/jobs`
   lists them and `POST .../jobs/{id}/cancel` stops a running one **without relying on the client connection**. The page's existing
-  "Stop" button aborts the SSE stream, which now also stops the in-flight Draw Things render (cooperative cancel).
+  "Stop" button cancels the background job, which also stops the in-flight Draw Things render (cooperative cancel);
+  a global **task center** (bottom-right dock) lists every job across pages and can cancel them.
   (Comic and short drama each implement this on their own track.)
 
 ## Quick Create (/micro, work → independent sessions)
@@ -132,7 +134,7 @@ A lightweight, no-project creation desk (sidebar "Quick Create") — **a Quick C
   Assistant replies are stored as **ordered content blocks** (`micro_messages.parts`: text / generation / error), so text and generated
   results keep their exact chronological order, one reply can contain several images/videos, and a refresh matches the streaming exactly.
   Untitled sessions/works are auto-named from the first user message; old databases (the legacy per-session config structure) are migrated on startup.
-- **Unified chat + streaming output (SSE)**: multi-turn conversation with the chosen LLM (ideation / scripting / prompts), with replies displayed token by token.
+- **Unified chat + streaming output (WebSocket)**: multi-turn conversation with the chosen LLM (ideation / scripting / prompts), with replies displayed token by token.
   A generation block settles by event id from "generating (spinner)" to "✓ Generated / ⚠ Failed"; the prompt is collapsed by default (click "Prompt" to expand) and shown only once.
 - **Chat area interaction**: the message area adapts to the viewport height (no more brittle offset); opening a session / images loading
   auto-pins to the bottom, while scrolling up stops the follow and reveals a "↓ Back to bottom" button; the session sidebar collapses
@@ -262,15 +264,17 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 ├── requirements.txt
 ├── services/
 │   ├── agent.py         # Pydantic AI v2 unified agent layer (model construction / structured output / message history)
-│   ├── api_common.py    # shared API infra (localization / media URL / serialization / SSE frame / paging)
+│   ├── api_common.py    # shared API infra (localization / media URL / serialization / paging)
 │   ├── api_comic.py     # comic project routes (/api/comics/*)
 │   ├── api_drama.py     # short-drama project routes (/api/dramas/*)
-│   ├── api_micro.py     # micro-creation routes (/api/micro/*) + SSE transport (drive engine queue + heartbeat)
+│   ├── api_micro.py     # micro-creation routes (/api/micro/*) + background chat / rerun / score runners
+│   ├── task_manager.py  # background task runner + WS event broadcast (type-agnostic)
+│   ├── api_tasks.py     # global task center API (/api/tasks/*: list / detail / cancel)
 │   ├── micro_agent.py   # micro-creation session engine (system prompt / generate_image + generate_video tools / parts / durable writes / rerun)
 │   ├── micro_parts.py   # assistant "ordered content blocks" schema + versioned (de)serialization
 │   ├── capabilities.py  # effective generation capabilities (feature-level model / ref-image overrides; shared)
 │   ├── media_files.py   # media cleanup / path resolve / user-attachment save / ZIP·PDF export (shared)
-│   ├── events.py        # SSE event contract (single source; frontend mirror = static/spa/js/events.js)
+│   ├── events.py        # task event contract (single source; frontend mirror = static/spa/js/events.js)
 │   ├── drawthings.py    # Draw Things gRPC client (images + video, via drawthings-py) + shared helpers/factory + cooperative cancel
 │   ├── pipeline.py      # pipeline facade (routes by kind → comic / drama)
 │   ├── pipeline_common.py / pipeline_comic.py / pipeline_drama.py  # shared utils + the two independent pipelines
@@ -280,7 +284,7 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 │   └── spa/             # single-page frontend (UMD, no bundler)
 │       ├── index.html   #   shell: left sidebar + toolbar + <router-view> + pre-paint theme/lang
 │       ├── css/app.css  #   app styles (Element Plus theme variable mapping + layout + chat area)
-│       └── js/          #   app.js (entry/router) api.js (fetch+SSE) events.js (event constants) theme.js i18n.js (zh/en dict) md.js (Markdown)
+│       └── js/          #   app.js (entry/router) api.js (fetch) ws.js (WS bus) tasks.js (job store/runner) events.js (event constants) theme.js i18n.js (zh/en dict) md.js (Markdown)
 │                        #   views/ (routed views + sub-components: micro-block / micro-session-list / micro-chat / micro-works-gallery; per-track comic/drama: chapter-card-*, create-form-*, chapter-list-*, chapter-toolbar-*, season-preview-*, season-export-*, gen-dialog-*, pdf-dialog-comic)
 └── data/                # app.db (SQLite) media/ (images/videos)
 ```
@@ -296,8 +300,9 @@ use structured output (Pydantic models), while Quick Create uses streaming + too
 - **Routes**: `/` home · `/projects` list · `/new` create · `/project/:id` detail · `/configs` settings ·
   `/micro` work list · `/micro/:id(/:sid)` work chat. Unknown paths fall back to the SPA shell from FastAPI,
   so deep-link refreshes work (the frontend router re-matches; unmatched routes redirect home).
-- **Data**: every page calls `/api/*` through `static/spa/js/api.js` (fetch wrapper + SSE parser);
-  the chat page reads SSE via a fetch stream (`POST /api/micro/{id}/{sid}/chat`), updating ordered content blocks (text / generation / media) by event id.
+- **Data**: every page calls `/api/*` through `static/spa/js/api.js` (fetch wrapper); long tasks are submitted through
+  `Tasks.run` (`js/tasks.js`) which returns a `job_id` and receives events over `ws.js` (`/ws`), updating ordered content blocks
+  (text / generation / media) by event id. Tasks are detached from the page, so navigation never cancels them.
 - **Components**: lists use `el-table`+filters+`el-pagination`, dialogs use `el-dialog`, deletes use `el-popconfirm`,
   steps use `el-steps`, first/chapter images use `el-image` (teleported preview), image zoom uses `el-image-viewer`,
   forms use `el-form`/`el-select`/`el-radio-group`; toasts use `ElMessage` uniformly.

@@ -100,7 +100,7 @@ Views.microChat = {
     const inputEl = ref(null);
     const chatBox = ref(null);
     const chatInner = ref(null);
-    let sseCtrl = null;  // 当前对话流：组件卸载 / 切换会话时中断，服务端随之清理后台生成任务
+    // 任务脱离本组件运行：切页 / 切换会话不会中断生成，回来后仍可看到进度与持久化结果
     const stream = reactive({ parts: [] });
     const ph = computed(() => (props.vision ? I18N.t('mw.phVision') : I18N.t('mw.phPlain')));
 
@@ -118,15 +118,23 @@ Views.microChat = {
     function applyQuote() { quoted.value = { url: ctx.url, kind: ctx.kind }; ctx.show = false; }
     function closeCtx() { if (ctx.show) ctx.show = false; }
 
-    // LLM 手动评分：写回 b.score / b.score_note（服务端持久化；未勾选视觉时后端按纯文本评估）
+    // LLM 手动评分：提交后台任务，结果经 media_score 事件写回 b.score / b.score_note（服务端已持久化）
     async function doScore(b) {
       b.scoring = true;
+      let result = null;
       try {
-        const r = await API.post(`/api/micro/${props.id}/${props.sid}/score`,
-          { url: b.url, media: b.media || 'image', prompt: b.prompt || '' });
-        b.score = r.score;
-        b.score_note = r.note;
-        return r;
+        const r = await Tasks.run(`/api/micro/${props.id}/${props.sid}/score`,
+          { url: b.url, media: b.media || 'image', prompt: b.prompt || '' }, {
+          onEvent: (ev, d) => {
+            if (ev === EVENTS.MEDIA_SCORE && d.url === b.url) {
+              b.score = d.score;
+              b.score_note = d.note;
+              result = d;
+            }
+          },
+        });
+        if (r.status === 'cancelled') return null;
+        return result || { score: b.score, note: b.score_note };
       } finally {
         b.scoring = false;
       }
@@ -260,48 +268,48 @@ Views.microChat = {
       stream.parts.push({ type: 'error', message: d.message || I18N.t('mw.err') });
     }
 
-    // ---------- 通用 SSE 流式处理 ----------
-    // 提取 send/rerun 共同的 SSE 逻辑：状态管理、事件分发、清理
-    async function runSse(url, payload, handlers = {}) {
-      const ctrl = new AbortController();
-      sseCtrl = ctrl;
+    // ---------- 通用任务流处理 ----------
+    // 提取 send/rerun 共同的逻辑：提交后台任务 → WS 事件分发 → 结束清理
+    async function runTask(url, payload, handlers = {}) {
       let failed = false;
       try {
-        await API.sse(url, payload, (ev, d) => {
-          if (ev === EVENTS.TOKEN && handlers.onToken) {
-            handlers.onToken(d);
-          } else if (ev === EVENTS.TOOL) {
-            onTool(d);
-            status.value = '';
-            stickBottom();
-          } else if (ev === EVENTS.MEDIA) {
-            onMedia(d);
-            stickBottom();
-          } else if (ev === EVENTS.TOOL_STATUS) {
-            onToolStatus(d);
-          } else if (ev === EVENTS.TOOL_ERROR) {
-            onToolError(d);
-          } else if (ev === EVENTS.ERROR) {
-            failed = true;
-            onError(d);
-          }
-        }, ctrl.signal);
+        const r = await Tasks.run(url, payload, {
+          onJobId: (id) => { activeJob.value = { id }; },
+          onEvent: (ev, d) => {
+            if (ev === EVENTS.TOKEN && handlers.onToken) {
+              handlers.onToken(d);
+            } else if (ev === EVENTS.TOOL) {
+              onTool(d);
+              status.value = '';
+              stickBottom();
+            } else if (ev === EVENTS.MEDIA) {
+              onMedia(d);
+              stickBottom();
+            } else if (ev === EVENTS.TOOL_STATUS) {
+              onToolStatus(d);
+            } else if (ev === EVENTS.TOOL_ERROR) {
+              onToolError(d);
+            } else if (ev === EVENTS.ERROR) {
+              failed = true;
+              onError(d);
+            }
+          },
+        });
+        if (r.status === 'cancelled') return false;
         if (failed) {
           status.value = I18N.t('mw.errRetry');
           return false;
         }
         return true;
       } catch (e) {
-        if (!ctrl.signal.aborted) {
-          onError({ message: e.message });
-          status.value = I18N.t('mw.errRetry');
-        }
+        onError({ message: e.message });
+        status.value = I18N.t('mw.errRetry');
         return false;
       } finally {
         stopTimer();
         busy.value = false;
         streaming.value = false;
-        if (sseCtrl === ctrl) sseCtrl = null;
+        activeJob.value = null;
         checkJob();
       }
     }
@@ -329,7 +337,7 @@ Views.microChat = {
       scrollBottom(true);
 
       const refUrl = quoted.value ? quoted.value.url : '';
-      const ok = await runSse(`/api/micro/${props.id}/${props.sid}/chat`,
+      const ok = await runTask(`/api/micro/${props.id}/${props.sid}/chat`,
         { message, images: shot, ref_url: refUrl },
         { onToken: (d) => { pushText(d.text); status.value = ''; stickBottom(); } });
       if (ok) {
@@ -353,7 +361,7 @@ Views.microChat = {
       pinned = true;
       scrollBottom(true);
 
-      const ok = await runSse(`/api/micro/${props.id}/${props.sid}/regenerate`, {
+      const ok = await runTask(`/api/micro/${props.id}/${props.sid}/regenerate`, {
         prompt: b.prompt, media: b.media || 'image',
         width: b.width || 0, height: b.height || 0, seconds: b.seconds || 0,
         ref_url: opts.ref_url != null ? opts.ref_url : (b.ref_url || ''),
@@ -392,8 +400,7 @@ Views.microChat = {
       const j = activeJob.value;
       if (!j) return;
       try {
-        await API.post(`/api/micro/${props.id}/jobs/${j.id}/cancel`);
-        activeJob.value = null;
+        await Tasks.cancel(j.id);  // 统一取消入口（后台任务协作式停止）
       } catch (e) {
         ElementPlus.ElMessage.error(e.message);
       }
@@ -447,7 +454,7 @@ Views.microChat = {
 
     // 切换会话：中断进行中的流并重置流式状态（不再静默卡住）
     watch(() => props.sid, () => {
-      if (busy.value && sseCtrl) sseCtrl.abort();
+      // 切换会话不再中断后台任务：任务继续跑，回来时用 checkJob() 显示进度 / 结果
       stopTimer();
       busy.value = false;
       streaming.value = false;
@@ -475,7 +482,6 @@ Views.microChat = {
     onBeforeUnmount(() => {
       alive = false;
       stopTimer();
-      if (sseCtrl) { sseCtrl.abort(); sseCtrl = null; }
       if (ro) { ro.disconnect(); ro = null; }
       const el = chatBox.value;
       if (el) el.removeEventListener('click', onChatClick);

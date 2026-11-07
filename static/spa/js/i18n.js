@@ -408,6 +408,22 @@ window.I18N = (function () {
 
 
 
+      'tc.title': '任务中心',
+      'tc.hint': '后台任务与页面无关：切页 / 刷新不会中断，进度在此实时显示。',
+      'tc.empty': '还没有任务',
+      'tc.cancel': '取消',
+      'tc.status.running': '进行中',
+      'tc.status.done': '已完成',
+      'tc.status.error': '失败',
+      'tc.status.cancelled': '已取消',
+      'tc.status.interrupted': '已中断',
+      'tc.kind.generate': '生成画面',
+      'tc.kind.chapters': '章节规划',
+      'tc.kind.score': '评分',
+      'tc.kind.single': '单章生成',
+      'tc.kind.chat': '对话',
+      'tc.kind.regenerate': '重跑',
+
       'cfg.title': '配置管理',
       'cfg.new': '＋ 新建',
       'cfg.secBasic': '基础配置',
@@ -1027,6 +1043,22 @@ window.I18N = (function () {
       'mt.exportsConfirm': 'This deletes historical ZIP/PDF files under data/exports (already delivered downloads). Continue?',
 
 
+
+      'tc.title': 'Task center',
+      'tc.hint': 'Background tasks are independent of the page — switching pages or refreshing does not stop them.',
+      'tc.empty': 'No tasks yet',
+      'tc.cancel': 'Cancel',
+      'tc.status.running': 'Running',
+      'tc.status.done': 'Done',
+      'tc.status.error': 'Failed',
+      'tc.status.cancelled': 'Cancelled',
+      'tc.status.interrupted': 'Interrupted',
+      'tc.kind.generate': 'Render',
+      'tc.kind.chapters': 'Chapter plan',
+      'tc.kind.score': 'Scoring',
+      'tc.kind.single': 'Single chapter',
+      'tc.kind.chat': 'Chat',
+      'tc.kind.regenerate': 'Re-run',
 
       'cfg.title': 'Settings',
       'cfg.new': '＋ New',

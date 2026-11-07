@@ -3,7 +3,7 @@
 本文件是给后续开发者 / AI 助手的硬性约定，请先读再改。
 
 ## 项目形态
-- 本地单用户应用：FastAPI（JSON + SSE）+ 免构建 Vue 3 / Element Plus SPA；SQLite + 本地媒体文件。
+- 本地单用户应用：FastAPI（JSON + WebSocket）+ 免构建 Vue 3 / Element Plus SPA；SQLite + 本地媒体文件。
 - 运行形态：BS（浏览器）/ CS（`python client.py`，pywebview 原生窗口）。
 
 ## 首要约定：漫画 / 短剧刻意分开，不要合并
@@ -23,15 +23,17 @@
 - 短剧线把「章」称为 **片段（clip）**、把「季」称为 **集（episode）**；漫画线仍用「章 / 季」。
 - 仅改**短剧线**的方法名 / 局部标识 / 前端组件与文案；**不改共享层**：
   - 模型 `Season` / `Chapter`、数据库表 `seasons` / `chapters`、列 `season_id`、路由 `/seasons/*`、`/chapters/*`、
-    JSON 字段 `season_id` / `index`、SSE 事件名 `chapter` 等**全部保持不变**（漫画线共用）。
+    JSON 字段 `season_id` / `index`、任务事件名 `chapter` 等**全部保持不变**（漫画线共用）。
   - `services/pipeline.py` 门面按 `kind` 显式分发（comic 用 章/季 方法名，drama 用 片段/集 方法名），避免耦合。
 - 文案：短剧专属字串放在 i18n 的 **`d.*`** 命名空间；漫画继续用 `p.*`，不要改共享 `p.*` 的值去适配短剧。
 
 ## 分层
 - `main.py` 只做 app 装配、配置/健康检查/SPA 外壳；业务路由在 `services/api_*.py`。
 - 业务逻辑在 `services/pipeline_*.py` / `services/micro_agent.py`；不要在路由里写业务。
-- 长任务（生图/生视频）一律走 SSE：事件名以 `services/events.py` 为单一来源，
-  前端镜像 `static/spa/js/events.js`，两处同步修改。
+- 长任务（生图/生视频/规划/评分/对话）一律走**后台任务 + WebSocket**：路由只创建 job 并
+  `task_manager.spawn`，请求立即返回 `{job_id}`；任务用独立 DB 会话，切页/刷新/断线都不中断。
+- 事件名以 `services/events.py` 为单一来源，前端镜像 `static/spa/js/events.js`，两处同步修改；
+  任务实现用 `services/task_manager.publish` 发事件、`publish_job` 发状态快照（任务中心消费）。
 
 ## 数据与配置
 - 外部端点（LLM / DrawThings）配置一律在 UI（`/configs`）管理、存 SQLite；**不引入配置文件**。
@@ -40,7 +42,8 @@
 
 ## 前端
 - 免构建：`static/spa/` 下用普通 `<script>` 加载的 UMD 全局组件（`window.Views`），改完即生效。
-- 全局错误兜底在 `js/app.js`；有新的长任务请复用 `API.sse` 与事件契约。
+- 全局错误兜底在 `js/app.js`；新的长任务请复用 `Tasks.run`（`js/tasks.js`）+ 事件契约，
+  不要把任务绑定到请求连接 / 组件生命周期上。
 
 ## 打包
 - `Drawthings Studio.spec` 是打包唯一依据；改打包参数改 spec，不要用额外 CLI 参数。
