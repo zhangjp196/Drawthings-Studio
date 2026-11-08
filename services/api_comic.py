@@ -511,9 +511,7 @@ async def _run_project_action(
 
     async def progress_cb(current: int, total: int, title: str):
         _job(note=f"{current}/{total} {title or ''}".strip())
-        task_manager.publish(
-            job_id, E.PROGRESS, {"current": current, "total": total, "title": title or ""}
-        )
+        task_manager.publish(job_id, E.PROGRESS, {"current": current, "total": total, "title": title or ""})
 
     async def chapter_cb(ch):
         # 生成画面：单章两步完成 → 回传提示词/描述/分辨率/媒体/状态，前端逐个刷新（后续章节仍参考它）
@@ -779,9 +777,7 @@ async def _run_import(
 
     async def progress_cb(current: int, total: int, title: str):
         _job(note=f"{current}/{total} {title or ''}".strip())
-        task_manager.publish(
-            job_id, E.PROGRESS, {"current": current, "total": total, "title": title or ""}
-        )
+        task_manager.publish(job_id, E.PROGRESS, {"current": current, "total": total, "title": title or ""})
 
     async def item_cb(item: dict, index: int):
         task_manager.publish(
@@ -827,7 +823,11 @@ async def project_import_apply(request: Request, project_id: str, db: Session = 
     project = _comic_project(db, project_id, lang)
     if project is None:
         raise HTTPException(status_code=404, detail=L(lang, "项目不存在", "Project not found"))
-    season = pipeline.comic._get_season(db, project, str(body.get("season_id") or "")) if body.get("season_id") else None
+    season = (
+        pipeline.comic._get_season(db, project, str(body.get("season_id") or ""))
+        if body.get("season_id")
+        else None
+    )
     if season is None:
         raise HTTPException(
             status_code=400, detail=L(lang, "请指定有效的季 (season_id)", "Please provide a valid season_id")
@@ -880,9 +880,7 @@ async def project_gen_single(request: Request, project_id: str, index: int, db: 
     jobs.register(job.id)
     task_manager.spawn(
         job.id,
-        _run_single_generate(
-            job.id, project.id, season.id, index, str(body.get("extra_prompt") or ""), lang
-        ),
+        _run_single_generate(job.id, project.id, season.id, index, str(body.get("extra_prompt") or ""), lang),
     )
     return {"job_id": job.id, "index": index}
 
@@ -1058,9 +1056,7 @@ async def _run_single_score(job_id: str, project_id: str, season_id: str, index:
         task_manager.publish(job_id, E.ERROR, {"message": L(lang, str(e), str(e))})
     except Exception as e:
         _job(status="error", error=str(e), finished=True)
-        task_manager.publish(
-            job_id, E.ERROR, {"message": L(lang, f"评分失败：{e}", f"Scoring failed: {e}")}
-        )
+        task_manager.publish(job_id, E.ERROR, {"message": L(lang, f"评分失败：{e}", f"Scoring failed: {e}")})
     finally:
         jobs.pop(job_id)
         db.close()

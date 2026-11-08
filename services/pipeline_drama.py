@@ -1080,7 +1080,9 @@ class DramaPipeline:
         chunks = split_chunks(text)
         llm_cfg = self._llm_cfg(db, project, lang)
         model = build_model(llm_cfg)
-        prior: list[tuple[str, str]] = [(c.title, c.summary) for c in self._episode_clips(db, project, season)]
+        prior: list[tuple[str, str]] = [
+            (c.title, c.summary) for c in self._episode_clips(db, project, season)
+        ]
         items: list[dict] = []
         for i, chunk in enumerate(chunks, start=1):
             if cancel_event is not None and cancel_event.is_set():
@@ -1094,7 +1096,9 @@ class DramaPipeline:
                     await item_cb(item, len(items))
         return items
 
-    def apply_imported_chapters(self, db, project: Project, season: Season, chapters, lang: str = "zh") -> int:
+    def apply_imported_chapters(
+        self, db, project: Project, season: Season, chapters, lang: str = "zh"
+    ) -> int:
         """把用户确认后的章节追加到所选季末尾（保留已有章节与媒体），返回写入数量。"""
         items: list[tuple[str, str]] = []
         for raw in chapters or []:

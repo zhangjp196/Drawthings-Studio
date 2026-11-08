@@ -58,6 +58,7 @@ router = APIRouter(prefix="/api/micro", tags=["micro"])
 
 MC_PAGE_SIZE = 10  # 微创作作品列表每页条数
 
+
 def _new_job(
     db: Session, *, micro_id: str, session_id: str, message_id, kind: str, prompt: str, media: str = ""
 ) -> GenerationJob:
@@ -1020,7 +1021,9 @@ async def _run_micro_regenerate_job(
         raise
     except Exception as e:
         _job(status="error", error=str(e), finished=True)
-        task_manager.publish(job_id, E.ERROR, {"message": L(lang, f"重跑失败：{e}", f"Re-generate failed: {e}")})
+        task_manager.publish(
+            job_id, E.ERROR, {"message": L(lang, f"重跑失败：{e}", f"Re-generate failed: {e}")}
+        )
     finally:
         jobs.pop(job_id)
         db.close()
@@ -1059,9 +1062,7 @@ async def micro_score(request: Request, work_id: str, session_id: str, db: Sessi
     )
     task_manager.spawn(
         job.id,
-        _run_micro_score_job(
-            job.id, work_id, session_id, url, kind, str(body.get("prompt") or ""), lang
-        ),
+        _run_micro_score_job(job.id, work_id, session_id, url, kind, str(body.get("prompt") or ""), lang),
     )
     return {"job_id": job.id, "url": url}
 
@@ -1118,18 +1119,14 @@ async def _run_micro_score_job(
         if changed:
             db.commit()
         _job(status="done", note=f"{score}", finished=True)
-        task_manager.publish(
-            job_id, E.MEDIA_SCORE, {"url": url, "media": kind, "score": score, "note": note}
-        )
+        task_manager.publish(job_id, E.MEDIA_SCORE, {"url": url, "media": kind, "score": score, "note": note})
         task_manager.publish(job_id, E.DONE, {"score": score, "note": note})
     except asyncio.CancelledError:
         raise
     except Exception as e:
         logging.getLogger("drawthings").warning("微创作评分失败：%s", e, exc_info=True)
         _job(status="error", error=str(e), finished=True)
-        task_manager.publish(
-            job_id, E.ERROR, {"message": L(lang, f"评分失败：{e}", f"Scoring failed: {e}")}
-        )
+        task_manager.publish(job_id, E.ERROR, {"message": L(lang, f"评分失败：{e}", f"Scoring failed: {e}")})
     finally:
         jobs.pop(job_id)
         db.close()

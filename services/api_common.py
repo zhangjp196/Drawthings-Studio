@@ -4,7 +4,6 @@
 本模块不含任何类型特有逻辑。
 """
 
-
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 

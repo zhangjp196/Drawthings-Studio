@@ -147,7 +147,7 @@ def build_model(cfg: LLMConfig) -> OpenAIChatModel:
 
 def supports_vision(cfg: LLMConfig) -> bool:
     """该 LLM 配置是否支持图片输入（视觉）。未勾选时调用方应跳过附图 / 禁用看图类功能。"""
-    return (str(getattr(cfg, "supports_vision", "") or "").lower() == "yes")
+    return str(getattr(cfg, "supports_vision", "") or "").lower() == "yes"
 
 
 def image_data_uri(path: str) -> str:

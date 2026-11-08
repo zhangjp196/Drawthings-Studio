@@ -35,7 +35,11 @@ def _decode(data: bytes, lang: str) -> str:
             continue
         return text
     raise ValueError(
-        L(lang, "无法识别文本编码（请另存为 UTF-8 后重试）", "Cannot detect the text encoding (please save as UTF-8)")
+        L(
+            lang,
+            "无法识别文本编码（请另存为 UTF-8 后重试）",
+            "Cannot detect the text encoding (please save as UTF-8)",
+        )
     )
 
 
@@ -43,9 +47,7 @@ def _pdf_text(data: bytes, lang: str) -> str:
     try:
         from pypdf import PdfReader
     except Exception as e:  # 依赖缺失（打包遗漏）时给出可执行提示
-        raise ValueError(
-            L(lang, f"PDF 解析组件不可用：{e}", f"PDF parser unavailable: {e}")
-        ) from e
+        raise ValueError(L(lang, f"PDF 解析组件不可用：{e}", f"PDF parser unavailable: {e}")) from e
     try:
         reader = PdfReader(io.BytesIO(data))
         if getattr(reader, "is_encrypted", False):
@@ -65,9 +67,7 @@ def _docx_text(data: bytes, lang: str) -> str:
     try:
         import docx
     except Exception as e:
-        raise ValueError(
-            L(lang, f"DOCX 解析组件不可用：{e}", f"DOCX parser unavailable: {e}")
-        ) from e
+        raise ValueError(L(lang, f"DOCX 解析组件不可用：{e}", f"DOCX parser unavailable: {e}")) from e
     try:
         document = docx.Document(io.BytesIO(data))
         parts = [p.text for p in document.paragraphs if p.text and p.text.strip()]

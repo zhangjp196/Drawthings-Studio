@@ -69,7 +69,9 @@ def micro_job_snapshot(job: GenerationJob, work: MicroWork | None = None) -> dic
     }
 
 
-def _load_snapshots(db: Session, project_jobs: list[ProjectJob], micro_jobs: list[GenerationJob]) -> list[dict]:
+def _load_snapshots(
+    db: Session, project_jobs: list[ProjectJob], micro_jobs: list[GenerationJob]
+) -> list[dict]:
     """批量补齐标题后生成快照（避免逐条查询）。"""
     pids = {j.project_id for j in project_jobs}
     mids = {j.micro_id for j in micro_jobs}
