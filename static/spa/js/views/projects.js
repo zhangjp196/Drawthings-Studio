@@ -4,12 +4,19 @@ Views.projects = {
   components: { 'create-form-comic': Views.createFormComic, 'create-form-drama': Views.createFormDrama },
   template: `
     <div class="page">
-      <div class="list-toolbar">
-        <div class="list-head">
+      <div class="ds-page-head">
+        <div>
+          <div class="ds-eyebrow">{{ I18N.t('nav.groupCreate') }}</div>
           <h1>{{ kindTitle }}</h1>
-          <span class="muted">{{ I18N.t('proj.total', total) }}</span>
+          <p class="ds-page-sub">{{ I18N.t('proj.total', total) }} · {{ I18N.t('home.recentDesc') }}</p>
         </div>
-        <el-button type="primary" @click="openNew">{{ I18N.t('wb.newProject') }}</el-button>
+        <div class="ds-page-actions">
+          <div class="ds-segment">
+            <button type="button" :class="{ on: f.kind === 'comic' }" @click="switchKind('comic')">🖼 {{ I18N.t('nav.studioComic') }}</button>
+            <button type="button" :class="{ on: f.kind === 'drama' }" @click="switchKind('drama')">🎬 {{ I18N.t('nav.studioDrama') }}</button>
+          </div>
+          <el-button type="primary" @click="openNew">{{ I18N.t('wb.newProject') }}</el-button>
+        </div>
       </div>
 
       <el-card class="filter-card" shadow="never">
@@ -128,6 +135,14 @@ Views.projects = {
       }
     }
     function apply() { f.page = 1; syncKindQuery(); load(); }
+    // 页面内类型切换（漫画 / 视频）：与顶部导航一致，切换后同步 URL 便于刷新恢复
+    function switchKind(k) {
+      if (f.kind === k) return;
+      f.kind = k;
+      f.page = 1;
+      syncKindQuery();
+      load();
+    }
     // 类型筛选同步到 URL（?kind=）：侧边栏「漫画/视频创作」高亮与刷新后恢复依赖它
     function syncKindQuery() {
       const cur = router.currentRoute.value.query.kind || '';
@@ -189,7 +204,7 @@ Views.projects = {
     return {
       f, kindTitle, rows, total, totalPages, statusLabels, statusTag,
       newComicDlg, newDramaDlg, openNew, renameDlg, renameTitle, busy,
-      load, apply, onSearch, reset, open, askRename, doRename, del, created,
+      load, apply, switchKind, onSearch, reset, open, askRename, doRename, del, created,
     };
   },
 };

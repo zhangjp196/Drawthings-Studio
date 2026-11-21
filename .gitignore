@@ -14,3 +14,7 @@ assets/Drawthings.icns
 
 # OpenChamber 浏览器面板产物（截图等）
 .openchamber/
+
+# AI 助手本地工作数据（记忆日志、预览截图、计划草稿），不入库
+.workbuddy/
+.zcode/

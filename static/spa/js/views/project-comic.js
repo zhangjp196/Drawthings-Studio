@@ -10,6 +10,10 @@ Views.projectComic = {
   components: { 'first-image': Views.comicFirstImage, 'season-cover': Views.comicSeasonCover, 'chapter-card': Views.chapterCardComic, 'season-preview': Views.comicSeasonPreview, 'season-export': Views.comicSeasonExport, 'chapter-list': Views.comicChapterList, 'chapter-toolbar': Views.comicChapterToolbar, 'plan-dialog': Views.comicPlanDialog, 'gen-dialog': Views.comicGenDialog, 'pdf-dialog': Views.comicPdfDialog, 'overlay-dialog': Views.comicOverlayDialog, 'cover-dialog': Views.comicCoverDialog, 'cfg-dialog': Views.comicCfgDialog, 'import-dialog': Views.comicImportDialog },
   template: `
     <div class="page" v-if="data">
+      <div class="ds-crumbs">
+        <router-link to="/projects?kind=comic">{{ I18N.t('nav.studioComic') }}</router-link>
+        <span>›</span><span>{{ data.project.title || data.project.origin }}</span>
+      </div>
       <div class="proj-hero">
         <div class="proj-cover" v-if="data.project.first_image_url" @click="openLb([data.project.first_image_url], 0)">
           <img :src="data.project.first_image_url" :alt="data.project.title || ''">

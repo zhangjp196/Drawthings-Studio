@@ -19,14 +19,16 @@ import os
 os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "__all__")
 
 import asyncio
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
 
 from config import data_dir
@@ -509,6 +511,16 @@ def health():
 
 
 # ---------------- 任务事件总线（WebSocket） ----------------
+def _load_snapshots(all_on: bool, ids: set[str]) -> list:
+    """在线程里查库：WS 订阅时的一次性快照查询是同步 SQLAlchemy，
+    放进事件循环会阻塞心跳与其它连接，交给线程池执行。"""
+    db = SessionLocal()
+    try:
+        return api_tasks.active_snapshots(db, 100) if all_on else api_tasks.snapshots_for(db, ids)
+    finally:
+        db.close()
+
+
 @app.websocket("/ws")
 async def ws_events(websocket: WebSocket):
     """任务事件总线：订阅任务后接收 progress / chapter / score / token / tool 等事件。
@@ -539,15 +551,7 @@ async def ws_events(websocket: WebSocket):
                     if "*" in ids:
                         all_jobs["on"] = True
                     subs.update(x for x in ids if x != "*")
-                    db = SessionLocal()
-                    try:
-                        snaps = (
-                            api_tasks.active_snapshots(db, 100)
-                            if all_jobs["on"]
-                            else api_tasks.snapshots_for(db, subs)
-                        )
-                    finally:
-                        db.close()
+                    snaps = await run_in_threadpool(_load_snapshots, all_jobs["on"], set(subs))
                     for s in snaps:
                         await send({"type": "job", "job": s})
                 elif typ == "unsub":
@@ -587,14 +591,34 @@ async def ws_events(websocket: WebSocket):
 # ---------------- SPA 外壳 ----------------
 SPA_SHELL = STATIC_ROOT / "spa" / "index.html"
 
+# 外壳 HTML 每次刷新 / 深链都要返回：按 mtime 缓存内容 + ETag，省掉重复磁盘 IO，
+# 同时保留「改完 index.html 立即生效」（文件一改 mtime 变，缓存即失效）。
+_SHELL_CACHE: dict = {"mtime_ns": -1, "body": b"", "etag": ""}
+
+
+def _shell_payload() -> tuple[bytes, str]:
+    st = SPA_SHELL.stat()
+    if st.st_mtime_ns != _SHELL_CACHE["mtime_ns"]:
+        body = SPA_SHELL.read_bytes()
+        _SHELL_CACHE.update(
+            body=body,
+            mtime_ns=st.st_mtime_ns,
+            etag=hashlib.sha256(body).hexdigest()[:16],
+        )
+    return _SHELL_CACHE["body"], '"' + _SHELL_CACHE["etag"] + '"'
+
 
 @app.get("/{full_path:path}")
-def spa_shell(full_path: str):
+def spa_shell(full_path: str, request: Request):
     """非 /api、/static、/media 的路径一律返回 SPA 外壳（前端路由接管，刷新深链可用）。
     未匹配到的 /api/* 直接 404（避免把 JSON 接口吞成 SPA 页面）。"""
     if full_path.startswith(("api/", "static/", "media/")):
         raise HTTPException(status_code=404, detail="Not Found")
-    return FileResponse(SPA_SHELL, media_type="text/html", headers={"Cache-Control": "no-cache"})
+    body, etag = _shell_payload()
+    headers = {"Cache-Control": "no-cache", "ETag": etag, "X-Content-Type-Options": "nosniff"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=body, media_type="text/html", headers=headers)
 
 
 if __name__ == "__main__":

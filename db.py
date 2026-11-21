@@ -54,6 +54,14 @@ def _sqlite_pragma(dbapi_conn, _record):
     cur.execute("PRAGMA synchronous=NORMAL")
     cur.execute("PRAGMA busy_timeout=15000")
     cur.execute("PRAGMA foreign_keys=ON")
+    # 读多写少的本地库：每连接给 32MB 页缓存、临时表放内存、大库用 mmap 读。
+    # 这些都是连接级设置，旧版 SQLite 不支持 mmap_size 时静默忽略即可。
+    cur.execute("PRAGMA cache_size=-32000")
+    cur.execute("PRAGMA temp_store=MEMORY")
+    try:
+        cur.execute("PRAGMA mmap_size=268435456")
+    except Exception:
+        pass
     cur.close()
 
 
@@ -511,10 +519,23 @@ def _indexes():
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON generation_jobs(status)",
         "CREATE INDEX IF NOT EXISTS idx_project_jobs_project ON project_jobs(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_project_jobs_status ON project_jobs(status)",
+        # 列表页：kind/status 过滤 + created_at/updated_at 排序的覆盖索引（避免全表扫描 + 排序）
+        "CREATE INDEX IF NOT EXISTS idx_projects_kind_status_created ON projects(kind, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_kind_status_updated ON projects(kind, status, updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_kind_updated ON projects(kind, updated_at)",
+        # 章节按「项目 + 季 + 序号」一次定位（详情页/预览/批量操作高频）
+        'CREATE INDEX IF NOT EXISTS idx_chapters_project_season_index ON chapters(project_id, season_id, "index")',
+        "CREATE INDEX IF NOT EXISTS idx_seasons_project_number ON seasons(project_id, number)",
+        # 微创作列表按 updated_at 排序；作品集预览按会话聚合最近消息
+        "CREATE INDEX IF NOT EXISTS idx_micro_works_updated ON micro_works(updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_micro_messages_session_id ON micro_messages(session_id, id)",
     ]
     with engine.connect() as conn:
         for s in stmts:
-            conn.execute(text(s))
+            try:
+                conn.execute(text(s))
+            except Exception:
+                pass  # 旧库可能尚无该表/列：跳过该索引，不影响启动
         conn.commit()
 
 

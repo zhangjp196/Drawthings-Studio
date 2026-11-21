@@ -10,6 +10,10 @@ Views.projectDrama = {
   components: { 'first-image': Views.dramaFirstImage, 'season-cover': Views.dramaSeasonCover, 'chapter-card': Views.chapterCardDrama, 'season-preview': Views.dramaSeasonPreview, 'season-export': Views.dramaSeasonExport, 'chapter-list': Views.dramaChapterList, 'chapter-toolbar': Views.dramaChapterToolbar, 'plan-dialog': Views.dramaPlanDialog, 'gen-dialog': Views.dramaGenDialog, 'overlay-dialog': Views.dramaOverlayDialog, 'cover-dialog': Views.dramaCoverDialog, 'cfg-dialog': Views.dramaCfgDialog, 'video-dialog': Views.dramaVideoDialog, 'import-dialog': Views.dramaImportDialog },
   template: `
     <div class="page" v-if="data">
+      <div class="ds-crumbs">
+        <router-link to="/projects?kind=drama">{{ I18N.t('nav.studioDrama') }}</router-link>
+        <span>›</span><span>{{ data.project.title || data.project.origin }}</span>
+      </div>
       <div class="proj-hero">
         <div class="proj-cover" v-if="data.project.first_image_url" @click="openLb([data.project.first_image_url], 0)">
           <img :src="data.project.first_image_url" :alt="data.project.title || ''">

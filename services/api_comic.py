@@ -116,7 +116,16 @@ def projects_list(
     rows, total = pipeline.comic.list_projects(
         db, "comic", status or None, q.strip(), sort, size, (page - 1) * size
     )
-    counts = dict(db.query(Chapter.project_id, func.count(Chapter.id)).group_by(Chapter.project_id).all())
+    # 只统计当前页项目的章节数：此前按全表 GROUP BY，项目越多越慢（每页仅 10 条却扫全库）。
+    page_ids = [p.id for p in rows]
+    counts: dict = {}
+    if page_ids:
+        counts = dict(
+            db.query(Chapter.project_id, func.count(Chapter.id))
+            .filter(Chapter.project_id.in_(page_ids))
+            .group_by(Chapter.project_id)
+            .all()
+        )
     return {
         "projects": [_project_view(p, counts.get(p.id, 0)) for p in rows],
         "total": total,

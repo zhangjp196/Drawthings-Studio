@@ -6,8 +6,12 @@ window.Views = window.Views || {};
 Views.configs = {
   template: `
     <div class="page">
-      <div class="list-toolbar">
-        <h1 style="margin: 0; font-size: 22px;">{{ I18N.t('cfg.title') }}</h1>
+      <div class="ds-page-head">
+        <div>
+          <div class="ds-eyebrow">{{ I18N.t('nav.groupSystem') }}</div>
+          <h1>{{ I18N.t('cfg.title') }}</h1>
+          <p class="ds-page-sub">{{ I18N.t('cfg.subtitle') }}</p>
+        </div>
       </div>
       <div class="cfg-layout">
         <aside class="cfg-side">

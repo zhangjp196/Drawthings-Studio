@@ -4,6 +4,23 @@
 window.API = {
   TIMEOUT: 5 * 60 * 1000,
 
+  // ---- 幂等 GET 短缓存 + 并发去重 ----
+  // 配置 / 选项 / 模型列表会被多个视图重复请求；8s 内复用结果，任何写操作成功后统一失效。
+  // dt-status 不进缓存（用户点「检测」需要实时探测），dt-models 可能较慢故纳入缓存。
+  GET_CACHE_TTL: 8000,
+  _cache: new Map(),      // key → {t, data}
+  _inflight: new Map(),   // key → Promise（同 URL 并发只发一次）
+  _cacheable(u) {
+    return /^\/api\/(choices|configs|settings|llm\/models|dt-models)(\?|$)/.test(u);
+  },
+  invalidate(prefix) {
+    if (prefix) {
+      for (const k of API._cache.keys()) if (k.startsWith(prefix)) API._cache.delete(k);
+    } else {
+      API._cache.clear();
+    }
+  },
+
   _lang() {
     try { return window.I18N ? I18N.current() : 'zh'; } catch (e) { return 'zh'; }
   },
@@ -51,19 +68,39 @@ window.API = {
     }
     if (r.status === 204) return null;
     const ct = r.headers.get('content-type') || '';
-    return ct.includes('application/json') ? r.json() : null;
+    const data = ct.includes('application/json') ? await r.json() : null;
+    // 写操作成功后清空 GET 缓存：避免新建/编辑/删除后列表仍读到旧快照
+    if (method !== 'GET') API.invalidate();
+    return data;
   },
 
   get: async (u, timeout) => {
-    try {
-      return await API.req('GET', u, undefined, false, timeout);
-    } catch (e) {
-      // 冗余：GET 幂等，仅对网络/超时类失败（无 HTTP 状态）自动重试一次，缓解瞬时抖动
-      if (e && !e.status) {
-        await new Promise((r) => setTimeout(r, 400));
-        return await API.req('GET', u, undefined, false, timeout);
+    const key = 'GET ' + u;
+    const hit = API._cache.get(key);
+    if (hit && Date.now() - hit.t < API.GET_CACHE_TTL) return hit.data;
+    const running = API._inflight.get(key);
+    if (running) return running;
+    const task = (async () => {
+      let data;
+      try {
+        data = await API.req('GET', u, undefined, false, timeout);
+      } catch (e) {
+        // 冗余：GET 幂等，仅对网络/超时类失败（无 HTTP 状态）自动重试一次，缓解瞬时抖动
+        if (e && !e.status) {
+          await new Promise((r) => setTimeout(r, 400));
+          data = await API.req('GET', u, undefined, false, timeout);
+        } else {
+          throw e;
+        }
       }
-      throw e;
+      if (API._cacheable(u)) API._cache.set(key, { t: Date.now(), data });
+      return data;
+    })();
+    API._inflight.set(key, task);
+    try {
+      return await task;
+    } finally {
+      API._inflight.delete(key);
     }
   },
   post: (u, body, timeout) => API.req('POST', u, body, false, timeout),

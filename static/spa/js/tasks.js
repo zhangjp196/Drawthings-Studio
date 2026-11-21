@@ -1,27 +1,68 @@
-// 全局任务 store + 运行器（Phase 2）：任务脱离页面运行，WS 推送进度，切页/刷新不中断。
-// - Tasks.run(url, body, opts)：POST 提交任务 → 订阅 WS → 分发事件；任务结束（done/error/cancelled）时 resolve/reject。
+// 全局任务 store + 运行器：任务脱离页面运行，WS 推送进度，切页/刷新不中断。
+// - Tasks.run(url, body, opts)：POST 提交任务 → 订阅 WS → 分发事件；任务结束时 resolve/reject。
 // - Tasks.store：任务快照（任务中心读取）；Tasks.cancel(id)：统一取消。
-// - 组件只关心「事件回调 + 最终状态」，不再持有连接，也不再因卸载而中断任务。
+// 性能要点：
+//  1) 高频 token 事件按动画帧合并为一次回调（流式输出时避免每 token 一次 Markdown 重排 + 强制滚动）；
+//  2) running 计数用响应式 Set 维护，不再每次渲染遍历全部任务；
+//  3) order 只在「新任务首次出现」时排序，进度快照不再触发任务中心/首页重排。
 window.Tasks = (function () {
-  const store = Vue.reactive({ jobs: {}, order: [] }); // job_id → snapshot；order 按 created_at 倒序（Vue 全局在此已加载）
-  const ui = Vue.reactive({ centerOpen: false }); // 任务中心抽屉开关（工具栏 / 侧栏 / dock 共用）
-  const pending = new Map(); // job_id → 等待中的 run（回调 + resolve/reject）
+  const store = Vue.reactive({ jobs: {}, order: [] }); // job_id → snapshot；order 按 created_at 倒序
+  const ui = Vue.reactive({ centerOpen: false });       // 任务中心抽屉开关
+  const pending = new Map();                            // job_id → 等待中的 run
+  const runningIds = Vue.reactive(new Set());           // 运行中的 job_id（activeCount 的 O(1) 数据源）
+  const tokenBuf = new Map();                           // job_id → { texts, raf }
   let inited = false;
+
+  const raf = window.requestAnimationFrame
+    ? window.requestAnimationFrame.bind(window)
+    : (fn) => setTimeout(fn, 16);
+  const cancelRaf = window.cancelAnimationFrame
+    ? window.cancelAnimationFrame.bind(window)
+    : clearTimeout;
 
   function upsert(job) {
     if (!job || !job.id) return;
-    if (!store.jobs[job.id]) store.order.push(job.id);
-    store.jobs[job.id] = Object.assign({}, store.jobs[job.id] || {}, job);
-    store.order.sort((a, b) => {
-      const ca = store.jobs[a].created_at || '';
-      const cb = store.jobs[b].created_at || '';
-      if (ca === cb) return 0;
-      return ca < cb ? 1 : -1;
-    });
+    const isNew = !store.jobs[job.id];
+    const merged = Object.assign({}, store.jobs[job.id] || {}, job);
+    store.jobs[job.id] = merged;
+    if (merged.status === 'running') runningIds.add(job.id);
+    else if (merged.status) runningIds.delete(job.id);
+    if (isNew) {
+      store.order.push(job.id);
+      store.order.sort((a, b) => {
+        const ca = store.jobs[a].created_at || '';
+        const cb = store.jobs[b].created_at || '';
+        if (ca === cb) return 0;
+        return ca < cb ? 1 : -1;
+      });
+    }
+  }
+
+  // ---- token 帧合并 ----
+  function flushTokens(jobId) {
+    const b = tokenBuf.get(jobId);
+    if (!b || !b.texts.length) return;
+    const text = b.texts.join('');
+    b.texts.length = 0;
+    if (b.raf) { cancelRaf(b.raf); b.raf = 0; }
+    const p = pending.get(jobId);
+    if (p && p.onEvent) {
+      try { p.onEvent('token', { text }, jobId); } catch (e) { console.error(e); }
+    }
+  }
+
+  function queueToken(jobId, text) {
+    let b = tokenBuf.get(jobId);
+    if (!b) { b = { texts: [], raf: 0 }; tokenBuf.set(jobId, b); }
+    b.texts.push(text);
+    if (b.raf) return;
+    b.raf = raf(() => { b.raf = 0; flushTokens(jobId); });
   }
 
   function settle(p, job) {
     if (p.settled) return;
+    flushTokens(job.id);            // 先把尾部 token 交给消费方，再结束
+    tokenBuf.delete(job.id);
     p.settled = true;
     pending.delete(job.id);
     WS.unsub(job.id);
@@ -46,10 +87,17 @@ window.Tasks = (function () {
       const p = pending.get(msg.job.id);
       if (p && msg.job.status && msg.job.status !== 'running') settle(p, msg.job);
     } else if (msg.type === 'event') {
-      const p = pending.get(msg.job);
+      const jid = msg.job;
+      // token 合并；其它事件到达前先 flush，保证事件顺序不被打乱
+      if (msg.event === 'token') {
+        queueToken(jid, (msg.data && msg.data.text) || '');
+        return;
+      }
+      flushTokens(jid);
+      const p = pending.get(jid);
       if (!p) return;
       if (p.onEvent) {
-        try { p.onEvent(msg.event, msg.data || {}, msg.job); } catch (e) { console.error(e); }
+        try { p.onEvent(msg.event, msg.data || {}, jid); } catch (e) { console.error(e); }
       }
     }
   }
@@ -95,7 +143,7 @@ window.Tasks = (function () {
   }
 
   function activeCount() {
-    return store.order.filter((id) => store.jobs[id] && store.jobs[id].status === 'running').length;
+    return runningIds.size;
   }
 
   function ensure() {
@@ -118,6 +166,7 @@ window.Tasks = (function () {
     refresh,
     activeCount,
     ensure,
+    flushTokens,
     get job() { return (id) => store.jobs[id] || null; },
   };
 })();

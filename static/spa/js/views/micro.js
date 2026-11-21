@@ -3,12 +3,15 @@ window.Views = window.Views || {};
 Views.micro = {
   template: `
     <div class="page">
-      <div class="list-toolbar">
-        <div class="list-head">
+      <div class="ds-page-head">
+        <div>
+          <div class="ds-eyebrow">{{ I18N.t('nav.groupCreate') }}</div>
           <h1>{{ I18N.t('mc.title') }}</h1>
-          <span class="muted">{{ I18N.t('mc.total', total) }}</span>
+          <p class="ds-page-sub">{{ I18N.t('mc.total', total) }} · {{ I18N.t('mc.subtitle') }}</p>
         </div>
-        <el-button type="primary" @click="openNew">{{ I18N.t('mc.new') }}</el-button>
+        <div class="ds-page-actions">
+          <el-button type="primary" @click="openNew">{{ I18N.t('mc.new') }}</el-button>
+        </div>
       </div>
 
       <el-card class="filter-card" shadow="never">

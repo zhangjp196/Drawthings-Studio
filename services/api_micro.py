@@ -186,18 +186,28 @@ def micro_works(
     wid_list = [w.id for w in works]
     previews: dict[str, list[str]] = {wid: [] for wid in wid_list}
     if wid_list:
-        rows = (
-            db.query(MicroSession.micro_id, MicroMessage.media_url, MicroMessage.id)
+        # 在库内按作品分组取最近 3 条：此前把全部历史媒体消息拉回内存再截断，
+        # 作品与消息增多后是明显的内存/传输浪费（窗口函数让 DB 只回传 3×N 行）。
+        rn = (
+            func.row_number()
+            .over(partition_by=MicroSession.micro_id, order_by=MicroMessage.id.desc())
+            .label("rn")
+        )
+        sub = (
+            db.query(
+                MicroSession.micro_id.label("mid"),
+                MicroMessage.media_url.label("url"),
+                rn,
+            )
             .join(MicroMessage, MicroMessage.session_id == MicroSession.id)
             .filter(
                 MicroSession.micro_id.in_(wid_list),
                 MicroMessage.media_url.isnot(None),
                 MicroMessage.media_url != "",
             )
-            .order_by(MicroMessage.id.desc())
-            .all()
+            .subquery()
         )
-        for mid, url, _ in rows:
+        for mid, url in db.query(sub.c.mid, sub.c.url).filter(sub.c.rn <= 3).all():
             lst = previews.get(mid)
             if lst is not None and len(lst) < 3:
                 lst.append(url)
